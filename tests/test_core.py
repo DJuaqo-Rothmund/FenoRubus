@@ -1363,3 +1363,15 @@ def test_move_trial_to_empty_predio(tmp_path):
     assert not pr.get_setting("ws_move_pending")
     pr.close()
     wss.close()
+
+
+def test_delete_one_week_of_a_measure(db):
+    """Basurero de la lista de mediciones: borra solo la semana; la medición sigue."""
+    m = db.add_measure("Calibre", "table")
+    w1, w2 = db.current_week(dt.date(2026, 10, 5)), db.current_week(dt.date(2026, 10, 12))
+    db.add_entry(m, w1["id"], data={"mm": "18"})
+    db.add_entry(m, w1["id"], data={"mm": "19"})
+    db.add_entry(m, w2["id"], data={"mm": "20"})
+    assert db.delete_week_entries(m, w1["id"]) == 2
+    assert [e["data"] for e in db.list_entries(m)] == [{"mm": "20"}]
+    assert db.get_measure(m) is not None

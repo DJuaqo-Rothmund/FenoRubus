@@ -846,6 +846,13 @@ class Database:
         if sets:
             self.execute(f"UPDATE measure_entries SET {', '.join(sets)} WHERE id=?", (*vals, entry_id))
 
+    def delete_week_entries(self, measure_id: int, week_id: int) -> int:
+        """Borra lo registrado en UNA semana para una medición (la medición sigue)."""
+        n = self.execute("DELETE FROM measure_entries WHERE measure_id=? AND week_id=?",
+                         (measure_id, week_id)).rowcount
+        self.log("delete", "measure_week", measure_id, f"semana {week_id}: {n} registro(s)")
+        return n
+
     def delete_entry(self, entry_id: int) -> None:
         self.execute("DELETE FROM measure_entries WHERE id=?", (entry_id,))
 

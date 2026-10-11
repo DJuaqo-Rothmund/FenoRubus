@@ -129,6 +129,7 @@ class PickRow(GlassButton):
     subtitle = StringProperty()
     accent = ColorProperty(c(theme.LEAF_SOFT))
     action = ObjectProperty(None, allownone=True)   # lo asigna la lista reciclable
+    trash = ObjectProperty(None, allownone=True)    # basurero opcional a la derecha
 
     def on_release(self, *_):
         if self.action is not None:
@@ -142,7 +143,8 @@ def pick_dialog(title: str, items: list[tuple], dark: bool = False):
     """
     Lista de selección en un diálogo CENTRADO y a lo ancho (reemplaza al menú
     desplegable, que se abría desplazado y cortaba los nombres largos).
-    items: (título, subtítulo, callback) o (título, subtítulo, callback, color_acento).
+    items: (título, subtítulo, callback) o (título, subtítulo, callback, color_acento)
+    o (título, subtítulo, callback, color_acento | None, al_tocar_basurero).
 
     Usa una lista RECICLABLE (RecycleView): solo se crean las filas visibles (~8) en vez
     de todas (la escala BBCH tiene 34), así abre al instante también en teléfonos básicos.
@@ -162,8 +164,9 @@ def pick_dialog(title: str, items: list[tuple], dark: bool = False):
 
     data = []
     for it in items:
-        row = {"title": it[0], "subtitle": it[1] or "", "action": wrap(it[2])}
-        row["accent"] = it[3] if len(it) > 3 else c(theme.LEAF_SOFT)
+        row = {"title": it[0], "subtitle": it[1] or "", "action": wrap(it[2]),
+               "trash": wrap(it[4]) if len(it) > 4 and it[4] else None}
+        row["accent"] = it[3] if len(it) > 3 and it[3] is not None else c(theme.LEAF_SOFT)
         data.append(row)
     rv = RecycleView(size_hint_y=None, do_scroll_x=False, bar_width=dp(4),
                      height=min(dp(440), dp(64) * len(items) + dp(8)))
@@ -3836,11 +3839,41 @@ def open_measures_menu():
         unit = ("foto(s)" if m["kind"] == "images" else "fila(s)")
         kind = "Imágenes" if m["kind"] == "images" else "Planilla"
         items.append((m["name"], f"{kind} · {m['n']} {unit} esta semana",
-                      lambda m=m: a.open_measure(m["id"], week["id"])))
+                      lambda m=m: a.open_measure(m["id"], week["id"]), None,
+                      lambda m=m: delete_measure_dialog(m, week)))
     if measures:
         items.append(("Exportar todas a Excel", "Una hoja por medición · toda la temporada",
                       lambda: export_measures_xlsx([m["id"] for m in measures])))
     pick_dialog(f"Mediciones · {ph.week_title(week)}", items)
+
+
+def delete_measure_dialog(m: dict, week: dict):
+    """Basurero de la lista: borrar lo registrado ESTA semana o la medición completa."""
+    a = app()
+    total = len(a.db.list_entries(m["id"]))
+
+    def done(msg):
+        a.toast(msg)
+        a.refresh_home()
+        Clock.schedule_once(lambda *_: open_measures_menu(), .3)
+
+    def this_week():
+        n = a.db.delete_week_entries(m["id"], week["id"])
+        done(f"«{m['name']}»: {n} registro(s) de esta semana eliminados")
+
+    def everything():
+        a.db.delete_measure(m["id"])
+        done(f"Medición «{m['name']}» eliminada")
+
+    actions = []
+    if m["n"]:
+        actions.append(("Esta semana", this_week))
+    actions.append(("Eliminar todo", everything))
+    text = (f"«{m['name']}» tiene {m['n']} registro(s) en {ph.week_title(week)} y {total} en "
+            f"total.\n\n• Esta semana: borra solo lo de esta semana (la medición sigue "
+            f"para las demás).\n• Eliminar todo: quita la medición de todas las semanas.\n\n"
+            f"Las fotos quedan en el teléfono.")
+    Clock.schedule_once(lambda *_: confirm(f"Eliminar «{m['name']}»", text, actions), .3)
 
 
 def export_measures_xlsx(measure_ids: list[int]):
