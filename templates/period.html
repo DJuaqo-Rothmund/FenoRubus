@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% from "_macros.html" import bbch_chip, heatmap, compare_chart %}
+{% from "_macros.html" import bbch_chip, heatmap, compare_chart, progress_block %}
 {% block meta %}<span>{{ weeks|length }} semanas</span><span>{{ strips|length }} variedades</span>{% endblock %}
 {% block content %}
 <h2>Avance fenológico por semana</h2>
@@ -36,4 +36,5 @@
   </div>
 </section>
 {% endfor %}
+{{ progress_block(progress) }}
 {% endblock %}

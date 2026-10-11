@@ -557,6 +557,30 @@ def _gallery_at(r: Report, items, x, width, cols=4):
         r.y += h + extra + 8
 
 
+def _progress(r: Report, progress: list[dict]):
+    """Mediciones resumidas: una tabla por variable (filas = variedad o sector, columnas =
+    promedio de cada semana, y el avance entre la primera y la última)."""
+    if not progress:
+        return
+    r.h2("Mediciones · avance semanal",
+         "Promedio de cada semana por variedad o sector. Avance = última semana − primera. El detalle "
+         "de cada registro está en el informe semanal y en el Excel de mediciones.")
+    for p in progress:
+        head = [p.get("who", "Variedad")] + p["weeks"] + (["Avance"] if p["advance"] else [])
+        widths = [2.6] + [1] * len(p["weeks"]) + ([1.2] if p["advance"] else [])
+        rows = [[{"text": row[0], "bold": True}] + row[1:] for row in p["rows"]]
+        if not rows:
+            continue
+
+        def block(p=p, head=head, widths=widths, rows=rows):
+            r.ensure(40)
+            r.y += 8
+            r.text(M, r.y, f"{p['name']} · {p['variable']}", 9.6, True, INK)
+            r.y += 6
+            r.table(head, rows, widths, 7.6, ["left"] + ["center"] * (len(head) - 1))
+        r.keep(block)
+
+
 def period(ctx: dict, names: dict, num=None) -> Report:
     r = _doc(ctx, [f"{len(ctx['weeks'])} semanas", f"{len(ctx['strips'])} variedades"], names, num)
     r.h2("Avance fenológico por semana",
@@ -595,6 +619,7 @@ def period(ctx: dict, names: dict, num=None) -> Report:
 
     for s in ctx["strips"]:
         r.keep(lambda s=s: draw_strip(s))   # la franja de cada variedad sin cortar
+    _progress(r, ctx.get("progress"))
     return r
 
 
@@ -747,6 +772,7 @@ def matrix(ctx: dict, names: dict, num=None) -> Report:
 
     for rr in rows:
         r.keep(lambda rr=rr: draw_gallery(rr))
+    _progress(r, ctx.get("progress"))
     return r
 
 

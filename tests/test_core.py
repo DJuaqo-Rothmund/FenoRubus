@@ -1375,3 +1375,31 @@ def test_delete_one_week_of_a_measure(db):
     assert db.delete_week_entries(m, w1["id"]) == 2
     assert [e["data"] for e in db.list_entries(m)] == [{"mm": "20"}]
     assert db.get_measure(m) is not None
+
+
+def test_period_and_matrix_show_measure_progress(db, tmp_path):
+    """Período y matriz: mediciones resumidas, una tabla por variable numérica con el
+    promedio semanal por variedad y el avance (las columnas de texto no salen)."""
+    from pypdf import PdfReader
+    season = db.current_week(dt.date(2026, 10, 5))["season"]
+    w1, w2 = db.current_week(dt.date(2026, 9, 28)), db.current_week(dt.date(2026, 10, 5))
+    v = db.list_varieties()[0]
+    m = db.add_measure("Calibre", "table", ["mm", "Obs"])
+    db.add_entry(m, w1["id"], v["id"], data={"mm": "10", "Obs": "ok"})
+    db.add_entry(m, w1["id"], v["id"], data={"mm": "12"})
+    db.add_entry(m, w2["id"], v["id"], data={"mm": "15,5"})
+    for w in (w1, w2):
+        obs = db.get_or_create_observation(v["id"], w["id"])
+        db.update_observation(obs["id"], bbch_code=61)
+    rg = ReportGenerator(db, str(tmp_path / "out"))
+    lo, hi = sorted((w1["week_number"], w2["week_number"]))
+    prog = rg._progress(season, [w for w in db.list_weeks(season) if lo <= w["week_number"] <= hi])
+    assert [(p["name"], p["variable"]) for p in prog] == [("Calibre", "mm")]
+    assert prog[0]["rows"] == [[v["name"], "11", "15,5", "+4,5"]]
+    html = open(rg.period(season, lo, hi, "html").path, encoding="utf-8").read()
+    assert "Mediciones · avance semanal" in html and "+4,5" in html
+    pdf = rg.period(season, lo, hi, "pdf").path
+    text = "".join(p.extract_text() for p in PdfReader(pdf).pages)
+    assert "avance semanal" in text and "+4,5" in text
+    mx = rg.matrix(season, package="pdf").path
+    assert "+4,5" in "".join(p.extract_text() for p in PdfReader(mx).pages)

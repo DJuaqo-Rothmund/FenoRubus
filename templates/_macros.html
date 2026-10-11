@@ -160,3 +160,18 @@
 {% endif %}
 {% endfor %}
 {%- endmacro %}
+
+
+{% macro progress_block(progress) -%}
+{% if progress %}
+<h2>Mediciones · avance semanal</h2>
+<p class="muted small">Promedio de cada semana por variedad o sector. Avance = última semana − primera.</p>
+{% for p in progress %}{% if p.rows %}
+<h3 class="measure">{{ p.name }} <span class="muted small">· {{ p.variable }}</span></h3>
+<div class="scroll-x"><table>
+  <thead><tr><th>{{ p.who or 'Variedad' }}</th>{% for w in p.weeks %}<th>{{ w }}</th>{% endfor %}{% if p.advance %}<th>Avance</th>{% endif %}</tr></thead>
+  <tbody>{% for row in p.rows %}<tr><td><b>{{ row[0] }}</b></td>{% for v in row[1:] %}<td class="mono">{{ v }}</td>{% endfor %}</tr>{% endfor %}</tbody>
+</table></div>
+{% endif %}{% endfor %}
+{% endif %}
+{%- endmacro %}

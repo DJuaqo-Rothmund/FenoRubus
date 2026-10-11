@@ -351,6 +351,68 @@ class ReportGenerator:
                 for f in self.db.list_attachments(variety_id, week_id=week_id)
                 for src in [images.src(f["path"], 480)] if src]
 
+    MAX_PROGRESS_WEEKS = 12   # columnas de semana que caben legibles en una hoja
+
+    def _progress(self, season: int, weeks: list[dict]) -> list[dict]:
+        """Mediciones en informes de período y matriz, resumidas: por cada variable
+        numérica, una tabla variedad (o sector) × semana con el promedio de la semana y el
+        avance (última − primera). Las de imágenes: fotos por semana."""
+        from measures_export import as_number
+        nums = {w["week_number"] for w in weeks}
+        who = "Sector" if getattr(self.db, "is_predio", False) else "Variedad"
+        out = []
+        for m in self.db.list_measures():
+            entries = [e for e in self.db.list_entries(m["id"], season=season)
+                       if e["week_number"] in nums]
+            if not entries:
+                continue
+            used = [w for w in weeks if any(e["week_number"] == w["week_number"] for e in entries)]
+            used = used[-self.MAX_PROGRESS_WEEKS:]   # temporada larga: las últimas semanas
+            entries = [e for e in entries if e["week_number"] in {w["week_number"] for w in used}]
+            labels = [ph.week_short(w) for w in used]
+            names = []
+            for e in entries:
+                n = e["variety_name"] or "General"
+                if n not in names:
+                    names.append(n)
+
+            def cell(vals):
+                if not vals:
+                    return ""
+                v = sum(vals) / len(vals)
+                return f"{v:.1f}".replace(".", ",") if not float(v).is_integer() else str(int(v))
+
+            if m["kind"] == "images":
+                rows = [[n] + [str(sum(1 for e in entries if (e["variety_name"] or "General") == n
+                                       and e["week_number"] == w["week_number"]) or "")
+                               for w in used] for n in names]
+                out.append({"name": m["name"], "variable": "Fotos por semana", "weeks": labels,
+                            "rows": rows, "advance": False, "who": who})
+                continue
+            cols = list(m["columns"])
+            for e in entries:
+                cols += [k for k in e["data"] if k not in cols]
+            for col in cols:
+                grid = {}
+                for e in entries:
+                    v = as_number(e["data"].get(col))
+                    if v is not None:
+                        grid.setdefault((e["variety_name"] or "General", e["week_number"]), []).append(v)
+                if not grid:
+                    continue   # columna de texto: queda en el informe semanal y en Excel
+                rows = []
+                for n in names:
+                    series = [grid.get((n, w["week_number"]), []) for w in used]
+                    if not any(series):
+                        continue
+                    means = [sum(x) / len(x) for x in series if x]
+                    delta = means[-1] - means[0] if len(means) > 1 else None
+                    rows.append([n] + [cell(x) for x in series] + [
+                        "" if delta is None else (("+" if delta > 0 else "") + cell([delta]))])
+                out.append({"name": m["name"], "variable": col, "weeks": labels, "rows": rows,
+                            "advance": True, "who": who})
+        return out
+
     def _measures(self, images: ImageStore, week_id: int | None = None, season: int | None = None,
                   variety_id: int | None = None) -> list[dict]:
         """Mediciones personalizadas con registros (de la semana o, por variedad, de la temporada)."""
@@ -473,6 +535,7 @@ class ReportGenerator:
         return self._render(
             "period.html", f"periodo_{season}_S{ph.week_of_year(weeks[0]):02d}-S{ph.week_of_year(weeks[-1]):02d}", "periodo",
             title, images, package, weeks=weeks, heat=heat, strips=strips, compare=self._compare(heat, weeks),
+            progress=self._progress(season, weeks),
             subtitle=f"Del {ph.format_date_es(start, False)} al {ph.format_date_es(end)} · "
                      f"{ph.season_title(season)}")
 
@@ -570,6 +633,7 @@ class ReportGenerator:
         return self._render(
             "matrix.html", f"matriz_{season}", "matriz", title, images, package,
             weeks=weeks, heat=heat, rows=rows, compare=self._compare(heat, weeks), ranking=ranking, max_abs=max_abs,
+            progress=self._progress(season, weeks),
             milestones=MILESTONES,
             gallery_label="fotos generales" if gk == "canopy" else "fotos de detalle",
             subtitle=f"Avance fenológico relativo · {ph.season_title(season)} · "
