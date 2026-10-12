@@ -352,7 +352,7 @@
     canvas.before:
         PushMatrix
         Translate:
-            xy: 0, -root.lift
+            xy: 0, -root.lift + root.bob
     canvas.after:
         PopMatrix
     FloatLayout:
@@ -363,7 +363,7 @@
             source: root.bubble
             opacity: 1 if root.bubble else 0
             size_hint: None, None
-            size: root.diameter + dp(40), root.diameter + dp(40)
+            size: ((root.diameter + dp(62)) * root.pulse,) * 2
             pos_hint: {"center_x": .5, "center_y": .5}
             fit_mode: "contain"
             mipmap: True
@@ -817,6 +817,7 @@
             id: bar
             title: ("I+D · Ensayos" if root.profile == "id" else "Predios") if root.menu_mode else "Ensayos y predios"
             left_action_items: [["arrow-left", lambda x: app.back()]]
+            right_action_items: [["view-list-outline" if root.view_mode == "grid" else "view-grid-outline", lambda x: root.toggle_view()]]
         MDBoxLayout:
             size_hint_y: None
             height: 0 if root.menu_mode else dp(56)
@@ -837,19 +838,15 @@
             MDBoxLayout:
                 orientation: "vertical"
                 adaptive_height: True
-                padding: dp(16), dp(6), dp(16), dp(24)
+                padding: dp(16), dp(6), dp(16), dp(104)
                 spacing: dp(10)
                 Muted:
                     id: hint
-                MDBoxLayout:
+                MDGridLayout:
                     id: ws_list
-                    orientation: "vertical"
+                    cols: 2 if root.view_mode == "grid" else 1
                     adaptive_height: True
-                    spacing: dp(8)
-                PrimaryButton:
-                    id: add_btn
-                    text: "+ Nuevo ensayo"
-                    on_release: root.new_item()
+                    spacing: dp(10) if root.view_mode == "grid" else dp(8)
                 MDFlatButton:
                     id: archived_btn
                     text: "Ver archivados"
@@ -857,6 +854,14 @@
                     theme_text_color: "Custom"
                     text_color: c(theme.LEAF_DARK)
                     on_release: root.toggle_archived()
+    MDFloatingActionButton:
+        id: add_btn
+        icon: "plus"
+        md_bg_color: c(theme.BERRY)
+        icon_color: 1, 1, 1, 1
+        elevation: 2
+        pos_hint: {"right": .95, "y": .035}
+        on_release: root.new_item()
 
 <SectorsScreen>:
     md_bg_color: 0, 0, 0, 0
@@ -998,6 +1003,67 @@
         icon: "dots-vertical"
         pos_hint: {"center_y": .5}
         on_release: root.screen.item_menu(root.ws)
+
+<WorkspaceTile>:
+    orientation: "vertical"
+    padding: dp(10), dp(16), dp(4), dp(10)
+    spacing: dp(4)
+    radius: [dp(18)]
+    elevation: 0
+    size_hint_y: None
+    height: dp(176)
+    md_bg_color: c(theme.BERRY_SOFT) if root.current else c(theme.GLASS)
+    line_color: c(theme.BERRY) if root.current else c(theme.GLASS_EDGE)
+    FloatLayout:
+        size_hint_y: None
+        height: dp(72)
+        MDLabel:
+            text: root.code
+            bold: True
+            halign: "center"
+            font_style: "H6"
+            size_hint: None, None
+            size: dp(64), dp(64)
+            pos_hint: {"center_x": .5, "center_y": .5}
+            theme_text_color: "Custom"
+            text_color: 1, 1, 1, 1
+            canvas.before:
+                Color:
+                    rgba: c(theme.LEAF_DARK, .16) if root.profile == "id" else c(theme.BERRY, .16)
+                Ellipse:
+                    pos: self.x - dp(6), self.y - dp(6)
+                    size: self.width + dp(12), self.height + dp(12)
+                Color:
+                    rgba: c(theme.LEAF_DARK) if root.profile == "id" else c(theme.BERRY)
+                Ellipse:
+                    pos: self.pos
+                    size: self.size
+        MDIconButton:
+            icon: "dots-vertical"
+            pos_hint: {"right": 1.02, "top": 1.2}
+            on_release: root.screen.item_menu(root.ws)
+    MDLabel:
+        text: root.title
+        font_style: "Subtitle2"
+        bold: True
+        halign: "center"
+        max_lines: 2
+        size_hint_y: None
+        height: dp(40)
+        padding: dp(4), 0
+        theme_text_color: "Custom"
+        text_color: c(theme.INK)
+    MDLabel:
+        text: root.subtitle
+        font_style: "Caption"
+        halign: "center"
+        valign: "top"
+        max_lines: 3
+        size_hint_y: None
+        height: dp(46)
+        padding: dp(4), 0
+        theme_text_color: "Custom"
+        text_color: c(theme.MUTED)
 
 <VarietyRow>:
     orientation: "horizontal"

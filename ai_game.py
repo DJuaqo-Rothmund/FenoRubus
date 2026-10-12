@@ -145,6 +145,45 @@ class DailyChallenge:
     def _capture_payload(code: int):
         return ("capture", {"target": code})
 
+    # ------------------------------------------------ por modo (sala de juego)
+    MODES = {"identify": "Nombrar fotos", "capture": "Subir fotos"}
+
+    def available(self, kind: str, day: _dt.date | None = None) -> int:
+        """Cuántos desafíos de ese modo se pueden jugar ahora (pendientes + fotos sin usar)."""
+        day = day or _dt.date.today()
+        open_ = sum(1 for c in self.challenges(day) if c["kind"] == kind and c["status"] == "open")
+        if kind == "capture":
+            return max(open_, 1)                       # siempre se puede pedir uno más
+        return open_ + len(self._candidate_photos(day, random.Random(0)))
+
+    def next_challenge(self, kind: str, day: _dt.date | None = None) -> dict | None:
+        """Siguiente desafío del modo elegido: el pendiente del día o uno nuevo (se puede
+        seguir jugando después de los 5 del día). None si no hay fotos para nombrar."""
+        day = day or _dt.date.today()
+        self.ensure_today(day)
+        rows = self.challenges(day)
+        for c in rows:
+            if c["kind"] == kind and c["status"] == "open":
+                return c
+        rnd = random.Random()
+        if kind == "identify":
+            photos = self._candidate_photos(day, rnd)
+            if not photos:
+                return None
+            item = self._identify_payload(photos[0], rnd)
+        else:
+            asked = {c["payload"].get("target") for c in rows if c["kind"] == "capture"}
+            codes = [cd for cd in self._target_codes(self.db.current_week(day)["week_number"], 6, rnd)
+                     if cd not in asked] or self._target_codes(
+                         self.db.current_week(day)["week_number"], 1, rnd)
+            item = self._capture_payload(codes[0])
+        idx = max((c["idx"] for c in rows), default=-1) + 1
+        self.db.execute(
+            "INSERT INTO challenges(day, idx, kind, payload, created_at) VALUES (?,?,?,?,?)",
+            (day.isoformat(), idx, item[0], json.dumps(item[1], ensure_ascii=False),
+             _dt.datetime.now().isoformat(timespec="seconds")))
+        return next(c for c in self.challenges(day) if c["idx"] == idx)
+
     # ------------------------------------------------------------ respuestas
     MIN_DONE_FOR_STREAK = 3
 

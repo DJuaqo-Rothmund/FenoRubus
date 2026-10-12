@@ -1403,3 +1403,27 @@ def test_period_and_matrix_show_measure_progress(db, tmp_path):
     assert "avance semanal" in text and "+4,5" in text
     mx = rg.matrix(season, package="pdf").path
     assert "+4,5" in "".join(p.extract_text() for p in PdfReader(mx).pages)
+
+
+def test_challenge_modes_keep_playing(db, tmp_path):
+    """Sala de juego: se elige el modo (nombrar fotos / subir fotos) y se puede seguir
+    jugando después de los 5 desafíos del día; sin fotos para nombrar devuelve None."""
+    from ai_game import DailyChallenge
+    clf = PhenologyClassifier(db, HandcraftedExtractor())
+    db.ensure_weeks(2026, 3)
+    for i, v in enumerate(db.list_varieties()[:5]):
+        obs = db.get_or_create_observation(v["id"], db.list_weeks(2026)[1]["id"])
+        db.add_photo(obs["id"], "detail", synthetic_photo(61, "detail", str(tmp_path / f"m{i}.jpg"), i))
+    game = DailyChallenge(db, lambda: clf)
+    day = dt.date(2026, 9, 28)
+    seen = set()
+    while (ch := game.next_challenge("identify", day)) is not None:
+        assert ch["kind"] == "identify" and ch["payload"]["photo_id"] not in seen
+        seen.add(ch["payload"]["photo_id"])
+        game.answer_identify(ch["id"], ch["payload"]["options"][0])
+    assert len(seen) == 5 and game.available("identify", day) == 0
+    for _ in range(4):                                   # más allá de los 2 de captura del día
+        ch = game.next_challenge("capture", day)
+        assert ch["kind"] == "capture"
+        game.skip(ch["id"])
+    assert len(game.challenges(day)) >= 9

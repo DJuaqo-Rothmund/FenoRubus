@@ -4,9 +4,11 @@ Pantallas y widgets de la app (lógica de UI). El layout está en ui/layout.kv.
 from __future__ import annotations
 
 import datetime as _dt
+import math
 import os
 import re
 import threading
+import time
 
 from kivy.clock import Clock, mainthread
 from kivy.metrics import dp
@@ -661,6 +663,8 @@ class StartIcon(ButtonBehavior, BoxLayout):
     diameter = NumericProperty(dp(130))
     lift = NumericProperty(0)           # animación de entrada (desplazamiento hacia abajo)
     reveal = NumericProperty(1)         # animación de entrada (opacidad)
+    bob = NumericProperty(0)            # flotación suave mientras se ve el inicio
+    pulse = NumericProperty(1)          # la sombra (burbuja) «respira» al flotar
 
 
 class StatusPill(Widget):
@@ -692,7 +696,23 @@ class StartScreen(MDScreen):
             delay = 1.0
         self._breath_ev = Clock.schedule_once(lambda *_: self._breathe(), delay)
 
+        self._t0 = time.monotonic()
+        self._float_ev = Clock.schedule_interval(self._float, 1 / 30)
+
+    FLOAT = ((0.0, "ic_id"), (2.1, "ic_predio"), (4.2, "ic_ai"))   # desfase de cada ícono
+
+    def _float(self, *_):
+        """Flotación suave y continua de los íconos (30 cuadros por segundo: liviano)."""
+        t = time.monotonic() - self._t0
+        for phase, key in self.FLOAT:
+            w = self.ids[key]
+            k = math.sin(t * 1.5 + phase)
+            w.bob = dp(4) * k
+            w.pulse = 1 + .035 * math.sin(t * 1.5 + phase - .9)
+
     def on_leave(self, *_):
+        if getattr(self, "_float_ev", None):
+            self._float_ev.cancel()
         if getattr(self, "_breath_ev", None):
             self._breath_ev.cancel()
         if getattr(self, "_breath", None):
@@ -914,10 +934,33 @@ class WorkspaceRow(GlassButton):
     screen = ObjectProperty()
 
 
+class WorkspaceTile(GlassButton):
+    """Vista en cuadrícula: el mismo ensayo/predio como baldosa (código en un círculo)."""
+    title = StringProperty()
+    subtitle = StringProperty()
+    code = StringProperty()
+    profile = StringProperty("id")
+    current = BooleanProperty(False)
+    ws = ObjectProperty(None, allownone=True)
+    screen = ObjectProperty()
+
+
 class WorkspacesScreen(MDScreen):
     """Menú inicial: perfil I+D (ensayos) o Predio, y la lista para elegir dónde trabajar."""
     profile = StringProperty("id")
     show_archived = BooleanProperty(False)
+    view_mode = StringProperty("list")   # «list» o «grid» (se recuerda)
+
+    def on_kv_post(self, *_):
+        try:
+            self.view_mode = app().db.get_setting("workspaces_view", "list") or "list"
+        except Exception:  # noqa: BLE001
+            pass
+
+    def toggle_view(self):
+        self.view_mode = "grid" if self.view_mode == "list" else "list"
+        app().db.set_setting("workspaces_view", self.view_mode)
+        self.refresh()
 
     menu_mode = BooleanProperty(False)   # abierto desde el inicio: solo I+D o solo Predio
 
@@ -965,7 +1008,8 @@ class WorkspacesScreen(MDScreen):
         from workspaces import KINDS
         rows = []
         for ws in items:
-            row = WorkspaceRow(title=ws["name"], code=ws["code"], profile=ws["profile"],
+            cls = WorkspaceTile if self.view_mode == "grid" else WorkspaceRow
+            row = cls(title=ws["name"], code=ws["code"], profile=ws["profile"],
                                subtitle=KINDS.get(ws["kind"], ws["kind"]),
                                current=ws["id"] == cur.get("id"), ws=ws, screen=self)
             row.bind(on_release=lambda w: self.choose(w.ws))
@@ -978,7 +1022,8 @@ class WorkspacesScreen(MDScreen):
                 Clock.schedule_once(lambda *_: fill(i + 1), 0)
         Clock.schedule_once(lambda *_: fill(), 0.05)
         if not items:
-            box.add_widget(MDLabel(text="No hay archivados." if self.show_archived else "Aún no hay nada aquí.",
+            box.add_widget(MDLabel(text="No hay archivados." if self.show_archived else
+                                   "Aún no hay nada aquí: toque + para crear el primero.",
                                    font_style="Caption", adaptive_height=True, halign="center",
                                    theme_text_color="Custom", text_color=c(theme.MUTED)))
         is_id = self.profile == "id"
@@ -987,7 +1032,6 @@ class WorkspacesScreen(MDScreen):
                               "Predios comerciales: fenología por variedad, sector y equipo de riego.")
         if self.show_archived:
             self.ids.hint.text = "Archivados: no aparecen en la lista, pero sus datos se conservan."
-        self.ids.add_btn.text = "+ Nuevo ensayo" if is_id else "+ Nuevo predio"
         self.ids.add_btn.opacity, self.ids.add_btn.disabled = (0, True) if self.show_archived else (1, False)
         self.ids.archived_btn.text = "Volver a la lista" if self.show_archived else "Ver archivados"
 
@@ -3316,24 +3360,106 @@ class AILabScreen(MDScreen):
     @property
     def game(self):
         a = app()
-        if not hasattr(self, "_game"):
+        if getattr(self, "_game", None) is None or self._game.db is not a.db:   # cambió de ensayo
             from ai_game import DailyChallenge
             self._game = DailyChallenge(a.db, lambda: a.classifier)
         return self._game
 
+    _mode = None          # modo en juego («identify» / «capture»); None = sala de juego
+    _pick = "identify"    # modo elegido en la sala
+
     def refresh_challenge(self):
+        if self._mode is None:
+            self._render_lobby()
+            return
         box = self.ids.task_box
-        if not self.game.challenges():
-            fast_clear(box)
-            box.add_widget(self._mind_note("Preparando los desafíos de hoy…"))
+        fast_clear(box)
+        box.add_widget(self._mind_note("Cargando el siguiente desafío…"))
+        mode = self._mode
 
-            def work():
-                self.game.ensure_today()
-                Clock.schedule_once(lambda *_: self._render_challenge())
+        def work():
+            try:
+                ch = self.game.next_challenge(mode)
+                Clock.schedule_once(lambda *_: self._render_challenge(ch))
+            except Exception as exc:  # noqa: BLE001
+                error = exc
+                Clock.schedule_once(lambda *_: (app().toast(f"No se pudo preparar: {error}"),
+                                                self._exit_game()))
 
-            app().workers.submit(work)
-        else:
-            self._render_challenge()
+        app().workers.submit(work)
+
+    # ---- sala de juego: «¿Aceptas el desafío?»
+    MODE_TEXT = {"identify": "Ponle nombre (estado BBCH) a fotos que ya están en la app. Si la foto "
+                             "ya tenía estado es un quiz; si no, tu respuesta la etiqueta.",
+                 "capture": "La IA te pide un estado y tú le muestras una foto (cámara o galería). "
+                            "Dice qué vio y aprende con tu ejemplo."}
+
+    def _render_lobby(self):
+        from ui import arcade
+        self._update_header()
+        box = self.ids.task_box
+        fast_clear(box)
+        card = _mind("MindCard")
+        arena = arcade.PixelArena(size_hint_y=None, height=dp(330))
+        arena.add_widget(arcade.PixelText(text="¿ACEPTAS\nEL DESAFÍO?", px=dp(4),
+                                          pos_hint={"center_x": .5, "top": .95}))
+        orb = arcade.PixelOrb(size_hint=(None, None), size=(dp(156), dp(156)),
+                              pos_hint={"center_x": .5, "center_y": .36})
+        orb.bind(on_release=lambda *_: self._start_game())
+        arena.add_widget(orb)
+        arena.add_widget(arcade.PixelText(text="GO", px=dp(7), color=c(theme.MIND_ACCENT),
+                                          pos_hint={"center_x": .5, "center_y": .36}))
+        arena.orb = orb
+        card.add_widget(arena)
+        card.add_widget(_mind("MindSection", text="ELIGE TU DESAFÍO"))
+        row = MDBoxLayout(adaptive_height=True, spacing=dp(8))
+        self._mode_btns = {}
+        for kind, label in (("identify", "Nombrar fotos"), ("capture", "Subir fotos")):
+            b = _mind("MindSeg", text=label, selected=kind == self._pick)
+            b.bind(on_release=lambda w, k=kind: self._choose_mode(k))
+            self._mode_btns[kind] = b
+            row.add_widget(b)
+        card.add_widget(row)
+        self._mode_desc = _mind("MindMuted", text="")
+        card.add_widget(self._mode_desc)
+        start = _mind("MindButton", text="COMENZAR")
+        start.bind(on_release=lambda *_: self._start_game())
+        card.add_widget(start)
+        box.add_widget(card)
+        self._choose_mode(self._pick)
+        arena.start()
+
+    def _choose_mode(self, kind):
+        self._pick = kind
+        for k, b in getattr(self, "_mode_btns", {}).items():
+            b.selected = k == kind
+        extra = ""
+        if kind == "identify":
+            n = self.game.available("identify")
+            extra = f"  ·  {n} foto(s) por nombrar" if n else "  ·  no quedan fotos por nombrar"
+        self._mode_desc.text = self.MODE_TEXT[kind] + extra
+
+    def _start_game(self):
+        if self._pick == "identify" and not self.game.available("identify"):
+            app().toast("No quedan fotos por nombrar: registra fotos en el muestreo o elige «Subir fotos».")
+            return
+        from ui import arcade
+
+        def go():
+            self._mode = self._pick
+            self.refresh_challenge()
+
+        arcade.countdown(go)
+
+    def _exit_game(self):
+        self._mode = None
+        self.refresh_challenge()
+
+    def _exit_button(self):
+        b = MDFlatButton(text="SALIR AL MENÚ DEL DESAFÍO", theme_text_color="Custom",
+                         text_color=c(theme.MIND_MUTED), pos_hint={"center_x": .5})
+        b.bind(on_release=lambda *_: self._exit_game())
+        return b
 
     def _update_header(self):
         st = self.game.stats()
@@ -3354,29 +3480,24 @@ class AILabScreen(MDScreen):
         card.add_widget(_mind("MindText", text=text))
         return card
 
-    def _render_challenge(self):
+    def _render_challenge(self, ch=None):
         self._update_header()
         box = self.ids.task_box
         fast_clear(box)
-        chs = self.game.challenges()
-        pending = [ch for ch in chs if ch["status"] == "open"]
-        if not pending:
-            st = self.game.stats()
+        if ch is None:   # no quedan fotos para nombrar
             card = _mind("MindCard")
-            n_done = sum(ch["status"] == "done" for ch in chs)
-            counted = n_done >= self.game.MIN_DONE_FOR_STREAK
-            card.add_widget(_mind("MindSection", text="HOY COMPLETADO" if counted else "DESAFÍOS CERRADOS"))
-            card.add_widget(MDLabel(text="La IA aprendió de tus respuestas." if counted else
-                                    f"Responde al menos {self.game.MIN_DONE_FOR_STREAK} para sumar racha.",
-                                    font_style="H6", bold=True,
-                                    adaptive_height=True, theme_text_color="Custom",
+            card.add_widget(_mind("MindSection", text="¡NIVEL DESPEJADO!"))
+            card.add_widget(MDLabel(text="Ya nombraste todas las fotos disponibles.", font_style="H6",
+                                    bold=True, adaptive_height=True, theme_text_color="Custom",
                                     text_color=c(theme.MIND_TEXT)))
-            card.add_widget(_mind("MindMuted", text=f"Racha: {st['streak']} día(s) · mejor racha: {st['best']} · "
-                                                    f"{st['xp']} XP. Vuelve mañana por 5 desafíos nuevos."))
+            card.add_widget(_mind("MindMuted", text="Registra fotos nuevas en el muestreo o cambia a "
+                                                    "«Subir fotos» para seguir entrenando a la IA."))
+            card.add_widget(self._exit_button())
             box.add_widget(card)
             return
-        ch = pending[0]
-        box.add_widget(self._identify_card(ch) if ch["kind"] == "identify" else self._capture_card(ch))
+        card = self._identify_card(ch) if ch["kind"] == "identify" else self._capture_card(ch)
+        card.add_widget(self._exit_button())
+        box.add_widget(card)
 
     # ---- «¿Qué estado es?»
     def _identify_card(self, ch):
@@ -3418,6 +3539,9 @@ class AILabScreen(MDScreen):
                 o.result = "ok" if res["correct"] in (True, None) else "bad"
             if not o.result:
                 o.opacity = .45
+        if res["correct"] is not False:   # acierto o etiqueta nueva: explosión de píxeles
+            from ui import arcade
+            arcade.burst(*option.to_window(*option.center))
         if res["correct"] is None:
             msg = f"Etiquetada como BBCH {ph.code_str(option.code)}. +{res['xp']} XP"
         elif res["correct"]:
@@ -3470,7 +3594,7 @@ class AILabScreen(MDScreen):
                 except Exception as exc:  # noqa: BLE001
                     error = exc
                     Clock.schedule_once(lambda *_: (a.toast(f"No se pudo procesar: {error}"),
-                                                    self._render_challenge()))
+                                                    self.refresh_challenge()))
 
             a.workers.submit(work)
 
@@ -3485,6 +3609,9 @@ class AILabScreen(MDScreen):
         img = MDBoxLayout(size_hint_y=None, height=dp(200))
         img.add_widget(thumb_widget(res["path"], 640))
         card.add_widget(img)
+        from kivy.core.window import Window
+        from ui import arcade
+        arcade.burst(Window.width / 2, Window.height / 2)
         seen = f"La IA vio BBCH {ph.code_str(res['ai'])}"
         verdict = " — ¡coincide con el estadio!" if res["agree"] else " — ahora aprende tu ejemplo"
         self.ids.task_box.add_widget(card)
@@ -3494,7 +3621,7 @@ class AILabScreen(MDScreen):
     def _skip_button(self, ch):
         b = MDFlatButton(text="SALTAR", theme_text_color="Custom", text_color=c(theme.MIND_MUTED),
                          pos_hint={"center_x": .5})
-        b.bind(on_release=lambda *_: (self.game.skip(ch["id"]), self._render_challenge()))
+        b.bind(on_release=lambda *_: (self.game.skip(ch["id"]), self.refresh_challenge()))
         return b
 
     def _feedback(self, msg, res, container=None):
@@ -3507,7 +3634,7 @@ class AILabScreen(MDScreen):
             card.add_widget(_mind("MindMuted", text=f"¡Desafío del día completado! Racha: "
                                                     f"{res['stats']['streak']} día(s)."))
         nxt = _mind("MindButton", text="Siguiente")
-        nxt.bind(on_release=lambda *_: self._render_challenge())
+        nxt.bind(on_release=lambda *_: self.refresh_challenge())
         card.add_widget(nxt)
         if container is None:
             self.ids.task_box.add_widget(card)
