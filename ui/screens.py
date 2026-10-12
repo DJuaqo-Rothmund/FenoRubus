@@ -3376,6 +3376,9 @@ class AILabScreen(MDScreen):
         fast_clear(box)
         box.add_widget(self._mind_note("Cargando el siguiente desafío…"))
         mode = self._mode
+        if mode == "endless":   # sin fin: 2 de cada 3 nombrar fotos (si quedan), 1 subir foto
+            mode = ("identify" if self._run % 3 != 2 and self.game.available("identify")
+                    else "capture")
 
         def work():
             try:
@@ -3392,7 +3395,10 @@ class AILabScreen(MDScreen):
     MODE_TEXT = {"identify": "Ponle nombre (estado BBCH) a fotos que ya están en la app. Si la foto "
                              "ya tenía estado es un quiz; si no, tu respuesta la etiqueta.",
                  "capture": "La IA te pide un estado y tú le muestras una foto (cámara o galería). "
-                            "Dice qué vio y aprende con tu ejemplo."}
+                            "Dice qué vio y aprende con tu ejemplo.",
+                 "endless": "Modo sin fin: nombrar y subir fotos, una tras otra, sin parar. "
+                            "Cada 5 seguidas completas una ronda."}
+    _run = 0              # desafíos respondidos en esta partida (modo sin fin)
 
     def _render_lobby(self):
         from ui import arcade
@@ -3414,7 +3420,8 @@ class AILabScreen(MDScreen):
         card.add_widget(_mind("MindSection", text="ELIGE TU DESAFÍO"))
         row = MDBoxLayout(adaptive_height=True, spacing=dp(8))
         self._mode_btns = {}
-        for kind, label in (("identify", "Nombrar fotos"), ("capture", "Subir fotos")):
+        for kind, label in (("identify", "Nombrar fotos"), ("capture", "Subir fotos"),
+                            ("endless", "Sin fin")):
             b = _mind("MindSeg", text=label, selected=kind == self._pick)
             b.bind(on_release=lambda w, k=kind: self._choose_mode(k))
             self._mode_btns[kind] = b
@@ -3446,7 +3453,7 @@ class AILabScreen(MDScreen):
         from ui import arcade
 
         def go():
-            self._mode = self._pick
+            self._mode, self._run = self._pick, 0
             self.refresh_challenge()
 
         arcade.countdown(go)
@@ -3496,6 +3503,8 @@ class AILabScreen(MDScreen):
             box.add_widget(card)
             return
         card = self._identify_card(ch) if ch["kind"] == "identify" else self._capture_card(ch)
+        if self._mode == "endless":
+            card.add_widget(_mind("MindSection", text=f"MODO SIN FIN · {self._run} SEGUIDOS"), index=len(card.children))
         card.add_widget(self._exit_button())
         box.add_widget(card)
 
@@ -3624,7 +3633,18 @@ class AILabScreen(MDScreen):
         b.bind(on_release=lambda *_: (self.game.skip(ch["id"]), self.refresh_challenge()))
         return b
 
+    def _celebrate(self, res):
+        """Serpentinas de píxeles: desafío del día completado o ronda del modo sin fin."""
+        from ui import arcade
+        self._run += 1
+        if res.get("day_done"):
+            arcade.party("DESAFIO\nCOMPLETADO",
+                         f"Racha: {res['stats']['streak']} día(s) · {res['stats']['xp']} XP")
+        elif self._mode == "endless" and self._run % 5 == 0:
+            arcade.party(f"RONDA {self._run // 5}\nCOMPLETADA", f"{self._run} desafíos seguidos · ¡sigue!")
+
     def _feedback(self, msg, res, container=None):
+        self._celebrate(res)
         self._update_header()
         card = container or _mind("MindCard")
         card.add_widget(MDLabel(text=msg, font_style="Subtitle1", bold=True, adaptive_height=True,

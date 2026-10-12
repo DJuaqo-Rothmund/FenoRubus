@@ -146,8 +146,43 @@ class PixelOrb(ButtonBehavior, Widget):
                 Rectangle(pos=(x - s / 2, y - s / 2), size=(s, s))
 
 
+# Frambuesa de 8 bits (7×8): G hoja, R fruto, r brillo, D sombra.
+RASPBERRY = ["..G.G..",
+             ".GGGGG.",
+             ".RRRRR.",
+             "RRrRRrR",
+             "RRRRRRR",
+             "DRrRRRD",
+             ".DRRRD.",
+             "..DRD.."]
+SPRITE_COLORS = {"G": "#4CAF50", "R": "#D81B60", "r": "#F8BBD0", "D": "#8E1240"}
+_sprite_tex = None
+
+
+def raspberry_texture():
+    """Textura de la frambuesa pixelada (una sola, ampliada sin suavizar)."""
+    global _sprite_tex
+    if _sprite_tex is None:
+        from kivy.graphics.texture import Texture
+        from kivy.utils import get_color_from_hex
+        h, w = len(RASPBERRY), len(RASPBERRY[0])
+        buf = bytearray()
+        for row in reversed(RASPBERRY):           # la textura va de abajo hacia arriba
+            for ch in row:
+                if ch == ".":
+                    buf += bytes((0, 0, 0, 0))
+                else:
+                    r, g, b, _a = get_color_from_hex(SPRITE_COLORS[ch])
+                    buf += bytes((int(r * 255), int(g * 255), int(b * 255), 255))
+        tex = Texture.create(size=(w, h), colorfmt="rgba")
+        tex.blit_buffer(bytes(buf), colorfmt="rgba", bufferfmt="ubyte")
+        tex.mag_filter = tex.min_filter = "nearest"
+        _sprite_tex = tex
+    return _sprite_tex
+
+
 class PixelArena(FloatLayout):
-    """Fondo de juego: estelas de píxeles en «dash» y el orbe al centro."""
+    """Fondo de juego: frambuesas de 8 bits que cruzan en «dash» (con estela) y el orbe."""
     streaks = ListProperty([])
 
     def __init__(self, **kw):
@@ -155,9 +190,9 @@ class PixelArena(FloatLayout):
         self._ev = None
         self._t = 0.0
         rnd = random.Random(7)
-        self.streaks = [{"y": rnd.random(), "x": rnd.random(), "v": rnd.uniform(.25, .7),
-                         "len": rnd.randint(3, 8), "col": rnd.choice(NEON),
-                         "s": rnd.choice((dp(3), dp(4), dp(5)))} for _ in range(18)]
+        self.streaks = [{"y": rnd.random(), "x": rnd.random(), "v": rnd.uniform(.22, .6),
+                         "len": rnd.randint(3, 6), "s": rnd.choice((dp(2.5), dp(3), dp(3.5))),
+                         "bob": rnd.uniform(0, 6.3)} for _ in range(12)]
         self.orb = None
 
     def start(self):
@@ -183,6 +218,7 @@ class PixelArena(FloatLayout):
         for ch in self.children:            # textos de píxeles: siempre en su lugar
             if isinstance(ch, PixelText) and ch._tr is not None:
                 ch._tr.xy = ch.pos
+        tex = raspberry_texture()
         self.canvas.before.clear()
         w, h = self.size
         with self.canvas.before:
@@ -190,18 +226,22 @@ class PixelArena(FloatLayout):
             Rectangle(pos=self.pos, size=self.size)
             for st in self.streaks:
                 st["x"] -= st["v"] * dt
-                if st["x"] < -.3:
-                    st["x"] = 1.1
-                    st["y"] = random.random()
                 s = st["s"]
+                sw, sh = 7 * s, 8 * s
+                if st["x"] * w < -sw * 3:
+                    st["x"] = 1.05
+                    st["y"] = random.random()
                 x = self.x + st["x"] * w
-                y = self.y + st["y"] * (h - s)
-                for k in range(st["len"]):                 # cabeza brillante, cola que se apaga
-                    px = x + k * s * 1.2
-                    if px < self.x or px + s > self.right:   # sin salirse del recuadro
-                        continue
-                    Color(*c(st["col"], max(.06, 1 - k / st["len"])))
-                    Rectangle(pos=(px, y), size=(s, s))
+                # Saltito de 8 bits: sube y baja en escalones de un píxel.
+                y = self.y + st["y"] * (h - sh) + round(math.sin(self._t * 6 + st["bob"])) * s
+                for k in range(1, st["len"] + 1):          # estela: píxeles frambuesa que se apagan
+                    px = x + sw + k * s * 1.6
+                    if self.x <= px <= self.right - s:
+                        Color(*c(SPRITE_COLORS["R"], max(.08, .7 - k / (st["len"] + 1))))
+                        Rectangle(pos=(px, y + sh * .45), size=(s, s))
+                if self.x <= x and x + sw <= self.right:
+                    Color(1, 1, 1, 1)
+                    Rectangle(texture=tex, pos=(x, y), size=(sw, sh))
 
 
 def burst(x: float, y: float, n: int = 36):
@@ -262,4 +302,82 @@ def countdown(on_done, steps=("3", "2", "1", "¡YA!")):
         Clock.schedule_once(lambda *_: show(i + 1), .62)
 
     show(0)
+    return layer
+
+
+def party(title: str, subtitle: str = "", duration: float = 3.6):
+    """Serpentinas y papel picado EN PÍXELES con un letrero de videojuego al centro
+    (desafío completado). Se cierra sola o al tocarla."""
+    from kivy.uix.label import Label
+    layer = FloatLayout(size=Window.size)
+    W, H = Window.size
+    rnd = random.Random()
+    s = dp(5)
+    bits = [{"x": rnd.uniform(0, W), "y": H + rnd.uniform(0, H * .6), "v": rnd.uniform(dp(150), dp(290)),
+             "col": rnd.choice(NEON + [SPRITE_COLORS["R"]]), "s": rnd.choice((dp(4), dp(5), dp(6)))}
+            for _ in range(60)]
+    snakes = [{"x": rnd.uniform(dp(10), W - dp(10)), "y": H + rnd.uniform(0, H * .5),
+               "v": rnd.uniform(dp(130), dp(220)), "col": rnd.choice(NEON + [SPRITE_COLORS["R"]]),
+               "ph": rnd.uniform(0, 6.3), "n": rnd.randint(12, 18)} for _ in range(10)]
+    berries = [{"x": rnd.uniform(0, W), "y": H + rnd.uniform(0, H * .7), "v": rnd.uniform(dp(120), dp(200))}
+               for _ in range(8)]
+    state = {"t": 0.0, "closing": False}
+    tex = raspberry_texture()
+
+    def step(dt):
+        state["t"] += dt
+        t = state["t"]
+        layer.canvas.before.clear()
+        with layer.canvas.before:
+            Color(*c("#050A16", .55))
+            Rectangle(pos=(0, 0), size=(W, H))
+            for b in bits:
+                b["y"] -= b["v"] * dt
+                Color(*c(b["col"]))
+                # en una grilla: cae «a saltos» como en una consola antigua
+                Rectangle(pos=(round(b["x"] / s) * s, round(b["y"] / s) * s), size=(b["s"], b["s"]))
+            for sn in snakes:
+                sn["y"] -= sn["v"] * dt
+                Color(*c(sn["col"]))
+                for k in range(sn["n"]):                   # serpentina: zigzag de cuadritos
+                    off = round(math.sin(k * .7 + sn["ph"] + t * 5) * 2) * s
+                    Rectangle(pos=(round((sn["x"] + off) / s) * s, round((sn["y"] + k * s) / s) * s),
+                              size=(s, s))
+            Color(1, 1, 1, 1)
+            for br in berries:
+                br["y"] -= br["v"] * dt
+                Rectangle(texture=tex, pos=(br["x"], br["y"]), size=(7 * dp(4), 8 * dp(4)))
+        if t >= duration:
+            close()
+
+    def close(*_):
+        if state["closing"]:
+            return
+        state["closing"] = True
+        ev.cancel()
+        Window.remove_widget(layer)
+
+    # Letrero central (estilo pantalla de victoria)
+    card_w, card_h = min(W - dp(40), dp(330)), dp(180)
+    with layer.canvas:
+        Color(*c("#0B1630", .96))
+        Rectangle(pos=((W - card_w) / 2, (H - card_h) / 2), size=(card_w, card_h))
+        Color(*c(theme.MIND_ACCENT))
+        for i in range(0, int(card_w), int(s * 2)):         # borde punteado de píxeles
+            Rectangle(pos=((W - card_w) / 2 + i, (H - card_h) / 2), size=(s, s))
+            Rectangle(pos=((W - card_w) / 2 + i, (H + card_h) / 2 - s), size=(s, s))
+    txt = PixelText(text=title, px=dp(4.5), color=c("#FDE047"))
+    txt.pos = ((W - txt.width) / 2, H / 2 - txt.height / 2 + (dp(18) if subtitle else 0))
+    layer.add_widget(txt)
+    if subtitle:
+        lb = Label(text=subtitle, font_size="13sp", color=c(theme.MIND_TEXT), size_hint=(None, None),
+                   halign="center")
+        lb.texture_update()
+        lb.size = lb.texture_size
+        lb.pos = ((W - lb.width) / 2, H / 2 - card_h / 2 + dp(18))
+        layer.add_widget(lb)
+    layer.bind(on_touch_down=lambda *_: close() or True)
+    Window.add_widget(layer)
+    burst(W / 2, H / 2, 40)
+    ev = Clock.schedule_interval(step, 1 / 30)
     return layer
