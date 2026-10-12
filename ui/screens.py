@@ -2584,13 +2584,38 @@ class StageChip(BoxLayout):
 
 
 class PreviewTile(ButtonBehavior, BoxLayout):
-    """Ficha de la vista previa: foto, estado BBCH y nombre. Tocar abre el registro."""
+    """Ficha de la vista previa: la frambuesa dibujada de la variedad (gris si esa semana
+    no tiene registro), su estado BBCH y nombre. El botón ES la frambuesa: solo responde
+    al tocar el fruto (no un recuadro)."""
     title = StringProperty()
     subtitle = StringProperty()
     sub_color = ColorProperty(c(theme.MUTED))
     badge = StringProperty()
     badge_bg = ColorProperty(c("#FFFFFF", .9))
     badge_fg = ColorProperty(c(theme.INK))
+    berry = StringProperty()
+    _alpha_cache: dict = {}
+
+    def collide_point(self, x, y):
+        img = self.ids.get("art")
+        if img is None or not img.collide_point(x, y) or not self.berry:
+            return False
+        core = self._alpha_cache.get(self.berry)
+        if core is None:
+            from kivy.core.image import Image as CoreImage
+            core = self._alpha_cache[self.berry] = CoreImage(self.berry, keep_data=True)
+        w, h = img.norm_image_size
+        if not w or not h:
+            return False
+        u = (x - (img.center_x - w / 2)) / w
+        v = (y - (img.center_y - h / 2)) / h
+        if not (0 <= u < 1 and 0 <= v < 1):
+            return False
+        tw, th = core.size
+        try:
+            return core.read_pixel(int(u * tw), int((1 - v) * th))[3] > .25
+        except Exception:  # noqa: BLE001 - sin datos de la imagen: toda la figura
+            return True
 
 
 class StageHeatmap(Widget):
@@ -2887,18 +2912,12 @@ class PreviewTab(MDScreen):
         else:
             sub, col = ok_sub, c(theme.MUTED)
         bg, fg = bbch_tag_colors(code)
+        has_record = code is not None or bool(n)
         tile = PreviewTile(title=title, subtitle=sub, sub_color=col,
                            badge=f"BBCH {ph.code_str(code)}" if code is not None else "",
-                           badge_bg=bg, badge_fg=fg)
-        thumb = thumb_widget(cell["photo"], 240)
-        thumb.pos_hint = {"x": 0, "y": 0}   # dentro del FloatLayout (si no, queda en 0,0)
-        thumb.clear_widgets()               # el ícono va centrado en la ficha (abajo)
-        box = tile.ids.thumb_box
-        box.add_widget(thumb, index=1)
-        if not cell["photo"]:
-            box.add_widget(MDIcon(icon="camera-plus-outline", theme_text_color="Custom",
-                                  text_color=c(theme.LEAF, .5), font_size="26sp",
-                                  pos_hint={"center_x": .5, "center_y": .55}), index=1)
+                           badge_bg=bg, badge_fg=fg,
+                           berry=theme.berry_art(row.get("cultivar") or "", row["name"],
+                                                 gray=not has_record))
         tile.bind(on_release=lambda *_: self._open_cell(cell))
         return tile
 

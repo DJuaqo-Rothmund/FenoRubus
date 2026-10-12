@@ -1639,29 +1639,23 @@
 <PreviewTile>:
     orientation: "vertical"
     size_hint_y: None
-    height: dp(146)
-    spacing: dp(3)
-    padding: dp(5), dp(5), dp(5), dp(6)
-    canvas.before:
-        Color:
-            rgba: c("#FFFFFF", .62 if self.state == "normal" else .9)
-        RoundedRectangle:
-            pos: self.pos
-            size: self.size
-            radius: [dp(16)]
-        Color:
-            rgba: c(theme.LEAF_DARK, .10)
-        Line:
-            rounded_rectangle: (self.x, self.y, self.width, self.height, dp(16))
-            width: dp(.8)
+    height: dp(150)
+    spacing: dp(2)
+    padding: dp(2), dp(2), dp(2), dp(4)
     FloatLayout:
-        id: thumb_box
         size_hint_y: None
-        height: dp(92)
+        height: dp(104)
+        Image:
+            id: art
+            source: root.berry
+            fit_mode: "contain"
+            mipmap: True
+            size_hint: (.86, .96) if root.state == "normal" else (.78, .88)
+            pos_hint: {"center_x": .5, "center_y": .5}
         BoxLayout:
             size_hint: None, None
             size: badge_lbl.texture_size[0] + dp(12), dp(20)
-            pos_hint: {"right": .97, "y": .04}
+            pos_hint: {"center_x": .5, "y": 0}
             opacity: 1 if root.badge else 0
             canvas.before:
                 Color:
@@ -1670,6 +1664,11 @@
                     pos: self.pos
                     size: self.size
                     radius: [dp(10)]
+                Color:
+                    rgba: c(theme.LEAF_DARK, .18)
+                Line:
+                    rounded_rectangle: (self.x, self.y, self.width, self.height, dp(10))
+                    width: dp(.8)
             Label:
                 id: badge_lbl
                 text: root.badge
@@ -1680,6 +1679,7 @@
         text: root.title
         font_style: "Caption"
         bold: True
+        halign: "center"
         shorten: True
         shorten_from: "right"
         size_hint_y: None
@@ -1689,6 +1689,7 @@
     MDLabel:
         text: root.subtitle
         font_size: "10sp"
+        halign: "center"
         shorten: True
         shorten_from: "right"
         size_hint_y: None

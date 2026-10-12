@@ -46,7 +46,31 @@ MIND_FIRE = "#FFB454"
 
 BACKGROUND = resource_path("assets", "ui", "background.jpg")
 LOGO = resource_path("assets", "ui", "logo.png")
-WORDMARK = resource_path("assets", "ui", "wordmark.png")   # letra «PhenoRubus App»
+WORDMARK = resource_path("assets", "ui", "wordmark.png")
+# Frambuesas ilustradas (vista previa): color = semana con registro; gris = sin registro.
+BERRY_KEYS = ("meeker", "wakefield", "lagorai", "cascade_harvest", "codigo_11", "codigo_24",
+              "codigo_31", "codigo_55", "codigo_81")
+
+
+def berry_art(*names: str, gray: bool = False) -> str:
+    """Dibujo de la variedad (por nombre o variedad del sector); si no tiene uno propio,
+    siempre el mismo de los 9 (según el nombre) para que cada una se reconozca."""
+    import unicodedata
+    import zlib
+
+    def slug(t):
+        t = unicodedata.normalize("NFKD", t or "")
+        t = "".join(ch for ch in t if not unicodedata.combining(ch)).lower()
+        t = t.replace("n°", "").replace("nº", "").replace("no.", "")
+        return "_".join(w for w in "".join(ch if ch.isalnum() else " " for ch in t).split())
+
+    keys = [slug(n) for n in names if n]
+    key = next((k for k in keys if k in BERRY_KEYS), None)
+    if key is None:
+        base = keys[0] if keys else ""
+        key = BERRY_KEYS[zlib.crc32(base.encode()) % len(BERRY_KEYS)]
+    return resource_path("assets", "ui", "berries", f"{key}{'_gris' if gray else ''}.png")
+   # letra «PhenoRubus App»
 # Pantalla de inicio: botones circulares e ícono de la IA (frambuesa-cerebro delineada)
 START_ID = resource_path("assets", "ui", "start_id.png")           # trazo frambuesa
 START_PREDIO = resource_path("assets", "ui", "start_predio.png")   # trazo verde
