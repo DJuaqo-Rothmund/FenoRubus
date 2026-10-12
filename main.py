@@ -48,7 +48,7 @@ from android_bridge import create_media, make_thumbnail, request_runtime_permiss
 from notifications import ReminderManager  # noqa: E402
 from platform_utils import data_subdir, get_data_dir, resource_path  # noqa: E402
 from ui.screens import (AILabScreen, HomeScreen, MeasureScreen, ObservationScreen,  # noqa: E402
-                        PinForm, SectorsScreen, SettingsScreen, SplashScreen, StartScreen,
+                        PinForm, SectorsScreen, SettingsScreen, SplashScreen, StartScreen, TimelineScreen,
                         VarietyScreen,
                         WorkspacesScreen, form_dialog)
 from workspaces import Workspaces  # noqa: E402
@@ -401,6 +401,14 @@ class FenoRubusApp(MDApp):
     def open_observation(self, variety_id: int, week_id: int):
         self.observation.load(variety_id, week_id)
         self.go("observation")
+
+    @property
+    def timeline(self):
+        return self._screen(TimelineScreen, "timeline")
+
+    def open_timeline(self, variety_id: int, week_id: int | None = None):
+        self.timeline.load(variety_id, week_id)
+        self.go("timeline")
 
     def open_variety(self, variety_id: int):
         self.variety.load(variety_id)

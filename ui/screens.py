@@ -433,7 +433,9 @@ def thumb_widget(path: str | None, size: int = 320, icon: str = "image-off-outli
     mark = Label(text=md_icons.get(icon, ""), font_name=os.path.join(fonts_path, "materialdesignicons-webfont.ttf"),
                  font_size=dp(20), color=c(theme.LEAF, .45), size_hint=(None, None), size=(dp(28), dp(28)))
     thumb.add_widget(mark)
-    thumb.bind(pos=lambda w, v: setattr(mark, "center", w.center), size=lambda w, v: setattr(mark, "center", w.center))
+    # Centrado en el cuadro siguiente (con los valores finales de la lista ya armada).
+    recenter = Clock.create_trigger(lambda dt: setattr(mark, "center", thumb.center))
+    thumb.bind(pos=recenter, size=recenter)
 
     state = {"async": False}
 
@@ -1749,6 +1751,171 @@ class CaptionForm(MDBoxLayout):
     pass
 
 
+class StageSparkline(Widget):
+    """Curva del estado BBCH semana a semana (puntos con el color de su estadio)."""
+    points = ListProperty([])    # [(etiqueta, código)]
+
+    def __init__(self, **kw):
+        super().__init__(**kw)
+        self.bind(points=self._redraw, pos=self._redraw, size=self._redraw)
+
+    def _redraw(self, *_):
+        from kivy.core.text import Label as CoreLabel
+        from kivy.graphics import Color, Ellipse, Line, Rectangle
+        self.canvas.clear()
+        pts = [(lab, code) for lab, code in self.points if code is not None]
+        if not pts:
+            return
+        vals = [ph.bbch_value(cd) for _l, cd in pts]
+        lo, hi = min(vals), max(vals)
+        span = max(hi - lo, 4)
+        pad_x, pad_top, pad_bot = dp(14), dp(16), dp(18)
+        n = len(pts)
+        step = (self.width - 2 * pad_x) / max(1, n - 1)
+
+        def xy(i, v):
+            x = self.x + pad_x + (i * step if n > 1 else (self.width - 2 * pad_x) / 2)
+            y = self.y + pad_bot + (v - lo) / span * (self.height - pad_top - pad_bot)
+            return x, y
+
+        with self.canvas:
+            Color(*c(theme.LEAF, .25))
+            Line(points=[self.x + pad_x, self.y + pad_bot, self.right - pad_x, self.y + pad_bot], width=1)
+            Color(*c(theme.BERRY, .8))
+            if n > 1:
+                Line(points=[k for i, v in enumerate(vals) for k in xy(i, v)], width=dp(1.4))
+            for i, ((lab, code), v) in enumerate(zip(pts, vals)):
+                x, y = xy(i, v)
+                bg, fg = theme.stage_colors(code)
+                Color(*fg)
+                Ellipse(pos=(x - dp(5), y - dp(5)), size=(dp(10), dp(10)))
+                Color(*bg)
+                Ellipse(pos=(x - dp(3), y - dp(3)), size=(dp(6), dp(6)))
+                if n <= 10 or i % 2 == 0 or i == n - 1:
+                    t = CoreLabel(text=lab, font_size=dp(9), bold=True)
+                    t.refresh()
+                    Color(*c(theme.MUTED))
+                    Rectangle(texture=t.texture, size=t.texture.size,
+                              pos=(x - t.texture.size[0] / 2, self.y + dp(2)))
+                    t = CoreLabel(text=ph.code_str(code), font_size=dp(9), bold=True)
+                    t.refresh()
+                    Color(*c(theme.LEAF_DARK))
+                    Rectangle(texture=t.texture, size=t.texture.size,
+                              pos=(x - t.texture.size[0] / 2, y + dp(6)))
+
+
+class TimelineScreen(MDScreen):
+    """Línea de tiempo de una variedad (o sector): cada semana con su estado y TODAS sus
+    fotos, en orden. Se abre al tocar una variedad en la vista previa."""
+    variety_id = NumericProperty(0)
+
+    def load(self, variety_id: int, week_id: int | None = None):
+        a = app()
+        self.variety_id = variety_id
+        v = a.db.get_variety(variety_id)
+        self.ids.bar.title = v["name"]
+        rows = a.db.variety_timeline(variety_id, a.season)
+        codes = [r["bbch_code"] for r in rows if r["bbch_code"] is not None]
+        n_photos = 0
+        box = self.ids.entries
+        fast_clear(box)
+        target = None
+        for i, r in enumerate(rows):
+            photos = a.db.list_photos(r["id"])
+            n_photos += len(photos)
+            entry = self._entry(r, photos, first=i == 0, last=i == len(rows) - 1)
+            box.add_widget(entry)
+            if week_id is not None and r["week_id"] == week_id:
+                target = entry
+        if not rows:
+            box.add_widget(MDLabel(text="Aún no hay registros de esta variedad en la temporada.",
+                                   font_style="Caption", adaptive_height=True, halign="center",
+                                   theme_text_color="Custom", text_color=c(theme.MUTED)))
+        sub = [v.get("cultivar") or "", ph.season_title(a.season)]
+        self.ids.sub.text = " · ".join(x for x in sub if x)
+        first, last = (codes[0], codes[-1]) if codes else (None, None)
+        self.ids.stats.text = (f"{len(rows)} semana(s) · {n_photos} foto(s)"
+                               + (f" · BBCH {ph.code_str(first)} a {ph.code_str(last)}" if codes else ""))
+        self.ids.spark.points = [(ph.week_short(r), r["bbch_code"]) for r in rows]
+        self.ids.spark.opacity = 1 if codes else 0
+        self.ids.spark.height = dp(110) if codes else 0
+        sv = self.ids.scroll
+        sv.scroll_y = 1
+        if target is not None:   # abre en la semana tocada
+            Clock.schedule_once(lambda *_: sv.scroll_to(target, padding=dp(12), animate=False), .15)
+
+    def _entry(self, r, photos, first=False, last=False):
+        from kivy.uix.scrollview import ScrollView
+        code = r["bbch_code"]
+        bg, fg = theme.stage_colors(code)
+        row = BoxLayout(size_hint_y=None, spacing=dp(8))
+        rail = Widget(size_hint_x=None, width=dp(26))
+
+        def draw_rail(w, *_):
+            from kivy.graphics import Color, Ellipse, Rectangle
+            w.canvas.clear()
+            with w.canvas:
+                Color(*c(theme.LEAF, .35))
+                top = w.top - (dp(22) if first else 0)
+                bot = w.y if not last else w.top - dp(22)
+                Rectangle(pos=(w.center_x - dp(1.2), bot), size=(dp(2.4), max(0, top - bot)))
+                Color(*fg)
+                Ellipse(pos=(w.center_x - dp(9), w.top - dp(31)), size=(dp(18), dp(18)))
+                Color(*bg)
+                Ellipse(pos=(w.center_x - dp(5.5), w.top - dp(27.5)), size=(dp(11), dp(11)))
+
+        # Se dibuja en el cuadro siguiente: durante el armado de la lista el alto y la
+        # posición cambian por partes y un dibujo inmediato quedaba con valores viejos.
+        redraw = Clock.create_trigger(lambda dt: draw_rail(rail))
+        rail.bind(pos=redraw, size=redraw)
+        row.add_widget(rail)
+        from kivy.factory import Factory
+        card = Factory.PaperCard()
+        card.padding = (dp(12), dp(10))
+        card.spacing = dp(6)
+        d = _dt.date.fromisoformat(r["start_date"])
+        head = MDBoxLayout(adaptive_height=True, spacing=dp(8))
+        head.add_widget(MDLabel(text=f"{ph.week_short(r)} · {d.day} {ph.MESES[d.month - 1][:3]} {d.year}",
+                                font_style="Subtitle2", bold=True, adaptive_height=True,
+                                theme_text_color="Custom", text_color=c(theme.INK)))
+        tag = Tag(text=f"BBCH {ph.code_str(code)}" if code is not None else "Sin estado",
+                  bg=bg, fg=fg, pos_hint={"center_y": .5})
+        head.add_widget(tag)
+        card.add_widget(head)
+        if code is not None:
+            card.add_widget(MDLabel(text=r["bbch_label"] or ph.bbch_label(code), font_style="Caption",
+                                    adaptive_height=True, theme_text_color="Custom",
+                                    text_color=c(theme.MUTED)))
+        if photos:
+            strip = BoxLayout(size_hint_x=None, spacing=dp(6))
+            strip.bind(minimum_width=strip.setter("width"))
+            for p in photos:
+                holder = ButtonBox(size_hint=(None, None), size=(dp(104), dp(104)))
+                holder.add_widget(thumb_widget(p["path"], 320))
+                holder.bind(on_release=lambda *_, path=p["path"]: app().media.open(path, "image/jpeg"))
+                strip.add_widget(holder)
+            sv = ScrollView(size_hint_y=None, height=dp(106), do_scroll_y=False, bar_width=dp(3))
+            sv.add_widget(strip)
+            card.add_widget(sv)
+        else:
+            card.add_widget(MDLabel(text="Sin fotos esta semana", font_style="Caption", adaptive_height=True,
+                                    theme_text_color="Custom", text_color=c(theme.BERRY)))
+        if (r["notes"] or "").strip():
+            card.add_widget(MDLabel(text=r["notes"].strip(), font_style="Body2", adaptive_height=True,
+                                    theme_text_color="Custom", text_color=c(theme.INK)))
+        edit = MDFlatButton(text="ABRIR REGISTRO", theme_text_color="Custom", text_color=c(theme.LEAF_DARK),
+                            pos_hint={"right": 1})
+        edit.bind(on_release=lambda *_: app().open_observation(self.variety_id, r["week_id"]))
+        card.add_widget(edit)
+        row.add_widget(card)
+        card.bind(height=lambda w, h: setattr(row, "height", h + dp(12)))
+        return row
+
+
+class ButtonBox(ButtonBehavior, BoxLayout):
+    """Contenedor tocable (miniaturas de la línea de tiempo)."""
+
+
 class VarietyScreen(SectorIrrigationMixin, MDScreen):
     variety_id = NumericProperty(0)
     METRICS = ("historical_yield", "projected_yield", "basal_canes", "laterals")
@@ -2591,7 +2758,8 @@ class PreviewTab(MDScreen):
     MAX_TILES = 30
 
     def _open_cell(self, cell):
-        app().open_observation(cell["variety_id"], cell["week_id"])
+        """Tocar una variedad (ficha o celda): su línea de tiempo con todas las fotos."""
+        app().open_timeline(cell["variety_id"], cell["week_id"])
 
     def _build_visual(self, sm):
         """Semanal: una ficha por variedad (foto + estado). Por variedad: una ficha por
