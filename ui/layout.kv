@@ -2946,8 +2946,68 @@
                         id: spark
                         size_hint_y: None
                         height: dp(110)
+                    BoxLayout:
+                        id: film_box
+                        size_hint_y: None
+                        height: dp(118)
+                        ScrollView:
+                            id: film_scroll
+                            do_scroll_y: False
+                            bar_width: dp(3)
+                            BoxLayout:
+                                id: film
+                                size_hint_x: None
+                                width: self.minimum_width
+                                spacing: dp(8)
+                                padding: dp(2), dp(4)
                 MDBoxLayout:
                     id: entries
                     orientation: "vertical"
                     adaptive_height: True
                     spacing: 0
+
+
+<FilmFrame>:
+    orientation: "vertical"
+    size_hint_x: None
+    width: dp(84)
+    spacing: dp(3)
+    canvas.before:
+        Color:
+            rgba: c(theme.BERRY) if root.selected else (0, 0, 0, 0)
+        Line:
+            rounded_rectangle: (self.x - dp(2), self.top - dp(88), self.width + dp(4), dp(88), dp(12))
+            width: dp(1.8)
+    BoxLayout:
+        id: pic
+        size_hint_y: None
+        height: dp(84)
+        opacity: 1 if root.state == "normal" else .7
+    BoxLayout:
+        size_hint_y: None
+        height: dp(18)
+        spacing: dp(4)
+        Widget:
+        Widget:
+            size_hint: None, None
+            size: dp(9), dp(9)
+            pos_hint: {"center_y": .5}
+            canvas:
+                Color:
+                    rgba: root.dot
+                Ellipse:
+                    pos: self.pos
+                    size: self.size
+                Color:
+                    rgba: c(theme.LEAF_DARK, .4)
+                Line:
+                    circle: (self.center_x, self.center_y, self.width / 2)
+                    width: dp(.8)
+        Label:
+            text: root.label
+            font_size: "11sp"
+            bold: True
+            color: c(theme.BERRY) if root.selected else c(theme.LEAF_DARK)
+            size_hint_x: None
+            width: self.texture_size[0]
+        Widget:

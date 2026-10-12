@@ -1819,14 +1819,21 @@ class TimelineScreen(MDScreen):
         n_photos = 0
         box = self.ids.entries
         fast_clear(box)
+        film = self.ids.film
+        fast_clear(film)
+        self._entries, self._frames = {}, {}
         target = None
         for i, r in enumerate(rows):
             photos = a.db.list_photos(r["id"])
             n_photos += len(photos)
             entry = self._entry(r, photos, first=i == 0, last=i == len(rows) - 1)
             box.add_widget(entry)
+            self._entries[r["week_id"]] = entry
+            film.add_widget(self._frame(r, photos))
             if week_id is not None and r["week_id"] == week_id:
                 target = entry
+        self.ids.film_box.height = dp(118) if rows else 0
+        self.ids.film_box.opacity = 1 if rows else 0
         if not rows:
             box.add_widget(MDLabel(text="Aún no hay registros de esta variedad en la temporada.",
                                    font_style="Caption", adaptive_height=True, halign="center",
@@ -1842,7 +1849,47 @@ class TimelineScreen(MDScreen):
         sv = self.ids.scroll
         sv.scroll_y = 1
         if target is not None:   # abre en la semana tocada
-            Clock.schedule_once(lambda *_: sv.scroll_to(target, padding=dp(12), animate=False), .15)
+            Clock.schedule_once(lambda *_: self.jump(week_id, animate=False), .15)
+
+    # ---- tira de miniaturas (una por semana)
+    def _frame(self, r, photos):
+        """Miniatura de la semana (foto de detalle o general) con solo «S38» debajo."""
+        main = (next((p for p in photos if p["kind"] == "detail" and p["is_primary"]), None)
+                or next((p for p in photos if p["is_primary"]), None) or (photos[0] if photos else None))
+        frame = FilmFrame(label=ph.week_short(r), week_id=r["week_id"])
+        frame.ids.pic.add_widget(thumb_widget(main["path"] if main else None, 240, icon="camera-off-outline"))
+        bg, _fg = theme.stage_colors(r["bbch_code"])
+        frame.dot = bg if r["bbch_code"] is not None else c("#FFFFFF", .6)
+        frame.bind(on_release=lambda w: self.jump(w.week_id))
+        self._frames[r["week_id"]] = frame
+        return frame
+
+    def jump(self, week_id, animate=True):
+        """Baja (o sube) hasta esa semana en el detalle y la destaca en la tira."""
+        entry = getattr(self, "_entries", {}).get(week_id)
+        if entry is None:
+            return
+        for wid, f in self._frames.items():
+            f.selected = wid == week_id
+        sv = self.ids.scroll
+        content = sv.children[0]
+        span = content.height - sv.height
+        if span > 0:   # la semana arriba de la pantalla (no apenas asomada abajo)
+            top = content.to_widget(*entry.to_window(entry.x, entry.top))[1]
+            y = max(0.0, min(1.0, (top + dp(8) - sv.height) / span))
+            from kivy.animation import Animation
+            Animation.cancel_all(sv, "scroll_y")
+            if animate:
+                Animation(scroll_y=y, d=.35, t="out_cubic").start(sv)
+            else:
+                sv.scroll_y = y
+        frame = self._frames.get(week_id)
+        if frame is not None:
+            self.ids.film_scroll.scroll_to(frame, padding=dp(40), animate=animate)
+        from kivy.animation import Animation
+        card = entry.children[0]
+        Animation.cancel_all(card, "opacity")
+        (Animation(opacity=.55, d=.12) + Animation(opacity=1, d=.35)).start(card)
 
     def _entry(self, r, photos, first=False, last=False):
         from kivy.uix.scrollview import ScrollView
@@ -1910,6 +1957,14 @@ class TimelineScreen(MDScreen):
         row.add_widget(card)
         card.bind(height=lambda w, h: setattr(row, "height", h + dp(12)))
         return row
+
+
+class FilmFrame(ButtonBehavior, BoxLayout):
+    """Cuadro de la tira de la línea de tiempo: miniatura + semana."""
+    label = StringProperty()
+    week_id = NumericProperty(0)
+    selected = BooleanProperty(False)
+    dot = ColorProperty(c("#FFFFFF"))
 
 
 class ButtonBox(ButtonBehavior, BoxLayout):
