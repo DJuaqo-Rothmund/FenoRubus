@@ -105,21 +105,12 @@ def _title(ti) -> str:
 
 
 def edit(ti, state: dict | None = None) -> None:
-    """Abre el cuadro nativo con el texto del campo; al aceptar, lo devuelve."""
+    """Abre el cuadro nativo (clase Java NativeInput) con el texto del campo; al aceptar,
+    el texto vuelve al campo."""
+    from jnius import PythonJavaClass, autoclass, java_method  # type: ignore
+
     state = state if state is not None else {}
-    from android.runnable import run_on_ui_thread  # type: ignore
-    from jnius import PythonJavaClass, autoclass, cast, java_method  # type: ignore
-
-    Activity = autoclass("org.kivy.android.PythonActivity").mActivity
-    Builder = autoclass("android.app.AlertDialog$Builder")
-    EditText = autoclass("android.widget.EditText")
-    String = autoclass("java.lang.String")
-    FrameLayout = autoclass("android.widget.FrameLayout")
-    WindowParams = autoclass("android.view.WindowManager$LayoutParams")
     flt = getattr(ti, "input_filter", None)
-
-    def cs(text):
-        return cast("java.lang.CharSequence", String(text))
 
     def deliver(text: str):
         if flt == "int":
@@ -128,62 +119,26 @@ def edit(ti, state: dict | None = None) -> None:
             text = "".join(ch for ch in text.replace(",", ".") if ch.isdigit() or ch in ".-")
         ti.text = text
 
-    class Click(PythonJavaClass):
-        __javainterfaces__ = ["android/content/DialogInterface$OnClickListener"]
+    class Callback(PythonJavaClass):
+        __javainterfaces__ = ["org/rubus/fenorubus/NativeInput$Callback"]
         __javacontext__ = "app"
 
-        def __init__(self, fn):
-            super().__init__()
-            self.fn = fn
-
-        @java_method("(Landroid/content/DialogInterface;I)V")
-        def onClick(self, dialog, which):  # noqa: N802
-            try:
-                self.fn()
-            finally:
-                _alive.clear()
-
-    # Los listeners Java se crean en el hilo de Kivy (desde otros hilos pyjnius no
-    # encuentra las clases de la app); Android los llama después en su hilo de interfaz.
-    box: dict = {}
-
-    def ok():
-        text = box["field"].getText().toString()
-        Clock.schedule_once(lambda *_: deliver(text), 0)
-
-    ok_l, cancel_l = Click(ok), Click(lambda: None)
-    _alive[:] = [ok_l, cancel_l]
-
-    @run_on_ui_thread
-    def show():
-        try:
-            _show()
+        @java_method("()V")
+        def onShown(self):  # noqa: N802
             state["shown"] = True
-        except Exception as exc:  # noqa: BLE001 - se informa y se usa el teclado de la app
-            state["error"] = f"{type(exc).__name__}: {exc}"
 
-    def _show():
-        field = box["field"] = EditText(Activity)
-        field.setInputType(input_type_for(ti))
-        field.setText(cs(ti.text or ""))
-        field.setSelection(field.getText().length())
-        if ti.multiline:
-            field.setMinLines(3)
-            field.setMaxLines(8)
-        else:
-            field.setSingleLine(True)
-        pad = int(20 * Activity.getResources().getDisplayMetrics().density)
-        frame = FrameLayout(Activity)
-        frame.setPadding(pad, pad // 2, pad, 0)
-        frame.addView(field)
-        builder = Builder(Activity)
-        builder.setTitle(cs(_title(ti)))
-        builder.setView(frame)
-        builder.setPositiveButton(cs("Aceptar"), ok_l)
-        builder.setNegativeButton(cs("Cancelar"), cancel_l)
-        dialog = builder.create()
-        dialog.getWindow().setSoftInputMode(WindowParams.SOFT_INPUT_STATE_ALWAYS_VISIBLE)
-        dialog.show()
-        field.requestFocus()
+        @java_method("(Ljava/lang/String;)V")
+        def onResult(self, text):  # noqa: N802
+            Clock.schedule_once(lambda *_: deliver(str(text)), 0)
 
-    show()
+        @java_method("(Ljava/lang/String;)V")
+        def onError(self, error):  # noqa: N802
+            state["error"] = str(error)
+
+    # El callback se crea en el hilo de Kivy (desde otros hilos pyjnius no encuentra las
+    # clases de la app) y se mantiene vivo mientras el cuadro está abierto.
+    cb = Callback()
+    _alive[:] = [cb]
+    NativeInput = autoclass("org.rubus.fenorubus.NativeInput")
+    activity = autoclass("org.kivy.android.PythonActivity").mActivity
+    NativeInput.show(activity, _title(ti), ti.text or "", input_type_for(ti), bool(ti.multiline), cb)

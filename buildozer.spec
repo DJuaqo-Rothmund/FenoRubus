@@ -94,6 +94,10 @@ android.extra_manifest_xml = ./android/extra_manifest.xml
 # (list) Recursos Android propios y tema de la app: en Android 12+ el splash del sistema
 # (ícono en grande) queda invisible y con el color del presplash: una sola pantalla de inicio.
 android.add_resources = android/res
+
+# (list) Código Java propio: cuadro de texto nativo (teclado del teléfono con dictado y
+# autocorrector), armado en Java para no depender de llamadas sueltas desde Python.
+android.add_src = android/src
 android.apptheme = @style/PhenoTheme
 
 # (list) Dependencias Gradle: Google Identity Services (autorización de Google Drive).
