@@ -3012,7 +3012,11 @@ class ReportsTab(MDScreen):
             vs = a.db.list_varieties()
             self.sel_variety = vs[0] if vs else None
         trial = a.db.is_trial
-        card = self.ids.trial_card
+        # self.ids guarda referencias DÉBILES: al quitar la tarjeta de la pantalla se
+        # liberaba y el refresco siguiente fallaba («weakly-referenced object…»).
+        card = getattr(self, "_trial_card", None)
+        if card is None:
+            card = self._trial_card = self.ids.trial_card.__self__
         if trial and card.parent is None:
             self._card_parent.add_widget(card, index=self._card_index)
         elif not trial and card.parent is not None:
