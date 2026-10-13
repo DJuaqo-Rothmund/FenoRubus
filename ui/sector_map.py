@@ -18,7 +18,8 @@ from pathlib import Path
 
 from kivy.clock import Clock
 from kivy.core.text import Label as CoreLabel
-from kivy.graphics import Color, Ellipse, Line, Mesh, PopMatrix, PushMatrix, Rectangle, Translate
+from kivy.graphics import (Color, Ellipse, InstructionGroup, Line, Mesh, PopMatrix, PushMatrix,
+                           Rectangle, Translate)
 from kivy.graphics.tesselator import TYPE_POLYGONS, WINDING_ODD, Tesselator
 from kivy.metrics import dp, sp
 from kivy.properties import BooleanProperty, DictProperty, NumericProperty, StringProperty
@@ -34,6 +35,8 @@ EQUIPO_RAMP = {
     3: ("#93C0EC", "#163F78"),   # azules
     4: ("#A3D88F", "#235A20"),   # verdes
 }
+# Destello neón del sector elegido (por equipo de riego).
+NEON = {1: "#FF3B3B", 2: "#FFC21A", 3: "#2E9BFF", 4: "#36E05A"}
 EMPTY = "#E6E8E3"       # sector sin datos: su color, muy desvaído hacia este gris
 N_SECTORS = 10
 
@@ -52,6 +55,28 @@ def sector_color(equipo, sector, faded: bool = False):
         rgb = [x * .14 + e * .86 for x, e in zip(rgb, _hex(EMPTY))]
     lum = .299 * rgb[0] + .587 * rgb[1] + .114 * rgb[2]
     return [*rgb, 1.0], (lum < .55 and not faded)
+
+
+def _strip(pts, width):
+    """Trazo grueso como Mesh de cuadriláteros (admite transparencia sin usar el stencil,
+    a diferencia de Line). pts = [(x, y), …]."""
+    verts, idx, hw = [], [], width / 2
+    for (x0, y0), (x1, y1) in zip(pts, pts[1:]):
+        dx, dy = x1 - x0, y1 - y0
+        ln = math.hypot(dx, dy)
+        if ln < 1e-6:
+            continue
+        nx, ny = -dy / ln * hw, dx / ln * hw
+        ex, ey = dx / ln * hw * .5, dy / ln * hw * .5      # un poco de solape en las uniones
+        n = len(verts) // 4
+        verts += [x0 - ex + nx, y0 - ey + ny, 0, 0, x0 - ex - nx, y0 - ey - ny, 0, 0,
+                  x1 + ex - nx, y1 + ey - ny, 0, 0, x1 + ex + nx, y1 + ey + ny, 0, 0]
+        idx += [n, n + 1, n + 2, n, n + 2, n + 3]
+    return verts, idx
+
+
+def _mix(rgb, other, k):
+    return [a + (b - a) * k for a, b in zip(rgb, other)]
 
 
 def equipo_chip(equipo):
@@ -312,13 +337,24 @@ class SectorMap(StencilView):
                     Ellipse(pos=(ex - dp(1), ey - dp(1)), size=(r * 2 + dp(2), r * 2 + dp(2)))
                     Color(1, 1, 1, 1)
                     Ellipse(pos=(ex, ey), size=(r * 2, r * 2))
+            # Sector elegido: contorno fino en el tono oscuro de su equipo y un destello
+            # neón que lo recorre (se anima aparte, ver _neon_tick).
+            self._sel_paths = []
             if sel in outlines:
-                Color(*c(theme.INK))
+                eq = info[sel]["equipo"]
+                Color(*_hex(EQUIPO_RAMP.get(eq, ("#999999", "#333333"))[1]), 1)
                 for pts in outlines[sel]:
-                    Line(points=pts, close=True, width=dp(3.6))
-                Color(1, 1, 1, 1)
+                    Line(points=pts, close=True, width=dp(1.3))
                 for pts in outlines[sel]:
-                    Line(points=pts, close=True, width=dp(1.4))
+                    xy = [(pts[k], pts[k + 1]) for k in range(0, len(pts), 2)] + [(pts[0], pts[1])]
+                    cum = [0.0]
+                    for (x0, y0), (x1, y1) in zip(xy, xy[1:]):
+                        cum.append(cum[-1] + math.hypot(x1 - x0, y1 - y0))
+                    if cum[-1] > 1:
+                        self._sel_paths.append((xy, cum))
+                self._neon_rgb = _hex(NEON.get(eq, "#FFFFFF"))
+            self._neon = InstructionGroup()      # dentro del Translate del plano
+            self.canvas.add(self._neon)
             if self.rotate:          # norte
                 nx, ny = w - dp(26), h - dp(26)
                 Color(*c(theme.LEAF_DARK))
@@ -328,6 +364,78 @@ class SectorMap(StencilView):
                 tex = self._north()
                 Rectangle(texture=tex, size=tex.size, pos=(nx - tex.width / 2, ny + dp(6)))
             PopMatrix()
+        ev = getattr(self, "_neon_ev", None)
+        if self._sel_paths and ev is None:
+            self._neon_t = 0.0
+            self._neon_ev = Clock.schedule_interval(self._neon_tick, 1 / 30)
+        elif not self._sel_paths and ev is not None:
+            ev.cancel()
+            self._neon_ev = None
+        self._neon_tick(0)
+
+    # Destello: recorre el contorno en LOOP_S segundos, con una cola que se desvanece.
+    LOOP_S, TAIL, PIECES = 2.4, .35, 12
+
+    @staticmethod
+    def _at(xy, cum, d):
+        import bisect
+        i = max(1, min(len(cum) - 1, bisect.bisect_left(cum, d)))
+        seg = cum[i] - cum[i - 1] or 1
+        k = (d - cum[i - 1]) / seg
+        (x0, y0), (x1, y1) = xy[i - 1], xy[i]
+        return x0 + (x1 - x0) * k, y0 + (y1 - y0) * k, i
+
+    def _sub(self, xy, cum, d0, d1):
+        """Tramo del contorno entre las distancias d0 y d1 (d1 > d0, con vuelta)."""
+        total = cum[-1]
+        out = []
+        while d0 < d1:
+            a = d0 % total
+            b = min(d1 - d0 + a, total)
+            x, y, i = self._at(xy, cum, a)
+            pts = [(x, y)]
+            while i < len(cum) and cum[i] < b:
+                pts.append(xy[i])
+                i += 1
+            x, y, _i = self._at(xy, cum, b)
+            pts.append((x, y))
+            out.append(pts)
+            d0 += b - a
+        return out
+
+    def _neon_tick(self, dt):
+        if self.parent is None and getattr(self, "_neon_ev", None) is not None:
+            self._neon_ev.cancel()
+            self._neon_ev = None
+            return False
+        g = getattr(self, "_neon", None)
+        if g is None:
+            return
+        self._neon_t = (getattr(self, "_neon_t", 0.0) + dt) % self.LOOP_S
+        g.clear()
+        if not self._sel_paths:
+            return
+        rgb = self._neon_rgb
+        core = _mix(rgb, [1, 1, 1], .55)
+        phase = self._neon_t / self.LOOP_S
+        for xy, cum in self._sel_paths:
+            total = cum[-1]
+            tail = total * self.TAIL
+            head = phase * total + tail
+            step = tail / self.PIECES
+            for p in range(self.PIECES):
+                k = (p + 1) / self.PIECES            # 0 cola … 1 cabeza
+                for pts in self._sub(xy, cum, head - tail + p * step, head - tail + (p + 1) * step):
+                    for width, color, alpha in ((dp(9), rgb, .2), (dp(5), rgb, .42),
+                                                (dp(2.2), core, 1.0)):
+                        verts, idx = _strip(pts, width)
+                        if verts:
+                            g.add(Color(*color, alpha * k * k))
+                            g.add(Mesh(vertices=verts, indices=idx, mode="triangles"))
+            x, y, _i = self._at(xy, cum, head % total)       # cabeza encendida
+            for r, color, alpha in ((dp(7), rgb, .28), (dp(4.2), rgb, .55), (dp(2.4), [1, 1, 1], 1)):
+                g.add(Color(*color, alpha))
+                g.add(Ellipse(pos=(x - r, y - r), size=(2 * r, 2 * r)))
 
     def _north(self):
         if "_N" not in self._textures:
