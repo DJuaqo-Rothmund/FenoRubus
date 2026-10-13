@@ -1537,6 +1537,7 @@ def test_splash_clock_ends_at_logo_time():
     """Logo animado: al terminar de cargar, las manijas quedan exactas en las 10:10 del
     logo, sin pasarse ni retroceder, y siempre con un margen para acomodar la hora."""
     import json
+    pytest.importorskip("kivy")                  # el CI de pruebas no instala Kivy
     import ui.splash_anim as sa
     o = sa.LogoAnim.__new__(sa.LogoAnim)
     with open(os.path.join(sa.DIR, "layout.json"), encoding="utf-8") as f:
