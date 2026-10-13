@@ -523,7 +523,16 @@ def form_dialog(title: str, content, on_ok, ok_text: str = "GUARDAR"):
         MDFlatButton(text="CANCELAR", on_release=lambda *_: dialog.dismiss()),
         MDFlatButton(text=ok_text, theme_text_color="Custom", text_color=c(theme.LEAF_DARK),
                      on_release=_ok)])
+
+    def fit(*_):
+        # KivyMD 1.2 mide el diálogo una sola vez al abrir, antes de que los campos tomen
+        # su alto final: el título quedaba encima del formulario. Se vuelve a medir.
+        dialog.update_height()
+        Clock.schedule_once(lambda *_: setattr(dialog, "height", dialog.ids.container.height), 0)
+
+    content.bind(height=fit)
     dialog.open()
+    Clock.schedule_once(fit, .05)
     return dialog
 
 
@@ -874,17 +883,96 @@ class SectorRow(GlassButton):
     screen = ObjectProperty(None, allownone=True)
 
 
-def unit_dialog(on_saved=None):
-    """Nuevo sector de predio: se guarda como «Equipo de riego n, sector m» con su variedad."""
+def sector_map_block(box, plan, status, selected, on_select, describe, dot_text=""):
+    """Plano del predio con su desplegable «Ver: Vista general / Equipo n · Sector m»
+    (elegir un sector lo acerca en el mismo plano) y la leyenda por equipo de riego.
+    describe(sid) -> subtítulo de cada sector en el desplegable. Devuelve el plano."""
+    from kivy.factory import Factory
+    from kivy.uix.stacklayout import StackLayout
+    from ui.sector_map import SectorMap, equipo_chip
+    names = {s["id"]: f"Equipo {s['equipo']} · Sector {s['sector']}" for s in plan["sectors"]}
+    pick = Factory.SegButton(text="Ver: vista general del predio", size_hint_y=None, height=dp(40),
+                             font_size="14sp")
+    mp = SectorMap(plan, on_select=on_select, size_hint_y=None, height=dp(200))
+    mp.status, mp.selected = status, selected
+    mp.bind(width=lambda w, v: setattr(w, "height", max(dp(200), v * plan["h"] / plan["w"] * 1.1)))
+
+    def show(sid):
+        mp.focus(sid)
+        pick.text = f"Ver: {names[sid]}" if sid else "Ver: vista general del predio"
+        pick.selected = bool(sid)
+        if sid:
+            mp.selected = sid
+            on_select(sid)
+
+    def open_menu(*_):
+        items = [("Vista general", "Todo el predio", lambda: show(""), c(theme.LEAF_SOFT))]
+        for sec in plan["sectors"]:
+            items.append((names[sec["id"]], describe(sec["id"]),
+                          lambda sid=sec["id"]: show(sid), equipo_chip(sec["equipo"])[0]))
+        pick_dialog("Elegir sector", items)
+
+    pick.bind(on_release=open_menu)
+    box.add_widget(pick)
+    box.add_widget(mp)
+    legend = StackLayout(size_hint_y=None, spacing=dp(6))
+    legend.bind(minimum_height=legend.setter("height"))
+    for eq in sorted({s["equipo"] for s in plan["sectors"]}):
+        col, light = equipo_chip(eq)
+        legend.add_widget(StageChip(text=f"Equipo {eq}", bg=col,
+                                    fg=c("#FFFFFF") if light else c(theme.INK)))
+    legend.add_widget(StageChip(text="Desvaído: sin datos", bg=c("#EEF0EC"), fg=c(theme.MUTED)))
+    if dot_text:
+        legend.add_widget(StageChip(text=f"• {dot_text}", bg=c("#FFFFFF"), fg=c(theme.INK)))
+    box.add_widget(legend)
+    return mp
+
+
+def no_map_card(box, name: str) -> None:
+    """Predio sin plano cargado: aviso amable (el resto de la pantalla sigue igual)."""
+    card = MDBoxLayout(orientation="vertical", adaptive_height=True, spacing=dp(4),
+                       padding=(dp(14), dp(12)), md_bg_color=c(theme.LEAF_SOFT, .35),
+                       radius=[dp(16)])
+    card.add_widget(MDIcon(icon="map-search-outline", font_size="34sp", halign="center",
+                           size_hint_y=None, height=dp(40), theme_text_color="Custom",
+                           text_color=c(theme.LEAF)))
+    card.add_widget(MDLabel(text=f"El plano de {name} aún va en camino", halign="center",
+                            font_style="Subtitle1", bold=True, adaptive_height=True,
+                            theme_text_color="Custom", text_color=c(theme.LEAF_DARK)))
+    card.add_widget(MDLabel(text="Todavía no hay mapa cargado para este predio. Estamos "
+                                 "trazando sus sectores: llegará en una próxima actualización. "
+                                 "Mientras tanto, todo funciona con la lista de siempre.",
+                            halign="center", font_style="Caption", adaptive_height=True,
+                            theme_text_color="Custom", text_color=c(theme.MUTED)))
+    box.add_widget(card)
+
+
+def year_field(after, text=""):
+    """Campo «Año de plantación» justo debajo de `after` (fichas de predio)."""
+    from kivy.factory import Factory
+    f = Factory.Field(hint_text="Año de plantación (opcional)", input_filter="int",
+                      max_text_length=4, text=str(text or ""))
+    box = after.parent
+    box.add_widget(f, index=box.children.index(after))
+    return f
+
+
+def unit_dialog(on_saved=None, sector: int = 0, irrigation: int = 0):
+    """Nuevo sector de predio: se guarda como «Equipo de riego n, sector m» con su
+    variedad, año de plantación y código. Desde el plano llega con equipo y sector."""
     a = app()
     form = VarietyForm()
     form.ids.name.hint_text = "Variedad"
-    form.ids.code.hint_text = "Código de la variedad (opcional, va en el nombre de las fotos)"
+    form.ids.code.hint_text = "Código (opcional, va en las fotos)"
+    year = year_field(form.ids.code)
+    form.sector, form.irrigation = sector or 0, irrigation or 0
+    form._sync_location_buttons()
 
     def ok(f):
         try:
             a.db.save_unit(f.ids.name.text, f.ids.code.text.strip(),
-                           f.sector or None, f.irrigation or None)
+                           f.sector or None, f.irrigation or None,
+                           plant_year=year.text.strip() or None)
         except ValueError as exc:
             a.toast(str(exc))
             return False
@@ -894,40 +982,144 @@ def unit_dialog(on_saved=None):
             on_saved()
         a.refresh_home()
 
-    form_dialog("Nuevo sector", form, ok, "AGREGAR")
+    form_dialog("Crear sector" if sector and irrigation else "Nuevo sector", form, ok, "AGREGAR")
 
 
 class SectorsScreen(MDScreen):
     """Predio: sectores (variedad + sector + equipo de riego) a muestrear esta semana.
-    Se crean aquí mismo (también siguen en Ajustes › Registros)."""
+    Con plano (El Amanecer) se trabaja sobre el mapa: los sectores creados se ven con su
+    color; tocar uno muestra sus variedades (para registrarlas) y tocar uno vacío lo crea
+    (variedad, año de plantación y código). Sin plano, la lista de siempre."""
+    sel = StringProperty("")
 
     def on_pre_enter(self, *_):
         self.refresh()
 
+    def _units(self):
+        a = app()
+        units = sorted(a.db.list_varieties(),
+                       key=lambda v: (v["irrigation"] or 99, v["sector"] or 99, v["name"].lower()))
+        done = {}
+        for v in units:
+            obs = a.db.get_observation(v["id"], a.week["id"])
+            done[v["id"]] = obs["bbch_code"] if obs else None
+        return units, done
+
+    def _row(self, v, code, title=None):
+        a = app()
+        row = SectorRow(variety_id=v["id"], screen=self, done=code is not None,
+                        badge=ph.location_tag(v) or "—", title=title or v["name"],
+                        subtitle=(f"{v.get('cultivar') or 'Sin variedad'} · " if not title else "") + (
+                            f"BBCH {ph.code_str(code)} registrado" if code is not None
+                            else "sin registro esta semana"))
+        row.bind(on_release=lambda w: a.open_observation(w.variety_id, a.week["id"]))
+        return row
+
     def refresh(self):
+        from ui.sector_map import load_map
         a = app()
         ws = a.workspace or {}
         self.ids.bar.title = ws.get("name", "Sectores")
-        units = sorted(a.db.list_varieties(),
-                       key=lambda v: (v["irrigation"] or 99, v["sector"] or 99, v["name"].lower()))
-        box = self.ids.rows
+        units, done = self._units()
+        n_done = sum(code is not None for code in done.values())
+        mbox, box = self.ids.map_box, self.ids.rows
+        fast_clear(mbox)
         fast_clear(box)
-        done = 0
+        plan = load_map(ws.get("code"))
+        self._plan = plan
+        if not plan:
+            no_map_card(mbox, ws.get("name") or "este predio")
+            for v in units:
+                box.add_widget(self._row(v, done[v["id"]]))
+            self.ids.add_btn.text = "+ Nuevo sector"
+            self.ids.hint.text = (f"{ph.week_title(a.week)} · {n_done} de {len(units)} sectores "
+                                  "registrados. Toque un sector para registrarlo." if units else
+                                  "Aún no hay sectores: cree el primero con «+ Nuevo sector» "
+                                  "(variedad, sector y equipo de riego).")
+            return
+        known = {s["id"]: s for s in plan["sectors"]}
+        self._by_sector = {sid: [] for sid in known}
+        loose = []
         for v in units:
-            obs = a.db.get_observation(v["id"], a.week["id"])
-            code = obs["bbch_code"] if obs else None
-            done += code is not None
-            row = SectorRow(variety_id=v["id"], screen=self, done=code is not None,
-                            badge=ph.location_tag(v) or "—", title=v["name"],
-                            subtitle=f"{v.get('cultivar') or 'Sin variedad'} · " + (
-                                f"BBCH {ph.code_str(code)} registrado" if code is not None
-                                else "sin registro esta semana"))
-            row.bind(on_release=lambda w: a.open_observation(w.variety_id, a.week["id"]))
-            box.add_widget(row)
-        self.ids.hint.text = (f"{ph.week_title(a.week)} · {done} de {len(units)} sectores registrados. "
-                              "Toque un sector para registrarlo." if units else
-                              "Aún no hay sectores: cree el primero con «+ Nuevo sector» "
-                              "(variedad, sector y equipo de riego).")
+            sid = f"E{v['irrigation'] or 0}-S{v['sector'] or 0}"
+            (self._by_sector[sid] if sid in known else loose).append(v)
+        self._done = done
+        status = {sid: {"data": True, "dot": any(done[v["id"]] is not None for v in vs)}
+                  for sid, vs in self._by_sector.items() if vs}
+        created = len(status)
+        self.ids.hint.text = (f"{ph.week_title(a.week)} · {created} de {len(known)} sectores creados · "
+                              f"{n_done} de {len(units)} registrados esta semana. Toque un sector "
+                              "del plano: si ya existe, registre sus variedades; si no, créelo.")
+
+        def describe(sid):
+            vs = self._by_sector[sid]
+            return ", ".join(ph.unit_label(v) for v in vs) if vs else "Sin crear · tocar para crearlo"
+
+        if self.sel not in known:
+            self.sel = ""
+        self._map = sector_map_block(mbox, plan, status, self.sel, self.pick, describe,
+                                     "registrado esta semana")
+        self._fill(self.sel)
+        if loose:
+            box.add_widget(MDLabel(text="Otros (sin ubicar en el plano)", font_style="Caption",
+                                   bold=True, adaptive_height=True, theme_text_color="Custom",
+                                   text_color=c(theme.MUTED)))
+            for v in loose:
+                box.add_widget(self._row(v, done[v["id"]]))
+        self.ids.add_btn.text = "+ Nuevo sector (sin plano)"
+
+    def pick(self, sid):
+        """Toque en el plano: muestra el sector y, si aún no existe, abre su creación."""
+        self.sel = sid
+        self._fill(sid)
+        if not self._by_sector.get(sid):
+            self.add_here(sid)
+
+    def _fill(self, sid):
+        box = getattr(self, "_panel", None)
+        if box is None:
+            box = self._panel = MDBoxLayout(orientation="vertical", adaptive_height=True,
+                                            spacing=dp(8))
+        if box.parent is not None:
+            box.parent.remove_widget(box)
+        self.ids.map_box.add_widget(box)
+        fast_clear(box)
+        sec = next((s for s in self._plan["sectors"] if s["id"] == sid), None)
+        if sec is None:
+            box.add_widget(MDLabel(text="Toque un sector del plano (o elíjalo en «Ver») para "
+                                        "registrarlo o crearlo.", font_style="Body2",
+                                   adaptive_height=True, theme_text_color="Custom",
+                                   text_color=c(theme.MUTED)))
+            return
+        box.add_widget(MDLabel(text=f"Equipo de riego {sec['equipo']} · sector {sec['sector']}",
+                               font_style="Subtitle1", bold=True, adaptive_height=True,
+                               theme_text_color="Custom", text_color=c(theme.LEAF_DARK)))
+        info = []
+        if sec.get("ha"):
+            info.append(f"{sec['ha']:.2f} ha".replace(".", ","))
+        if sec.get("hileras"):
+            info.append(f"{sec['hileras']} hileras")
+        if sec.get("variedades"):
+            info.append("plano: " + ", ".join(sec["variedades"]))
+        if info:
+            box.add_widget(MDLabel(text=" · ".join(info), font_style="Caption", adaptive_height=True,
+                                   theme_text_color="Custom", text_color=c(theme.MUTED)))
+        vs = self._by_sector.get(sid) or []
+        for v in vs:
+            box.add_widget(self._row(v, self._done.get(v["id"]), title=ph.unit_label(v)))
+        if not vs:
+            box.add_widget(MDLabel(text="Este sector aún no está creado.", font_style="Body2",
+                                   adaptive_height=True, theme_text_color="Custom",
+                                   text_color=c(theme.BERRY)))
+        from kivy.factory import Factory
+        add = Factory.GhostButton(icon="plus", text="Crear este sector" if not vs else
+                                  "Agregar otra variedad a este sector")
+        add.bind(on_release=lambda *_: self.add_here(sid))
+        box.add_widget(add)
+
+    def add_here(self, sid):
+        sec = next(s for s in self._plan["sectors"] if s["id"] == sid)
+        unit_dialog(on_saved=self.refresh, sector=sec["sector"], irrigation=sec["equipo"])
 
     def add_sector(self):
         unit_dialog(on_saved=self.refresh)
@@ -2029,6 +2221,14 @@ class VarietyScreen(SectorIrrigationMixin, MDScreen):
         self.ids.notes.text = v["notes"] or ""
         self.sector, self.irrigation = v["sector"] or 0, v["irrigation"] or 0
         self._sync_location_buttons()
+        year = getattr(self, "_year", None)
+        if self.predio and year is None:
+            self._year = year_field(self.ids.code)
+        elif not self.predio and year is not None:
+            year.parent.remove_widget(year)
+            self._year = None
+        if self.predio:
+            self._year.text = str(v.get("plant_year") or "")
         self.ids.metrics_title.text = f"PARÁMETROS BIOMÉTRICOS · {ph.season_title(a.season).upper()}"
         m = a.db.get_metrics(variety_id, a.season)
         for k in self.METRICS:
@@ -2081,7 +2281,8 @@ class VarietyScreen(SectorIrrigationMixin, MDScreen):
         try:
             if getattr(self, "predio", False):
                 a.db.save_unit(name, self.ids.code.text.strip(), self.sector or None,
-                               self.irrigation or None, self.variety_id)
+                               self.irrigation or None, self.variety_id,
+                               plant_year=self._year.text.strip() or None)
                 a.db.update_variety(self.variety_id, notes=self.ids.notes.text)
                 name = a.db.get_variety(self.variety_id)["name"]
             else:
@@ -2928,6 +3129,8 @@ class PreviewTab(MDScreen):
         if self.kind == "variety" and self._plan():
             self._build_map(sm, self._plan(), box, span)
             return
+        if self.kind == "variety" and a.db.is_predio:
+            no_map_card(box, (a.workspace or {}).get("name") or "este predio")
         if self.kind == "variety":
             started = sum(1 for r in sm["rows"] if any(cl["code"] is not None or cl["n_photos"]
                                                        for cl in r["cells"]))
@@ -2996,7 +3199,6 @@ class PreviewTab(MDScreen):
         return data, status, loose
 
     def _build_map(self, sm, plan, box, span):
-        from ui.sector_map import SectorMap, equipo_chip
         data, status, loose = self._sector_data(sm, plan)
         self._sectors = data
         active = [sid for sid in data if sid in status]
@@ -3006,31 +3208,17 @@ class PreviewTab(MDScreen):
             latest = max(active, key=lambda sid: (data[sid]["last"] or ((-1, -1), None))[0],
                          default="")
             self.sel_sector = latest
-        mp = SectorMap(plan, on_select=self._select_sector, size_hint_y=None, height=dp(200))
-        mp.status, mp.selected = status, self.sel_sector
-        mp.bind(width=lambda w, v: setattr(w, "height", max(dp(180), v * plan["h"] / plan["w"])))
-        self._map = mp
-        box.add_widget(mp)
-        # Leyenda: un color por equipo de riego (claro = sector 1 … oscuro = sector 10).
-        from kivy.factory import Factory
-        from kivy.uix.stacklayout import StackLayout
-        legend = StackLayout(size_hint_y=None, spacing=dp(6))
-        legend.bind(minimum_height=legend.setter("height"))
-        for eq in sorted({s["equipo"] for s in plan["sectors"]}):
-            col, light = equipo_chip(eq)
-            legend.add_widget(StageChip(text=f"Equipo {eq}", bg=col,
-                                        fg=c("#FFFFFF") if light else c(theme.INK)))
-        legend.add_widget(StageChip(text="Desvaído: sin datos", bg=c("#EEF0EC"), fg=c(theme.MUTED)))
-        if any(st["dot"] for st in status.values()):
-            legend.add_widget(StageChip(text="• con mediciones", bg=c("#FFFFFF"), fg=c(theme.INK)))
-        box.add_widget(legend)
-        zoom = Factory.SegButton(text="Ampliar plano", size_hint=(None, None), height=dp(36),
-                                 font_size="14sp", pos_hint={"center_x": .5})
-        zoom.text_size = (None, None)
-        zoom.texture_update()
-        zoom.width = zoom.texture_size[0] + dp(30)
-        zoom.bind(on_release=lambda *_: self._open_map_full(plan, status))
-        box.add_widget(zoom)
+
+        def describe(sid):
+            d = data[sid]
+            if not d["rows"]:
+                return "Sin variedades"
+            return ", ".join(ph.unit_label(r) for r in d["rows"]) + (
+                f" · {d['records']} reg." if d["records"] else " · sin datos")
+
+        self._map = sector_map_block(box, plan, status, self.sel_sector, self._select_sector,
+                                     describe, "con mediciones"
+                                     if any(st["dot"] for st in status.values()) else "")
         self._sector_box = MDBoxLayout(orientation="vertical", adaptive_height=True, spacing=dp(8))
         box.add_widget(self._sector_box)
         self._fill_sector(self._sector_box, self.sel_sector)
@@ -3095,42 +3283,9 @@ class PreviewTab(MDScreen):
             parts.append(f"último: {cl['week']} · BBCH {ph.code_str(cl['code'])}")
         box.add_widget(MDLabel(text=" · ".join(parts), font_style="Body2", adaptive_height=True,
                                theme_text_color="Custom", text_color=c(theme.INK)))
-        box.add_widget(self._tile_grid(d["rows"], before_open))
-
-    def _open_map_full(self, plan, status):
-        """Plano a pantalla completa (vertical, con zoom) y la ficha del sector abajo."""
-        from kivy.uix.modalview import ModalView
-        from kivy.uix.scrollview import ScrollView
-        from kivymd.uix.button import MDIconButton
-        from ui.sector_map import SectorMap
-        view = ModalView(size_hint=(1, 1), auto_dismiss=True, background_color=(0, 0, 0, .6))
-        root = MDBoxLayout(orientation="vertical", md_bg_color=DIALOG_BG)
-        head = MDBoxLayout(adaptive_height=True, padding=(dp(16), dp(6), dp(6), dp(0)))
-        head.add_widget(MDLabel(text=plan.get("name") or "Plano del predio", font_style="H6",
-                                bold=True, adaptive_height=True, pos_hint={"center_y": .5}))
-        head.add_widget(MDIconButton(icon="close", on_release=lambda *_: view.dismiss()))
-        root.add_widget(head)
-        root.add_widget(MDLabel(text="Dos dedos o doble toque para acercar · un dedo para mover",
-                                font_style="Caption", adaptive_height=True,
-                                padding=(dp(16), 0), theme_text_color="Custom",
-                                text_color=c(theme.MUTED)))
-        card = MDBoxLayout(orientation="vertical", adaptive_height=True, spacing=dp(8),
-                           padding=(dp(16), dp(8)))
-        sv = ScrollView(size_hint_y=None, height=dp(240), do_scroll_x=False, bar_width=dp(3))
-        sv.add_widget(card)
-
-        def pick(sid):
-            self._select_sector(sid)
-            self._fill_sector(card, sid, before_open=view.dismiss)
-            sv.scroll_y = 1
-
-        mp = SectorMap(plan, on_select=pick, rotate=True, zoomable=True)
-        mp.status, mp.selected = status, self.sel_sector
-        root.add_widget(mp)
-        root.add_widget(sv)
-        self._fill_sector(card, self.sel_sector, before_open=view.dismiss)
-        view.add_widget(root)
-        view.open()
+        # Lo que se mide en el sector: cada variedad (con su año de plantación y código).
+        rows = [dict(r, display=ph.unit_label(r)) for r in d["rows"]]
+        box.add_widget(self._tile_grid(rows, before_open))
 
     def _tile(self, row, before_open=None):
         """Frambuesa de la variedad: a color si tiene registros en la temporada."""
@@ -3143,7 +3298,7 @@ class PreviewTab(MDScreen):
             code = None
             sub, col = ("Sin estado registrado" if cells else "Sin registros"), c(theme.BERRY)
         bg, fg = bbch_tag_colors(code)
-        tile = PreviewTile(title=row["name"], subtitle=sub, sub_color=col,
+        tile = PreviewTile(title=row.get("display") or row["name"], subtitle=sub, sub_color=col,
                            badge=f"BBCH {ph.code_str(code)}" if code is not None else "",
                            badge_bg=bg, badge_fg=fg,
                            berry=theme.berry_art(row.get("cultivar") or "", row["name"],

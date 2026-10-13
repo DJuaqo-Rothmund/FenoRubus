@@ -825,12 +825,16 @@
             disabled: root.menu_mode
             padding: dp(16), dp(8), dp(16), dp(4)
             spacing: dp(8)
+            # Ocultos (menú de un solo perfil): alto 0 de verdad. Si solo se deshabilitan,
+            # siguen recibiendo los toques y tapaban la flecha «volver» de la barra.
             SegButton:
                 text: "I+D"
+                height: 0 if root.menu_mode else dp(44)
                 selected: root.profile == "id"
                 on_release: root.set_profile("id")
             SegButton:
                 text: "Predio"
+                height: 0 if root.menu_mode else dp(44)
                 selected: root.profile == "predio"
                 on_release: root.set_profile("predio")
         MDScrollView:
@@ -881,11 +885,17 @@
                 Muted:
                     id: hint
                 MDBoxLayout:
+                    id: map_box
+                    orientation: "vertical"
+                    adaptive_height: True
+                    spacing: dp(10)
+                MDBoxLayout:
                     id: rows
                     orientation: "vertical"
                     adaptive_height: True
                     spacing: dp(8)
                 PrimaryButton:
+                    id: add_btn
                     text: "+ Nuevo sector"
                     on_release: root.add_sector()
                 GhostButton:

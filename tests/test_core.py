@@ -1483,3 +1483,35 @@ def test_ai_trainer_is_shared_between_workspaces(tmp_path):
     g_am = DailyChallenge(am, lambda: clf, sources)       # mismo puntaje y desafíos
     assert g_am.stats()["xp"] == g_nv.stats()["xp"] > 70
     assert g_am.challenges(dt.date(2026, 10, 6)) == g_nv.challenges(dt.date(2026, 10, 6))
+
+
+def test_predio_unit_with_plant_year(tmp_path):
+    """Un sector puede tener la misma variedad plantada en años distintos (otra fuente de
+    datos); el año se conserva al editar sin indicarlo."""
+    from workspaces import Workspaces
+    wss = Workspaces(str(tmp_path))
+    db = wss.open(wss.by_code("AM"))
+    a = db.save_unit("Meeker", "MEE", 1, 1, plant_year=2019)
+    b = db.save_unit("Meeker", "MEE", 1, 1, plant_year=2023)
+    with pytest.raises(ValueError):
+        db.save_unit("Meeker", "", 1, 1, plant_year=2019)
+    with pytest.raises(ValueError):
+        db.save_unit("Heritage", "", 2, 1, plant_year=1800)
+    va, vb = db.get_variety(a), db.get_variety(b)
+    assert va["name"] == "Equipo de riego 1, sector 1" and va["plant_year"] == 2019
+    assert vb["name"] == "Equipo de riego 1, sector 1 · Meeker" and vb["plant_year"] == 2023
+    db.save_unit("Meeker", "MK", 1, 1, variety_id=a)                 # sin año: se conserva
+    assert db.get_variety(a)["plant_year"] == 2019
+    assert ph.unit_label(db.get_variety(a)) == "Meeker · 2019 · MK"
+
+
+def test_am_map_upper_sector_1_1_is_one_piece():
+    """En el plano, el sector 1-1 (equipo 1) es un polígono arriba y otro abajo."""
+    import json
+    from pathlib import Path
+    plan = json.loads((Path(__file__).resolve().parent.parent / "assets" / "maps" / "AM.json")
+                      .read_text(encoding="utf-8"))
+    s11 = next(s for s in plan["sectors"] if s["id"] == "E1-S1")
+    assert len(s11["parts"]) == 2
+    top, low = sorted(s11["parts"], key=lambda p: -max(p[1::2]))
+    assert min(top[1::2]) >= max(low[1::2]) - 1      # separadas por el camino horizontal

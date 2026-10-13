@@ -129,7 +129,7 @@ class SectorMap(StencilView):
     status = DictProperty()
     zoom = NumericProperty(1.0)
 
-    MAX_ZOOM = 6.0
+    MAX_ZOOM = 14.0
 
     def __init__(self, plan: dict, on_select=None, **kw):
         super().__init__(**kw)
@@ -158,6 +158,7 @@ class SectorMap(StencilView):
         self._shift = None
         self._redraw = Clock.create_trigger(self._draw, -1)
         self.bind(pos=self._move)
+        self.bind(size=lambda *_: self.focused and self.focus(self.focused, animate=False))
         self.bind(size=self._redraw, selected=self._redraw,
                   status=self._redraw, zoom=self._redraw, rotate=self._redraw)
 
@@ -207,6 +208,51 @@ class SectorMap(StencilView):
         self._pan[0] = max(-lim_x, min(lim_x, self._pan[0]))
         self._pan[1] = max(-lim_y, min(lim_y, self._pan[1]))
 
+    # ------------------------------------------------------- enfoque (sector)
+    focused = StringProperty("")      # sector enfocado ("" = vista general)
+
+    def focus(self, sid: str = "", animate: bool = True):
+        """Acerca el plano a un sector (o vuelve a la vista general) sin salir de la
+        pantalla. Se anima en ~0,35 s."""
+        self.focused = sid or ""
+        if not self.width or not self.height:
+            Clock.schedule_once(lambda *_: self.focus(sid, animate), 0)
+            return
+        target_zoom, target_pan = 1.0, [0.0, 0.0]
+        rings = [r for i, r, _m, _a in self._parts if i == sid]
+        if rings:
+            old_zoom, old_pan = self.zoom, list(self._pan)
+            self.zoom, self._pan = 1.0, [0.0, 0.0]
+            pts = [self._local(r[k], r[k + 1]) for r in rings for k in range(0, len(r), 2)]
+            xs, ys = [p[0] for p in pts], [p[1] for p in pts]
+            bw, bh = max(xs) - min(xs) or 1, max(ys) - min(ys) or 1
+            target_zoom = max(1.0, min(self.MAX_ZOOM, .62 * min(self.width / bw, self.height / bh)))
+            self.zoom = target_zoom
+            pts = [self._local(r[k], r[k + 1]) for r in rings for k in range(0, len(r), 2)]
+            cx = (min(p[0] for p in pts) + max(p[0] for p in pts)) / 2
+            cy = (min(p[1] for p in pts) + max(p[1] for p in pts)) / 2
+            target_pan = [self.width / 2 - cx, self.height / 2 - cy]
+            self.zoom, self._pan = old_zoom, old_pan
+        ev = getattr(self, "_focus_ev", None)
+        if ev is not None:
+            ev.cancel()
+        if not animate:
+            self.zoom, self._pan = target_zoom, target_pan
+            self._redraw()
+            return
+        start = (self.zoom, list(self._pan))
+        state = {"t": 0.0}
+
+        def step(dt):
+            state["t"] = min(1.0, state["t"] + dt / .35)
+            k = 1 - (1 - state["t"]) ** 3          # sale rápido y frena suave
+            self._pan = [start[1][i] + (target_pan[i] - start[1][i]) * k for i in (0, 1)]
+            self.zoom = start[0] + (target_zoom - start[0]) * k
+            self._redraw()
+            return state["t"] < 1.0
+
+        self._focus_ev = Clock.schedule_interval(step, 1 / 60)
+
     # ---------------------------------------------------------------- dibujo
     def _texture(self, sid):
         if sid not in self._textures:
@@ -237,7 +283,9 @@ class SectorMap(StencilView):
                     for k in range(0, len(v), 4):
                         v[k], v[k + 1] = ts(v[k], v[k + 1])
                     Mesh(vertices=v, indices=idx, mode="triangle_fan")
-            Color(1, 1, 1, .95)
+            # Las líneas van SIEMPRE opacas: una Line con transparencia usa el stencil por
+            # dentro y se saldría del recorte del plano.
+            Color(1, 1, 1, 1)
             outlines = {}
             for sid, ring, _m, _a in self._parts:
                 pts = []
@@ -265,7 +313,7 @@ class SectorMap(StencilView):
                     Color(1, 1, 1, 1)
                     Ellipse(pos=(ex, ey), size=(r * 2, r * 2))
             if sel in outlines:
-                Color(*c(theme.INK, .9))
+                Color(*c(theme.INK))
                 for pts in outlines[sel]:
                     Line(points=pts, close=True, width=dp(3.6))
                 Color(1, 1, 1, 1)
@@ -273,7 +321,7 @@ class SectorMap(StencilView):
                     Line(points=pts, close=True, width=dp(1.4))
             if self.rotate:          # norte
                 nx, ny = w - dp(26), h - dp(26)
-                Color(*c(theme.LEAF_DARK, .85))
+                Color(*c(theme.LEAF_DARK))
                 Line(points=[nx - dp(10), ny, nx + dp(10), ny], width=dp(1.6))
                 Line(points=[nx + dp(4), ny + dp(5), nx + dp(10), ny, nx + dp(4), ny - dp(5)],
                      width=dp(1.6))

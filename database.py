@@ -317,7 +317,8 @@ class Database:
     NEW_COLUMNS = {  # v3: columnas opcionales agregadas a tablas existentes
         "varieties": [("sector", "INTEGER"), ("irrigation", "INTEGER"),
                       ("treatment", "INTEGER"), ("rep", "INTEGER"),   # parcela T1R1…
-                      ("cultivar", "TEXT")],                          # predio: variedad de la unidad
+                      ("cultivar", "TEXT"),                           # predio: variedad de la unidad
+                      ("plant_year", "INTEGER")],                     # predio: año de plantación
         "observations": [("latitude", "REAL"), ("longitude", "REAL"),
                          ("gps_accuracy", "REAL"), ("gps_source", "TEXT")],
         "sampling_weeks": [("skipped", "INTEGER NOT NULL DEFAULT 0")],   # semana no muestreada
@@ -484,7 +485,7 @@ class Database:
 
     def update_variety(self, variety_id: int, **fields: Any) -> None:
         allowed = {"name", "code", "notes", "sort_order", "active", "sector", "irrigation",
-                   "treatment", "rep", "cultivar"}
+                   "treatment", "rep", "cultivar", "plant_year"}
         sets = {k: v for k, v in fields.items() if k in allowed}
         if not sets:
             return
@@ -498,25 +499,37 @@ class Database:
     def is_predio(self) -> bool:
         return (self.workspace or {}).get("profile") == "predio"
 
+    _KEEP = object()
+
     def save_unit(self, cultivar: str, code: str = "", sector: int | None = None,
-                  irrigation: int | None = None, variety_id: int | None = None) -> int:
+                  irrigation: int | None = None, variety_id: int | None = None,
+                  plant_year=_KEEP) -> int:
         """Unidad de predio: se llama «Equipo de riego n, sector m» y la variedad va aparte
-        (la misma variedad puede estar en varios sectores y un sector puede repetirse con
-        otra variedad)."""
+        (la misma variedad puede estar en varios sectores y un sector puede tener varias
+        variedades, o la misma variedad plantada en años distintos). plant_year: año de
+        plantación (sin indicarlo, al editar se conserva el que tenía)."""
         cultivar = (cultivar or "").strip()
         if not cultivar:
             raise ValueError("Indique la variedad.")
         if not sector and not irrigation:
             raise ValueError("Elija el sector y/o el equipo de riego.")
+        if plant_year is self._KEEP:
+            old = self.get_variety(variety_id) if variety_id else None
+            plant_year = old.get("plant_year") if old else None
+        plant_year = int(plant_year) if plant_year else None
+        if plant_year is not None and not 1950 <= plant_year <= 2100:
+            raise ValueError("El año de plantación no es válido.")
         base = ph.unit_name(sector, irrigation)
         dup = self.query_one(
             "SELECT id FROM varieties WHERE active=1 AND IFNULL(sector,0)=? AND IFNULL(irrigation,0)=? "
-            "AND lower(IFNULL(cultivar,''))=lower(?) AND id IS NOT ?",
-            (sector or 0, irrigation or 0, cultivar, variety_id))
+            "AND lower(IFNULL(cultivar,''))=lower(?) AND IFNULL(plant_year,0)=? AND id IS NOT ?",
+            (sector or 0, irrigation or 0, cultivar, plant_year or 0, variety_id))
         if dup:
-            raise ValueError(f"Ya existe «{base}» con la variedad {cultivar}.")
+            raise ValueError(f"Ya existe «{base}» con la variedad {cultivar}"
+                             + (f" ({plant_year})." if plant_year else "."))
         name = base
-        for cand in (base, f"{base} · {cultivar}"):
+        cands = [base, f"{base} · {cultivar}"] + ([f"{base} · {cultivar} {plant_year}"] if plant_year else [])
+        for cand in cands:
             other = self.query_one("SELECT id, active FROM varieties WHERE name=?", (cand,))
             if other is None or other["id"] == variety_id or (not other["active"] and variety_id is None):
                 name = cand
@@ -526,7 +539,7 @@ class Database:
         if variety_id is None:
             variety_id = self.add_variety(name, code=code, sector=sector, irrigation=irrigation)
         self.update_variety(variety_id, name=name, code=code or "", cultivar=cultivar,
-                            sector=sector, irrigation=irrigation, active=1)
+                            sector=sector, irrigation=irrigation, plant_year=plant_year, active=1)
         return variety_id
 
     def migrate_predio_units(self) -> int:

@@ -856,4 +856,5 @@ def report_summary(db, kind: str, season: int, week_id: int | None = None,
             "week_labels": [ph.week_short(w) for w in weeks],
             "rows": [{"variety_id": v["id"], "name": v["name"], "cultivar": v.get("cultivar") or "",
                       "sector": v.get("sector"), "irrigation": v.get("irrigation"),
+                      "plant_year": v.get("plant_year"), "code": v.get("code") or "",
                       "cells": detail[v["id"]]} for v in varieties]}

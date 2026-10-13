@@ -445,6 +445,17 @@ def unit_name(sector, irrigation) -> str:
     return ", ".join(parts)
 
 
+def unit_label(v: dict) -> str:
+    """Variedad de una unidad de predio con su año de plantación y código:
+    «Meeker · 2019 · MEE»."""
+    parts = [v.get("cultivar") or v.get("name") or ""]
+    if v.get("plant_year"):
+        parts.append(str(v["plant_year"]))
+    if v.get("code"):
+        parts.append(v["code"])
+    return " · ".join(p for p in parts if p)
+
+
 def location_tag(variety: dict) -> str:
     """«S1ER2» (sector 1, equipo de riego 2); se omite lo que no esté definido."""
     out = ""
