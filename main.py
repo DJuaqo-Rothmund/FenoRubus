@@ -52,7 +52,15 @@ from ui import theme  # noqa: E402
 
 # Kivy quita la pantalla de carga en su primer cuadro; aquí la quita la app, cuando todo
 # está precargado y el logo de Kivy va en el mismo cuadro que la animación nativa.
-EventLoopBase.remove_android_splash = lambda self, *args: None
+# Función con su nombre real (no lambda): el reloj de Kivy la busca por nombre en el
+# objeto; con una lambda («<lambda>») fallaba en cada apertura.
+
+
+def remove_android_splash(self, *args):
+    """No hace nada: la pantalla de carga la quita splash_native.remove()."""
+
+
+EventLoopBase.remove_android_splash = remove_android_splash
 
 theme.install_palette()  # antes de cargar widgets KivyMD con color
 
