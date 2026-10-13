@@ -1534,8 +1534,8 @@ def test_catalog_code_for_new_sector(tmp_path):
 
 
 def test_splash_clock_ends_at_logo_time():
-    """Logo animado: al terminar de cargar, las manijas quedan exactas en las 10:10 del
-    logo, sin pasarse ni retroceder, y siempre con un margen para acomodar la hora."""
+    """Logo animado: arranca en 9:10 (como el presplash) y en una vuelta del minutero
+    queda exacto en las 10:10 del logo, sin pasarse; la animación dura ~1,2 s."""
     import json
     pytest.importorskip("kivy")                  # el CI de pruebas no instala Kivy
     import ui.splash_anim as sa
@@ -1544,10 +1544,10 @@ def test_splash_clock_ends_at_logo_time():
         o.L = json.load(f)
     assert len(o.L["icons"]) == 5
     m0, h0 = o.L["minute"]["deg"], o.L["hour"]["deg"]
-    for t in (0.0, 0.37, 1.12, 1.16, 2.9, 7.31):
-        end = sa.LogoAnim.finish_time(t)
-        assert end - t >= .25
-        o._finish = {"t": t, "end": end, "done": None, "hour0": o._hour_deg(t)}
-        before, after = o._hands(end - 1e-4), o._hands(end + 1e-4)
-        assert abs((before[0] - m0) % 360) < .5 and abs((before[1] - h0) % 360) < .5
-        assert after == (m0, h0, True)
+    assert o.hands(0) == pytest.approx((m0, h0 + 30))
+    m, h = o.hands(sa.TOTAL_S)
+    assert abs((m - m0) % 360) < 1e-6 and abs(h - h0) < 1e-6
+    assert o.hands(sa.TOTAL_S + 5) == (m, h)          # se queda quieto al terminar
+    assert 1.0 < sa.TOTAL_S < 1.4
+    last_icon = sa.ICON_DELAY + (len(o.L["icons"]) - 1) * sa.ICON_STAGGER + sa.ICON_S
+    assert abs(last_icon - sa.TOTAL_S) < .1           # el último dibujo llega con las 10:10

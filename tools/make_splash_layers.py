@@ -11,7 +11,7 @@ Separa el logo (assets/logo_source.png) en capas para la animación de apertura:
 
 Todo sobre el mismo cuadrado que assets/ui/logo.png (make_ui_assets.load_logo), para que
 la animación calce exacto con el logo fijo. También rehace assets/presplash.png con solo
-la frambuesa y sus manijas en 10:10: lo demás aparece animado al abrir la app.
+la frambuesa y el reloj en 9:10: lo demás aparece animado al abrir la app.
 
     python tools/make_splash_layers.py
 """
@@ -123,9 +123,26 @@ def main():
     with open(os.path.join(OUT, "layout.json"), "w", encoding="utf-8") as f:
         json.dump(layout, f, indent=1)
 
-    # Presplash: solo la frambuesa con las manijas en 10:10 (sin círculo ni dibujos).
-    big_layer = to_square(lab == big)
-    ui.load_logo = lambda size: big_layer.resize((size, size), Image.LANCZOS)
+    # Presplash: solo la frambuesa con el reloj en 9:10 (sin círculo ni dibujos). La
+    # animación arranca desde ahí y en una vuelta del minutero llega a las 10:10 del logo.
+    from PIL import ImageDraw
+    ss = 4
+    berry = Image.open(os.path.join(OUT, "berry.png")).convert("RGBA")
+    hands = Image.new("RGBA", (SIDE * ss, SIDE * ss), (0, 0, 0, 0))
+    dr = ImageDraw.Draw(hands)
+    fu, fv = layout["face"]["u"] * SIDE * ss, (1 - layout["face"]["v"]) * SIDE * ss
+    wid = layout["hand_w"] * SIDE * ss
+    ink = HAND_RGB + (255,)
+    for key, extra in (("hour", 30), ("minute", 0)):
+        r = math.radians(layout[key]["deg"] + extra)
+        ln = layout[key]["len"] * SIDE * ss
+        x1, y1 = fu + math.cos(r) * ln, fv - math.sin(r) * ln
+        dr.line((fu, fv, x1, y1), fill=ink, width=round(wid))
+        dr.ellipse((x1 - wid / 2, y1 - wid / 2, x1 + wid / 2, y1 + wid / 2), fill=ink)
+    d = layout["dot_r"] * SIDE * ss
+    dr.ellipse((fu - d, fv - d, fu + d, fv + d), fill=ink)
+    first = Image.alpha_composite(berry, hands.resize((SIDE, SIDE), Image.LANCZOS))
+    ui.load_logo = lambda size: first.resize((size, size), Image.LANCZOS)
     ui.make_presplash()
     print("Capas en", OUT, "·", len(icons), "dibujos")
 

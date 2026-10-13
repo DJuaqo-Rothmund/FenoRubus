@@ -12,7 +12,6 @@ from __future__ import annotations
 import hashlib
 import os
 import threading
-import time
 from concurrent.futures import ThreadPoolExecutor
 from functools import cached_property
 
@@ -60,8 +59,6 @@ MIME = {".html": "text/html", ".zip": "application/zip", ".sqlite3": "applicatio
 
 class FenoRubusApp(MDApp):
     title = "PhenoRubus"
-    SPLASH_MIN_S = 1.3  # tiempo mínimo visible de la pantalla de inicio
-    BOOT_AFTER_S = 0.9  # se arma la app cuando los dibujos del logo ya casi llegaron
 
     # ------------------------------------------------------------ build
     def build(self):
@@ -282,20 +279,18 @@ class FenoRubusApp(MDApp):
         return self._screen(SettingsScreen, "settings")
 
     def on_start(self):
-        self._t_start = time.monotonic()
-        self.sm.get_screen("splash").animate_in()
-        # Los dibujos del logo llegan a su lugar sin tirones; recién entonces se arma la
-        # app (las manijas siguen marcando la hora mientras tanto).
-        Clock.schedule_once(self._boot, self.BOOT_AFTER_S)
-
-    def _boot(self, *_):
+        # Todo se arma ANTES del primer cuadro: mientras tanto sigue a la vista el presplash
+        # de Android (la misma frambuesa-reloj). Así la animación del logo corre después de
+        # corrido; si se armara durante la animación, el teléfono la congelaba un rato y
+        # luego saltaba de golpe.
         self.home = HomeScreen(name="home")  # el resto de pantallas se crea al primer uso
         self.sm.add_widget(self.home)
         self.home.refresh_current()
-        self.start   # la pantalla de inicio también se arma detrás del logo
-        wait = max(0.0, self.SPLASH_MIN_S - (time.monotonic() - self._t_start))
+        self.start   # la pantalla de inicio también queda lista detrás del logo
         splash = self.sm.get_screen("splash")
-        Clock.schedule_once(lambda *_: splash.finish(self._leave_splash), wait)
+        # Dos cuadros de margen: el primero sube las imágenes del logo a la GPU.
+        Clock.schedule_once(lambda *_: Clock.schedule_once(
+            lambda *_: splash.animate_in(self._leave_splash), 0), 0)
 
     def _leave_splash(self, *_):
         self.sm.transition = FadeTransition(duration=0.25)   # solo logo -> inicio

@@ -3,20 +3,21 @@ ui/splash_anim.py
 =================
 Logo animado de la apertura (capas de tools/make_splash_layers.py):
 
-* El presplash de Android muestra solo la frambuesa-reloj; aquí sigue la misma imagen y
-  aparecen el círculo punteado (girando) y los dibujos chicos del ciclo, que recorren el
-  círculo hasta su lugar, uno tras otro.
-* Mientras la app carga, las manijas avanzan a saltitos como un reloj real (la de las
-  horas, 12 veces más lenta). El tiempo sale del reloj del sistema: si el teléfono se
-  traba un instante, las manijas no se atrasan, saltan a donde deben estar.
-* `finish(listo)`: el minutero completa su vuelta hasta las 10:10 del logo y llama a listo.
+* El presplash de Android muestra la frambuesa-reloj (9:10) mientras la app se arma por
+  completo; recién después corre la animación, de corrido y sin tirones:
+* el círculo punteado aparece girando y los dibujos chicos del ciclo recorren el círculo
+  hasta su lugar, uno tras otro;
+* el minutero da una vuelta a saltitos, como un reloj real, y la manija de la hora avanza
+  una hora: el reloj termina en las 10:10 del logo, justo cuando llega el último dibujo.
+
+El tiempo de la animación avanza por cuadros dibujados (con tope): si el teléfono se
+traba un instante, la animación se pausa en vez de saltar.
 """
 from __future__ import annotations
 
 import json
 import math
 import os
-import time
 
 from kivy.clock import Clock
 from kivy.core.image import Image as CoreImage
@@ -25,9 +26,11 @@ from kivy.uix.widget import Widget
 
 DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "assets", "ui", "splash")
 
-TICK_S = .1            # un «salto» del minutero (1/12 de vuelta)
+TICK_S = .105          # un «salto» del minutero (1/12 de vuelta)
+TOTAL_S = (11 + .45) * TICK_S   # la vuelta completa: termina con el último salto (≈1,2 s)
 RING_S = 1.0           # el círculo aparece girando
-ICON_DELAY, ICON_STAGGER, ICON_S = .1, .09, .8
+ICON_DELAY, ICON_STAGGER, ICON_S = .1, .09, .75   # el último dibujo llega a ≈1,2 s
+MAX_DT = 1 / 24        # una traba larga no adelanta la animación (se pausa)
 ICON_SWEEP = 300       # grados que recorre cada dibujo por el círculo antes de quedar quieto
 
 
@@ -52,34 +55,26 @@ class LogoAnim(Widget):
         rc = self.L["ring"]
         self._icon_deg = [math.degrees(math.atan2(ic["v"] - rc["v"], ic["u"] - rc["u"]))
                           for ic in self.L["icons"]]
-        self._t0 = None
+        self._t = None
         self._ev = None
-        self._finish = None
+        self._done = None
         self.bind(pos=self._draw, size=self._draw)
 
     # ---------------------------------------------------------------- control
-    def start(self):
-        self._t0 = time.monotonic()
+    def start(self, done=None):
+        """Corre la animación completa y luego llama a done()."""
+        self._t, self._done = 0.0, done
         if self._ev is None:
-            self._ev = Clock.schedule_interval(self._draw, 1 / 60)
+            self._ev = Clock.schedule_interval(self._tick, 0)
 
-    def finish(self, done):
-        """Termina la vuelta del minutero en las 10:10 y llama a done()."""
-        if self._t0 is None:
-            done()
-            return
-        t = time.monotonic() - self._t0
-        self._finish = {"t": t, "end": self.finish_time(t), "done": done,
-                        "hour0": self._hour_deg(t)}
-
-    @staticmethod
-    def finish_time(t):
-        """Cuándo termina el salto que deja al minutero de nuevo en su lugar del logo
-        (una vuelta completa = 12 saltos), siempre después de t."""
-        end_step = (int(t / TICK_S) // 12 + 1) * 12
-        while (end_step - 1 + .45) * TICK_S <= t + .25:      # tiempo para acomodar la hora
-            end_step += 12
-        return (end_step - 1 + .45) * TICK_S
+    def _tick(self, dt):
+        self._t = min(TOTAL_S, self._t + min(dt, MAX_DT))
+        self._draw()
+        if self._t >= TOTAL_S:
+            self.stop()
+            done, self._done = self._done, None
+            if done:
+                Clock.schedule_once(lambda *_: done(), .15)
 
     def stop(self):
         if self._ev is not None:
@@ -87,27 +82,17 @@ class LogoAnim(Widget):
             self._ev = None
 
     # ---------------------------------------------------------------- tiempo
-    def _steps(self, t):
-        """Minutero a saltitos: salto rápido con un pequeño rebote al llegar."""
+    @staticmethod
+    def _steps(t):
+        """Saltos del minutero hasta t (0 … 12): salto rápido con un pequeño rebote."""
         step, frac = divmod(t / TICK_S, 1)
-        return step + min(1.0, _out_back(min(1.0, frac / .45)))
+        return min(12.0, step + min(1.0, _out_back(min(1.0, frac / .45))))
 
-    def _hour_deg(self, t):
-        return self.L["hour"]["deg"] - 2.5 * self._steps(t)
-
-    def _hands(self, t):
-        m0, h0 = self.L["minute"]["deg"], self.L["hour"]["deg"]
-        fin = self._finish
-        if fin and t >= fin["end"]:
-            return m0, h0, True
-        minute = m0 - 30 * self._steps(t)
-        hour = self._hour_deg(t)
-        if fin:   # la hora se acomoda en el tiempo que le queda al minutero
-            k = min(1.0, (t - fin["t"]) / max(.05, fin["end"] - fin["t"]))
-            start = fin["hour0"]
-            target = start - ((start - h0) % 360)
-            hour = start + (target - start) * _out_cubic(k)
-        return minute, hour, False
+    def hands(self, t):
+        """(minutero, hora) en grados: de 9:10 a 10:10 en una vuelta del minutero."""
+        n = self._steps(t)
+        return (self.L["minute"]["deg"] - 30 * n,
+                self.L["hour"]["deg"] + 30 - 2.5 * n)
 
     # ---------------------------------------------------------------- dibujo
     def _draw(self, *_):
@@ -115,12 +100,12 @@ class LogoAnim(Widget):
         if side <= 0:
             return
         ox, oy = self.center_x - side / 2, self.center_y - side / 2
-        t = (time.monotonic() - self._t0) if self._t0 is not None else 0.0
+        t = self._t or 0.0            # antes de empezar: igual que el presplash
         L = self.L
         self.canvas.clear()
         with self.canvas:
             # Círculo punteado: aparece y gira hasta quedar en su lugar.
-            k = min(1.0, t / RING_S) if self._t0 is not None else 1.0
+            k = min(1.0, t / RING_S)
             rc = L["ring"]
             cx, cy = ox + rc["u"] * side, oy + rc["v"] * side
             PushMatrix()
@@ -130,18 +115,15 @@ class LogoAnim(Widget):
             PopMatrix()
             # Dibujos chicos: recorren el círculo (sentido horario) hasta su sitio.
             for i, ic in enumerate(L["icons"]):
-                if self._t0 is None:
-                    e, a = 1.0, 1.0
-                else:
-                    x = (t - ICON_DELAY - i * ICON_STAGGER) / ICON_S
-                    if x <= 0:
-                        continue
-                    x = min(1.0, x)
-                    e, a = _out_cubic(x), min(1.0, x * 3)
+                x = (t - ICON_DELAY - i * ICON_STAGGER) / ICON_S
+                if x <= 0:
+                    continue
+                x = min(1.0, x)
+                e, a = _out_cubic(x), min(1.0, x * 3)
                 ang = math.radians(self._icon_deg[i] + ICON_SWEEP * (1 - e))
                 dist = math.hypot(ic["u"] - rc["u"], ic["v"] - rc["v"]) * side
                 px, py = cx + math.cos(ang) * dist, cy + math.sin(ang) * dist
-                sc = .35 + .65 * (_out_back(x) if self._t0 is not None else 1.0)
+                sc = .35 + .65 * _out_back(x)
                 w, h = ic["w"] * side * sc, ic["h"] * side * sc
                 Color(1, 1, 1, a)
                 Rectangle(texture=self._tex[ic["file"]], pos=(px - w / 2, py - h / 2), size=(w, h))
@@ -149,17 +131,12 @@ class LogoAnim(Widget):
             Color(1, 1, 1, 1)
             Rectangle(texture=self._tex["berry"], pos=(ox, oy), size=(side, side))
             # Manijas.
-            minute, hour, ended = self._hands(t) if self._t0 is not None else (
-                L["minute"]["deg"], L["hour"]["deg"], False)
+            minute, hour = self.hands(t)
             fx, fy = ox + L["face"]["u"] * side, oy + L["face"]["v"] * side
             Color(*L["hand_rgb"], 1)
             for deg, ln in ((hour, L["hour"]["len"]), (minute, L["minute"]["len"])):
                 r = math.radians(deg)
                 Line(points=[fx, fy, fx + math.cos(r) * ln * side, fy + math.sin(r) * ln * side],
-                     width=max(1.0, L["hand_w"] * side / 2), cap="round")
+                     width=max(1.0, L["hand_w"] * side * .6), cap="round")   # = grosor del presplash
             d = L["dot_r"] * side
             Ellipse(pos=(fx - d, fy - d), size=(2 * d, 2 * d))
-        if ended and self._finish:
-            done, self._finish = self._finish["done"], None
-            self.stop()
-            Clock.schedule_once(lambda *_: done(), .12)
