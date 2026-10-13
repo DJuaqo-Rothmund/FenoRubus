@@ -1570,3 +1570,8 @@ def test_splash_lottie_matches_timeline():
     for f in (0, 30, 90, 300):
         if f in kfs:
             assert kfs[f] == pytest.approx(-tl.hands(L, f / tl.LOTTIE_FPS)[0], abs=1e-2)
+
+
+def test_week_long_label():
+    """Pie de la pantalla de sectores: «Semana 42 del año 2026»."""
+    assert ph.week_long("2026-10-12") == "Semana 42 del año 2026"

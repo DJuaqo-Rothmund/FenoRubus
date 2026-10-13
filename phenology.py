@@ -349,6 +349,12 @@ def week_title(week) -> str:
     return f"Semana {w}, año {y}"
 
 
+def week_long(week) -> str:
+    """«Semana 42 del año 2026»."""
+    w, y = iso_week(_week_date(week))
+    return f"Semana {w} del año {y}"
+
+
 def week_short(week) -> str:
     """«S33»: rótulo corto (ejes de gráficos, rangos)."""
     return f"S{iso_week(_week_date(week))[0]}"

@@ -990,9 +990,37 @@ class SectorsScreen(MDScreen):
     color; tocar uno muestra sus variedades (para registrarlas) y tocar uno vacío lo crea
     (variedad, año de plantación y código). Sin plano, la lista de siempre."""
     sel = StringProperty("")
+    cta_style = StringProperty("below")   # «below»: botón grande bajo la barra; «bar»: en la barra
+    cta_subtitle = StringProperty("")
 
     def on_pre_enter(self, *_):
         self.refresh()
+
+    def delete_sector(self, variety_id: int):
+        """Quitar una variedad del sector: archivar (conserva registros y fotos) o eliminar."""
+        a = app()
+        v = a.db.get_variety(variety_id)
+        if not v:
+            return
+        label = f"{v['name']} · {ph.unit_label(v)}" if v.get("cultivar") else v["name"]
+
+        def done(msg):
+            a.toast(msg)
+            self.refresh()
+            a.refresh_home()
+
+        def archive():
+            a.db.delete_variety(variety_id)
+            done(f"«{label}» archivada (historial conservado)")
+
+        def purge():
+            a.db.delete_variety(variety_id, purge=True)
+            done(f"«{label}» eliminada")
+
+        confirm(f"Quitar «{label}»",
+                "Archivar la saca del plano y del muestreo, pero conserva sus registros y fotos "
+                "(recomendado). Eliminar borra definitivamente todos sus registros.",
+                [("Archivar", archive), ("Eliminar", purge)])
 
     def _units(self):
         a = app()
@@ -1021,6 +1049,10 @@ class SectorsScreen(MDScreen):
         self.ids.bar.title = ws.get("name", "Sectores")
         units, done = self._units()
         n_done = sum(code is not None for code in done.values())
+        # Acceso destacado al muestreo (con el avance de la semana) y la semana, abajo.
+        self.cta_subtitle = (f"{n_done} de {len(units)} registrados esta semana" if units
+                             else "Registrar los sectores esta semana")
+        self.ids.week_note.text = ph.week_long(a.week)
         mbox, box = self.ids.map_box, self.ids.rows
         fast_clear(mbox)
         fast_clear(box)
@@ -1031,10 +1063,11 @@ class SectorsScreen(MDScreen):
             for v in units:
                 box.add_widget(self._row(v, done[v["id"]]))
             self.ids.add_btn.text = "+ Nuevo sector"
-            self.ids.hint.text = (f"{ph.week_title(a.week)} · {n_done} de {len(units)} sectores "
-                                  "registrados. Toque un sector para registrarlo." if units else
-                                  "Aún no hay sectores: cree el primero con «+ Nuevo sector» "
-                                  "(variedad, sector y equipo de riego).")
+            if not units:
+                box.add_widget(MDLabel(text="Aún no hay sectores: cree el primero con «+ Nuevo "
+                                            "sector» (variedad, sector y equipo de riego).",
+                                       font_style="Body2", adaptive_height=True,
+                                       theme_text_color="Custom", text_color=c(theme.MUTED)))
             return
         known = {s["id"]: s for s in plan["sectors"]}
         self._by_sector = {sid: [] for sid in known}
@@ -1045,10 +1078,6 @@ class SectorsScreen(MDScreen):
         self._done = done
         status = {sid: {"data": True, "dot": any(done[v["id"]] is not None for v in vs)}
                   for sid, vs in self._by_sector.items() if vs}
-        created = len(status)
-        self.ids.hint.text = (f"{ph.week_title(a.week)} · {created} de {len(known)} sectores creados · "
-                              f"{n_done} de {len(units)} registrados esta semana. Toque un sector "
-                              "del plano: si ya existe, registre sus variedades; si no, créelo.")
 
         def describe(sid):
             vs = self._by_sector[sid]
