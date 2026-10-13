@@ -1427,3 +1427,27 @@ def test_challenge_modes_keep_playing(db, tmp_path):
         assert ch["kind"] == "capture"
         game.skip(ch["id"])
     assert len(game.challenges(day)) >= 9
+
+
+def test_predio_map_sectors_and_measure_counts(db):
+    """Plano de El Amanecer: 40 sectores «E<equipo>-S<sector>» (los mismos de la app de
+    sanidad) y las unidades del predio se ubican por equipo de riego y sector."""
+    import json
+    from pathlib import Path
+    from reporter import report_summary
+    plan = json.loads((Path(__file__).resolve().parent.parent / "assets" / "maps" / "AM.json")
+                      .read_text(encoding="utf-8"))
+    ids = {s["id"] for s in plan["sectors"]}
+    assert len(ids) == 40 and "E2-S7" in ids
+    for s in plan["sectors"]:
+        assert s["id"] == f"E{s['equipo']}-S{s['sector']}"
+        assert all(len(r) >= 6 and len(r) % 2 == 0 for r in s["parts"])
+        assert all(0 <= x <= plan["w"] + .1 for r in s["parts"] for x in r[0::2])
+    vid = db.save_unit("Heritage", "", 7, 2)
+    w = db.current_week(dt.date(2026, 10, 5))
+    m = db.add_measure("Calibre", "table", ["mm"])
+    db.add_entry(m, w["id"], vid, data={"mm": "18"})
+    db.add_entry(m, w["id"], vid, data={})            # fila vacía: no cuenta
+    assert db.measure_counts(w["season"]) == {vid: 1}
+    row = next(r for r in report_summary(db, "matrix", w["season"])["rows"] if r["variety_id"] == vid)
+    assert f"E{row['irrigation']}-S{row['sector']}" == "E2-S7"

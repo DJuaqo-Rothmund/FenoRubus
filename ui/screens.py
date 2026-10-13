@@ -2797,12 +2797,27 @@ class PreviewTab(MDScreen):
     kind = StringProperty("variety")
     KIND_NAMES = {"variety": "Por variedad", "matrix": "Matriz global"}
     sel_month = ObjectProperty(None, allownone=True)   # (año, mes) o None = toda la temporada
+    variety_label = StringProperty("Por variedad")    # «Por sector» en predios con plano
+    sel_sector = StringProperty("")
+
+    def _plan(self):
+        """Plano de sectores del predio activo (None en I+D o si no hay plano)."""
+        a = app()
+        ws = getattr(a, "workspace", None) or {}
+        if ws.get("profile") != "predio":
+            return None
+        from ui.sector_map import load_map
+        return load_map(ws.get("code"))
 
     def refresh(self):
         a = app()
         if getattr(self, "_season", None) != a.season:
             self._season = a.season
             self.sel_month = None
+        plan = self._plan()
+        if plan is not getattr(self, "_plan_on", None):
+            self._plan_on, self.sel_sector = plan, ""
+        self.variety_label = "Por sector" if plan else "Por variedad"
         self._build_params()
         self._summarize()
 
@@ -2823,7 +2838,9 @@ class PreviewTab(MDScreen):
         box = self.ids.params
         fast_clear(box)
         if self.kind == "variety":
-            box.add_widget(MDLabel(text="Toque una frambuesa para ver todo el informe de esa variedad.",
+            box.add_widget(MDLabel(text=("Toque un sector del plano para ver su información; con dos "
+                                         "dedos o «Ampliar» se acerca." if self._plan() else
+                                         "Toque una frambuesa para ver todo el informe de esa variedad."),
                                    font_style="Caption", adaptive_height=True,
                                    theme_text_color="Custom", text_color=c(theme.MUTED)))
             return
@@ -2869,7 +2886,7 @@ class PreviewTab(MDScreen):
         ids = self.ids
         ids.sum_title.text = ("Matriz global · " + (f"{ph.MESES[self.sel_month[1] - 1].capitalize()} "
                                                    f"{self.sel_month[0]}" if rng else "toda la temporada")
-                              if self.kind == "matrix" else "Por variedad · toda la temporada")
+                              if self.kind == "matrix" else f"{self.variety_label} · toda la temporada")
         ratio = sm["complete"] / sm["cells"] if sm["cells"] else 0
         ids.ring.value = ratio
         ids.ring_text.text = f"{ratio:.0%}"
@@ -2908,6 +2925,9 @@ class PreviewTab(MDScreen):
             lo, hi = min(codes, key=ph.bbch_value), max(codes, key=ph.bbch_value)
             span = (f"BBCH {ph.code_str(lo)}" if lo == hi
                     else f"BBCH {ph.code_str(lo)} a {ph.code_str(hi)}")
+        if self.kind == "variety" and self._plan():
+            self._build_map(sm, self._plan(), box, span)
+            return
         if self.kind == "variety":
             started = sum(1 for r in sm["rows"] if any(cl["code"] is not None or cl["n_photos"]
                                                        for cl in r["cells"]))
@@ -2946,7 +2966,178 @@ class PreviewTab(MDScreen):
                 legend.add_widget(StageChip(text=ph.MACRO_STAGES.get(m, ""), bg=bg, fg=fg))
             box.add_widget(legend)
 
-    def _tile(self, row):
+    # ------------------------------------------------------- plano del predio
+    def _sector_data(self, sm, plan):
+        """Por sector del plano: sus unidades y totales; y las unidades sin ubicar."""
+        from ui.sector_map import stage_fill
+        counts = app().db.measure_counts(app().season)
+        known = {s["id"]: s for s in plan["sectors"]}
+        data = {sid: {"plan": s, "rows": [], "records": 0, "photos": 0, "measures": 0,
+                      "last": None} for sid, s in known.items()}
+        loose = []
+        for r in sm["rows"]:
+            sid = f"E{r.get('irrigation') or 0}-S{r.get('sector') or 0}"
+            if sid not in data:
+                loose.append(r)
+                continue
+            d = data[sid]
+            d["rows"].append(r)
+            d["records"] += sum(1 for cl in r["cells"] if cl["code"] is not None or cl["n_photos"])
+            d["photos"] += sum(cl["n_photos"] for cl in r["cells"])
+            d["measures"] += counts.get(r["variety_id"], 0)
+            for i, cl in enumerate(r["cells"]):
+                if cl["code"] is not None:
+                    key = (i, ph.bbch_value(cl["code"]))
+                    if d["last"] is None or key > d["last"][0]:
+                        d["last"] = (key, cl)
+        status = {}
+        for sid, d in data.items():
+            if d["records"] or d["measures"]:
+                fill, dark = stage_fill(d["last"][1]["code"] if d["last"] else None)
+                status[sid] = {"fill": fill, "dark": dark, "dot": d["measures"] > 0}
+        return data, status, loose
+
+    def _build_map(self, sm, plan, box, span):
+        from ui.sector_map import MAP_STAGE, NO_STAGE, SectorMap
+        data, status, loose = self._sector_data(sm, plan)
+        self._sectors = data
+        active = [sid for sid in data if sid in status]
+        self.ids.headline.text = " · ".join(x for x in (
+            f"{len(active)} de {len(data)} sectores con datos", span) if x)
+        if self.sel_sector not in data:
+            latest = max(active, key=lambda sid: (data[sid]["last"] or ((-1, -1), None))[0],
+                         default="")
+            self.sel_sector = latest
+        mp = SectorMap(plan, on_select=self._select_sector, size_hint_y=None, height=dp(200))
+        mp.status, mp.selected = status, self.sel_sector
+        mp.bind(width=lambda w, v: setattr(w, "height", max(dp(180), v * plan["h"] / plan["w"])))
+        self._map = mp
+        box.add_widget(mp)
+        # Leyenda (solo los estados presentes) y botón para ampliar.
+        from kivy.factory import Factory
+        from kivy.uix.stacklayout import StackLayout
+        legend = StackLayout(size_hint_y=None, spacing=dp(6))
+        legend.bind(minimum_height=legend.setter("height"))
+        macros = sorted({ph.macro_of(d["last"][1]["code"]) for d in data.values() if d["last"]})
+        for m in macros:
+            col, dark = MAP_STAGE.get(m, NO_STAGE)
+            legend.add_widget(StageChip(text=ph.MACRO_STAGES.get(m, ""), bg=c(col),
+                                        fg=c("#FFFFFF") if dark else c(theme.INK)))
+        if any(sid in status and not data[sid]["last"] for sid in data):
+            legend.add_widget(StageChip(text="Sin estado", bg=c(NO_STAGE[0]), fg=c(theme.INK)))
+        legend.add_widget(StageChip(text="Sin datos", bg=c("#E3E6DF"), fg=c(theme.MUTED)))
+        if any(st["dot"] for st in status.values()):
+            legend.add_widget(StageChip(text="• con mediciones", bg=c("#FFFFFF"), fg=c(theme.BERRY)))
+        box.add_widget(legend)
+        zoom = Factory.SegButton(text="Ampliar plano", size_hint=(None, None), height=dp(36),
+                                 font_size="14sp", pos_hint={"center_x": .5})
+        zoom.text_size = (None, None)
+        zoom.texture_update()
+        zoom.width = zoom.texture_size[0] + dp(30)
+        zoom.bind(on_release=lambda *_: self._open_map_full(plan, status))
+        box.add_widget(zoom)
+        self._sector_box = MDBoxLayout(orientation="vertical", adaptive_height=True, spacing=dp(8))
+        box.add_widget(self._sector_box)
+        self._fill_sector(self._sector_box, self.sel_sector)
+        if loose:
+            box.add_widget(MDLabel(text=f"Sin ubicar en el plano ({len(loose)}): falta su sector o "
+                                        "equipo de riego en Ajustes › Variedades.",
+                                   font_style="Caption", adaptive_height=True,
+                                   theme_text_color="Custom", text_color=c(theme.MUTED)))
+            box.add_widget(self._tile_grid(loose))
+
+    def _select_sector(self, sid):
+        self.sel_sector = sid
+        if getattr(self, "_map", None) is not None:
+            self._map.selected = sid
+        if getattr(self, "_sector_box", None) is not None:
+            self._fill_sector(self._sector_box, sid)
+
+    def _tile_grid(self, rows, before_open=None):
+        from kivy.uix.gridlayout import GridLayout
+        grid = GridLayout(cols=3, spacing=dp(8), size_hint_y=None)
+        grid.bind(minimum_height=grid.setter("height"))
+        for r in rows:
+            grid.add_widget(self._tile(r, before_open))
+        return grid
+
+    def _fill_sector(self, box, sid, before_open=None):
+        """Ficha del sector elegido: datos del plano, totales y sus unidades (frambuesas)."""
+        fast_clear(box)
+        d = (getattr(self, "_sectors", None) or {}).get(sid)
+        if not d:
+            box.add_widget(MDLabel(text="Toque un sector del plano para ver su información.",
+                                   font_style="Body2", adaptive_height=True,
+                                   theme_text_color="Custom", text_color=c(theme.MUTED)))
+            return
+        p = d["plan"]
+        box.add_widget(MDLabel(text=f"Equipo de riego {p['equipo']} · sector {p['sector']}",
+                               font_style="Subtitle1", bold=True, adaptive_height=True,
+                               theme_text_color="Custom", text_color=c(theme.LEAF_DARK)))
+        info = []
+        if p.get("ha"):
+            info.append(f"{p['ha']:.2f} ha".replace(".", ","))
+        if p.get("hileras"):
+            info.append(f"{p['hileras']} hileras")
+        if p.get("variedades"):
+            info.append("plano: " + ", ".join(p["variedades"]))
+        if info:
+            box.add_widget(MDLabel(text=" · ".join(info), font_style="Caption", adaptive_height=True,
+                                   theme_text_color="Custom", text_color=c(theme.MUTED)))
+        if not d["rows"]:
+            box.add_widget(MDLabel(text="Sin unidades en este sector (se agregan en Ajustes › "
+                                        "Variedades con este equipo de riego y sector).",
+                                   font_style="Body2", adaptive_height=True,
+                                   theme_text_color="Custom", text_color=c(theme.MUTED)))
+            return
+        n = len(d["rows"])
+        parts = [f"{n} unidad" + ("es" if n != 1 else ""),
+                 f"{d['records']} registro" + ("s" if d["records"] != 1 else ""),
+                 f"{d['photos']} foto" + ("s" if d["photos"] != 1 else ""),
+                 f"{d['measures']} medici" + ("ones" if d["measures"] != 1 else "ón")]
+        if d["last"]:
+            cl = d["last"][1]
+            parts.append(f"último: {cl['week']} · BBCH {ph.code_str(cl['code'])}")
+        box.add_widget(MDLabel(text=" · ".join(parts), font_style="Body2", adaptive_height=True,
+                               theme_text_color="Custom", text_color=c(theme.INK)))
+        box.add_widget(self._tile_grid(d["rows"], before_open))
+
+    def _open_map_full(self, plan, status):
+        """Plano a pantalla completa (vertical, con zoom) y la ficha del sector abajo."""
+        from kivy.uix.modalview import ModalView
+        from kivy.uix.scrollview import ScrollView
+        from kivymd.uix.button import MDIconButton
+        from ui.sector_map import SectorMap
+        view = ModalView(size_hint=(1, 1), auto_dismiss=True, background_color=(0, 0, 0, .6))
+        root = MDBoxLayout(orientation="vertical", md_bg_color=DIALOG_BG)
+        head = MDBoxLayout(adaptive_height=True, padding=(dp(16), dp(6), dp(6), dp(0)))
+        head.add_widget(MDLabel(text=plan.get("name") or "Plano del predio", font_style="H6",
+                                bold=True, adaptive_height=True, pos_hint={"center_y": .5}))
+        head.add_widget(MDIconButton(icon="close", on_release=lambda *_: view.dismiss()))
+        root.add_widget(head)
+        root.add_widget(MDLabel(text="Dos dedos o doble toque para acercar · un dedo para mover",
+                                font_style="Caption", adaptive_height=True,
+                                padding=(dp(16), 0), theme_text_color="Custom",
+                                text_color=c(theme.MUTED)))
+        card = MDBoxLayout(orientation="vertical", adaptive_height=True, spacing=dp(8),
+                           padding=(dp(16), dp(8)))
+        sv = ScrollView(size_hint_y=None, height=dp(240), do_scroll_x=False, bar_width=dp(3))
+        sv.add_widget(card)
+
+        def pick(sid):
+            self._select_sector(sid)
+            self._fill_sector(card, sid, before_open=view.dismiss)
+            sv.scroll_y = 1
+
+        mp = SectorMap(plan, on_select=pick, rotate=True, zoomable=True)
+        mp.status, mp.selected = status, self.sel_sector
+        root.add_widget(mp)
+        root.add_widget(sv)
+        self._fill_sector(card, self.sel_sector, before_open=view.dismiss)
+        view.add_widget(root)
+        view.open()
+
+    def _tile(self, row, before_open=None):
         """Frambuesa de la variedad: a color si tiene registros en la temporada."""
         cells = [cl for cl in row["cells"] if cl["code"] is not None or cl["n_photos"]]
         last = next((cl for cl in reversed(row["cells"]) if cl["code"] is not None), None)
@@ -2962,7 +3153,12 @@ class PreviewTab(MDScreen):
                            badge_bg=bg, badge_fg=fg,
                            berry=theme.berry_art(row.get("cultivar") or "", row["name"],
                                                  gray=not cells))
-        tile.bind(on_release=lambda *_: app().open_timeline(row["variety_id"]))
+
+        def go(*_):
+            if before_open:
+                before_open()
+            app().open_timeline(row["variety_id"])
+        tile.bind(on_release=go)
         return tile
 
     # ----------------------------------------------------------- vista previa

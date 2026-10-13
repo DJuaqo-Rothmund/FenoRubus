@@ -822,6 +822,15 @@ class Database:
             "FROM measures m ORDER BY m.sort_order, m.id", (week_id or 0,))
         return [self._measure(r) for r in rows]
 
+    def measure_counts(self, season: int) -> dict:
+        """{variety_id: registros de mediciones en la temporada} (mapa del predio)."""
+        rows = self.query(
+            "SELECT e.variety_id AS vid, COUNT(*) AS n FROM measure_entries e "
+            "JOIN sampling_weeks w ON w.id = e.week_id WHERE w.season = ? "
+            "AND e.variety_id IS NOT NULL AND (e.path IS NOT NULL OR e.data NOT IN ('', '{}')) "
+            "GROUP BY e.variety_id", (season,))
+        return {r["vid"]: r["n"] for r in rows}
+
     def add_entry(self, measure_id: int, week_id: int, variety_id: int | None = None,
                   path: str | None = None, caption: str = "", data: dict | None = None) -> int:
         cur = self.execute(

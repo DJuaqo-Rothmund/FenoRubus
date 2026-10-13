@@ -855,4 +855,5 @@ def report_summary(db, kind: str, season: int, week_id: int | None = None,
             # Vista previa visual: fichas (semanal / por variedad) y mapa de estados.
             "week_labels": [ph.week_short(w) for w in weeks],
             "rows": [{"variety_id": v["id"], "name": v["name"], "cultivar": v.get("cultivar") or "",
+                      "sector": v.get("sector"), "irrigation": v.get("irrigation"),
                       "cells": detail[v["id"]]} for v in varieties]}

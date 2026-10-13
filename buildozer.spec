@@ -16,7 +16,7 @@ source.include_exts = py,png,jpg,kv,atlas,html,json,tflite,txt
 
 # (list) Directories / files to exclude
 source.exclude_dirs = tests, bin, .buildozer, .git, __pycache__, .pytest_cache
-source.exclude_patterns = tools/demo_data.py, tools/export_mobilenet_tflite.py, tools/make_berries.py, README.md
+source.exclude_patterns = tools/demo_data.py, tools/export_mobilenet_tflite.py, tools/make_berries.py, tools/make_maps.py, README.md
 
 # (str) Application versioning
 version = 1.0.0
