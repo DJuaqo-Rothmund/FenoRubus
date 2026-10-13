@@ -278,7 +278,7 @@ class FenoRubusApp(MDApp):
             self.sm.current = "sectors"
         else:
             self.sm.current = "home"
-        self.toast(f"{Workspaces.title(ws)} ({ws['code']})")
+        # Sin aviso emergente con el nombre: ya se ve en el banner del muestreo.
         self.workers.submit(self._rename_photos)
         if self.db.get_setting("drive_enabled", False):
             Clock.schedule_once(lambda *_: self.workers.submit(self._drive_daily), 3)

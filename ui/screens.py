@@ -881,49 +881,43 @@ class SectorRow(GlassButton):
     screen = ObjectProperty(None, allownone=True)
 
 
-def sector_map_block(box, plan, status, selected, on_select, describe, dot_text="",
-                     data_word="con datos"):
-    """Plano del predio con su desplegable «Ver: vista general / Equipo de riego n» (elegir
-    un equipo lo acerca entero en el mismo plano; ahí se toca el sector) y la leyenda por
-    equipo de riego. describe(sid) queda para quien lo use. Devuelve el plano."""
-    from kivy.factory import Factory
-    from kivy.uix.stacklayout import StackLayout
+def sector_map_block(box, plan, status, selected, on_select):
+    """Plano del predio con los equipos de riego arriba, centrados: son la leyenda de
+    colores y, al tocarlos, acercan el equipo entero en el mismo plano (ahí se toca el
+    sector); tocar de nuevo el equipo elegido vuelve a la vista general. Devuelve el plano."""
+    from kivy.uix.anchorlayout import AnchorLayout
     from ui.sector_map import SectorMap, equipo_chip
     equipos = sorted({s["equipo"] for s in plan["sectors"]})
-    pick = Factory.SegButton(text="Ver: vista general del predio", size_hint_y=None, height=dp(40),
-                             font_size="14sp")
     mp = SectorMap(plan, on_select=on_select, size_hint_y=None, height=dp(200))
     mp.status, mp.selected = status, selected
     mp.bind(width=lambda w, v: setattr(w, "height", max(dp(200), v * plan["h"] / plan["w"] * 1.1)))
 
+    row = BoxLayout(size_hint=(None, None), height=dp(34), spacing=dp(6))
+    chips = {}
+
     def show(eq):
-        key = f"E{eq}" if eq else ""
-        mp.focus(key)
-        pick.text = f"Ver: equipo de riego {eq} · toque un sector" if eq else "Ver: vista general del predio"
-        pick.selected = bool(eq)
+        eq = 0 if mp.focused == f"E{eq}" else eq          # tocar el elegido: vista general
+        mp.focus(f"E{eq}" if eq else "")
+        for k, chip in chips.items():
+            chip.selected = k == eq
 
-    def open_menu(*_):
-        items = [("Vista general", "Todo el predio", lambda: show(0), c(theme.LEAF_SOFT))]
-        for eq in equipos:
-            secs = [s["id"] for s in plan["sectors"] if s["equipo"] == eq]
-            n = sum(1 for sid in secs if sid in status)
-            items.append((f"Equipo de riego {eq}", f"{len(secs)} sectores · {n} {data_word}",
-                          lambda eq=eq: show(eq), equipo_chip(eq)[0]))
-        pick_dialog("Ver en el plano", items)
-
-    pick.bind(on_release=open_menu)
-    box.add_widget(pick)
-    box.add_widget(mp)
-    legend = StackLayout(size_hint_y=None, spacing=dp(6))
-    legend.bind(minimum_height=legend.setter("height"))
-    for eq in sorted({s["equipo"] for s in plan["sectors"]}):
+    for eq in equipos:
         col, light = equipo_chip(eq)
-        legend.add_widget(StageChip(text=f"Equipo {eq}", bg=col,
-                                    fg=c("#FFFFFF") if light else c(theme.INK)))
-    legend.add_widget(StageChip(text="Desvaído: sin datos", bg=c("#EEF0EC"), fg=c(theme.MUTED)))
-    if dot_text:
-        legend.add_widget(StageChip(text=f"• {dot_text}", bg=c("#FFFFFF"), fg=c(theme.INK)))
-    box.add_widget(legend)
+        chip = PillButton(text=f"Equipo {eq}", font_size="13sp", bold=True,
+                          size_hint=(None, None), height=dp(34),
+                          bg_on=col, fg_on=c("#FFFFFF") if light else c(theme.INK),
+                          bg_off=[*col[:3], .28], fg_off=c(theme.INK), edge=[*col[:3], .9])
+        chip.text_size = (None, None)
+        chip.texture_update()
+        chip.width = chip.texture_size[0] + dp(22)
+        chip.bind(on_release=lambda *_, eq=eq: show(eq))
+        chips[eq] = chip
+        row.add_widget(chip)
+    row.width = sum(ch.width for ch in chips.values()) + row.spacing * max(0, len(chips) - 1)
+    holder = AnchorLayout(anchor_x="center", size_hint_y=None, height=dp(34))
+    holder.add_widget(row)
+    box.add_widget(holder)
+    box.add_widget(mp)
     return mp
 
 
@@ -990,8 +984,6 @@ class SectorsScreen(MDScreen):
     color; tocar uno muestra sus variedades (para registrarlas) y tocar uno vacío lo crea
     (variedad, año de plantación y código). Sin plano, la lista de siempre."""
     sel = StringProperty("")
-    cta_style = StringProperty("below")   # «below»: botón grande bajo la barra; «bar»: en la barra
-    cta_subtitle = StringProperty("")
 
     def on_pre_enter(self, *_):
         self.refresh()
@@ -1048,11 +1040,7 @@ class SectorsScreen(MDScreen):
         ws = a.workspace or {}
         self.ids.bar.title = ws.get("name", "Sectores")
         units, done = self._units()
-        n_done = sum(code is not None for code in done.values())
-        # Acceso destacado al muestreo (con el avance de la semana) y la semana, abajo.
-        self.cta_subtitle = (f"{n_done} de {len(units)} registrados esta semana" if units
-                             else "Registrar los sectores esta semana")
-        self.ids.week_note.text = ph.week_long(a.week)
+        self.ids.week_note.text = ph.week_long(a.week)    # la semana, al pie
         mbox, box = self.ids.map_box, self.ids.rows
         fast_clear(mbox)
         fast_clear(box)
@@ -1079,14 +1067,9 @@ class SectorsScreen(MDScreen):
         status = {sid: {"data": True, "dot": any(done[v["id"]] is not None for v in vs)}
                   for sid, vs in self._by_sector.items() if vs}
 
-        def describe(sid):
-            vs = self._by_sector[sid]
-            return ", ".join(ph.unit_label(v) for v in vs) if vs else "Sin crear · tocar para crearlo"
-
         if self.sel not in known:
             self.sel = ""
-        self._map = sector_map_block(mbox, plan, status, self.sel, self.pick, describe,
-                                     "registrado esta semana", data_word="creados")
+        self._map = sector_map_block(mbox, plan, status, self.sel, self.pick)
         self._fill(self.sel)
         if loose:
             box.add_widget(MDLabel(text="Otros (sin ubicar en el plano)", font_style="Caption",
@@ -1114,7 +1097,7 @@ class SectorsScreen(MDScreen):
         fast_clear(box)
         sec = next((s for s in self._plan["sectors"] if s["id"] == sid), None)
         if sec is None:
-            box.add_widget(MDLabel(text="Toque un sector del plano (con «Ver» se acerca un equipo de riego) para "
+            box.add_widget(MDLabel(text="Toque un sector del plano (tocando un equipo arriba del plano se acerca) para "
                                         "registrarlo o crearlo.", font_style="Body2",
                                    adaptive_height=True, theme_text_color="Custom",
                                    text_color=c(theme.MUTED)))
@@ -3070,8 +3053,8 @@ class PreviewTab(MDScreen):
         box = self.ids.params
         fast_clear(box)
         if self.kind == "variety":
-            box.add_widget(MDLabel(text=("Toque un sector del plano para ver su información; con «Ver» "
-                                         "se acerca un equipo de riego." if self._plan() else
+            box.add_widget(MDLabel(text=("Toque un sector del plano para ver su información; tocando "
+                                         "un equipo de riego se acerca." if self._plan() else
                                          "Toque una frambuesa para ver todo el informe de esa variedad."),
                                    font_style="Caption", adaptive_height=True,
                                    theme_text_color="Custom", text_color=c(theme.MUTED)))
@@ -3240,16 +3223,7 @@ class PreviewTab(MDScreen):
                          default="")
             self.sel_sector = latest
 
-        def describe(sid):
-            d = data[sid]
-            if not d["rows"]:
-                return "Sin variedades"
-            return ", ".join(ph.unit_label(r) for r in d["rows"]) + (
-                f" · {d['records']} reg." if d["records"] else " · sin datos")
-
-        self._map = sector_map_block(box, plan, status, self.sel_sector, self._select_sector,
-                                     describe, "con mediciones"
-                                     if any(st["dot"] for st in status.values()) else "")
+        self._map = sector_map_block(box, plan, status, self.sel_sector, self._select_sector)
         self._sector_box = MDBoxLayout(orientation="vertical", adaptive_height=True, spacing=dp(8))
         box.add_widget(self._sector_box)
         self._fill_sector(self._sector_box, self.sel_sector)

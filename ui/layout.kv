@@ -865,79 +865,41 @@
         on_release: root.new_item()
 
 <SamplingCTA@ButtonBehavior+BoxLayout>:
-    # Botón destacado «Ir al muestreo semanal» (pantalla de sectores del predio).
-    title: "Muestreo semanal"
-    subtitle: ""
-    compact: False
+    # Botón destacado «Muestreo» (pantalla de sectores del predio, en la barra).
+    title: "Muestreo"
     orientation: "horizontal"
-    size_hint_y: None
-    height: dp(40) if self.compact else dp(64)
-    padding: (dp(12), 0, dp(14), 0) if self.compact else (dp(10), 0, dp(14), 0)
-    spacing: dp(8) if self.compact else dp(12)
+    padding: dp(12), 0, dp(14), 0
+    spacing: dp(8)
     canvas.before:
         Color:
-            rgba: c(theme.BERRY, .22) if self.compact else c(theme.BERRY, .18)
+            rgba: c(theme.BERRY, .22)
         RoundedRectangle:
             pos: self.x, self.y - dp(3)
             size: self.size
-            radius: [self.height / 2] if self.compact else [dp(20)]
+            radius: [self.height / 2]
         Color:
             rgba: c(theme.BERRY_DARK if self.state == "down" else theme.BERRY)
         RoundedRectangle:
             pos: self.pos
             size: self.size
-            radius: [self.height / 2] if self.compact else [dp(20)]
-    FloatLayout:
-        size_hint: None, None
-        size: (dp(24), dp(24)) if root.compact else (dp(44), dp(44))
-        pos_hint: {"center_y": .5}
-        canvas.before:
-            Color:
-                rgba: (1, 1, 1, 0) if root.compact else (1, 1, 1, .2)
-            Ellipse:
-                pos: self.pos
-                size: self.size
-        MDIcon:
-            icon: "calendar-check"
-            halign: "center"
-            font_size: "20sp" if root.compact else "26sp"
-            theme_text_color: "Custom"
-            text_color: 1, 1, 1, 1
-            pos_hint: {"center_x": .5, "center_y": .5}
-    BoxLayout:
-        orientation: "vertical"
-        size_hint_x: None if root.compact else 1
-        width: cta_title.texture_size[0] if root.compact else 0
-        pos_hint: {"center_y": .5}
-        size_hint_y: None
-        height: cta_title.texture_size[1] + (0 if root.compact or not root.subtitle else cta_sub.texture_size[1] + dp(2))
-        Label:
-            id: cta_title
-            text: root.title
-            bold: True
-            font_size: "14sp" if root.compact else "17sp"
-            color: 1, 1, 1, 1
-            size_hint_y: None
-            height: self.texture_size[1]
-            text_size: (None, None) if root.compact else (self.width, None)
-            halign: "left"
-        Label:
-            id: cta_sub
-            text: "" if root.compact else root.subtitle
-            font_size: "12sp"
-            color: 1, 1, 1, .85
-            size_hint_y: None
-            height: 0 if root.compact or not root.subtitle else self.texture_size[1]
-            text_size: self.width, None
-            halign: "left"
+            radius: [self.height / 2]
     MDIcon:
-        icon: "chevron-right"
+        icon: "calendar-check"
+        halign: "center"
+        font_size: "20sp"
         size_hint: None, None
-        size: (dp(0), dp(0)) if root.compact else (dp(26), dp(26))
-        opacity: 0 if root.compact else 1
+        size: dp(24), dp(24)
         pos_hint: {"center_y": .5}
         theme_text_color: "Custom"
         text_color: 1, 1, 1, 1
+    Label:
+        text: root.title
+        bold: True
+        font_size: "14sp"
+        color: 1, 1, 1, 1
+        size_hint: None, None
+        size: self.texture_size
+        pos_hint: {"center_y": .5}
 
 <SectorsScreen>:
     md_bg_color: 0, 0, 0, 0
@@ -952,16 +914,8 @@
             MDBoxLayout:
                 orientation: "vertical"
                 adaptive_height: True
-                padding: dp(16), dp(12) if root.cta_style == "below" else dp(2), dp(16), dp(24)
+                padding: dp(16), dp(2), dp(16), dp(24)
                 spacing: dp(10)
-                # Opción «debajo»: el acceso al muestreo, grande, bajo la barra.
-                SamplingCTA:
-                    id: cta_below
-                    subtitle: root.cta_subtitle
-                    opacity: 1 if root.cta_style == "below" else 0
-                    disabled: root.cta_style != "below"
-                    height: dp(64) if root.cta_style == "below" else -dp(10)   # sin hueco oculto
-                    on_release: app.enter_home()
                 MDBoxLayout:
                     id: map_box
                     orientation: "vertical"
@@ -979,16 +933,13 @@
                 Muted:
                     id: week_note
                     halign: "center"
-    # Opción «barra»: el acceso al muestreo, compacto, al lado del nombre del predio.
+    # Acceso destacado al muestreo semanal, al lado del nombre del predio.
     SamplingCTA:
         id: cta_bar
-        compact: True
         title: "Muestreo"
         size_hint: None, None
-        width: self.minimum_width if root.cta_style == "bar" else 0
-        height: dp(40) if root.cta_style == "bar" else 0
-        opacity: 1 if root.cta_style == "bar" else 0
-        disabled: root.cta_style != "bar"
+        width: self.minimum_width
+        height: dp(40)
         x: root.width - self.width - dp(12)
         y: root.height - (bar.height + self.height) / 2     # centrado en la barra
         on_release: app.enter_home()
