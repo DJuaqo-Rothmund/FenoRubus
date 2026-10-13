@@ -883,34 +883,35 @@ class SectorRow(GlassButton):
     screen = ObjectProperty(None, allownone=True)
 
 
-def sector_map_block(box, plan, status, selected, on_select, describe, dot_text=""):
-    """Plano del predio con su desplegable «Ver: Vista general / Equipo n · Sector m»
-    (elegir un sector lo acerca en el mismo plano) y la leyenda por equipo de riego.
-    describe(sid) -> subtítulo de cada sector en el desplegable. Devuelve el plano."""
+def sector_map_block(box, plan, status, selected, on_select, describe, dot_text="",
+                     data_word="con datos"):
+    """Plano del predio con su desplegable «Ver: vista general / Equipo de riego n» (elegir
+    un equipo lo acerca entero en el mismo plano; ahí se toca el sector) y la leyenda por
+    equipo de riego. describe(sid) queda para quien lo use. Devuelve el plano."""
     from kivy.factory import Factory
     from kivy.uix.stacklayout import StackLayout
     from ui.sector_map import SectorMap, equipo_chip
-    names = {s["id"]: f"Equipo {s['equipo']} · Sector {s['sector']}" for s in plan["sectors"]}
+    equipos = sorted({s["equipo"] for s in plan["sectors"]})
     pick = Factory.SegButton(text="Ver: vista general del predio", size_hint_y=None, height=dp(40),
                              font_size="14sp")
     mp = SectorMap(plan, on_select=on_select, size_hint_y=None, height=dp(200))
     mp.status, mp.selected = status, selected
     mp.bind(width=lambda w, v: setattr(w, "height", max(dp(200), v * plan["h"] / plan["w"] * 1.1)))
 
-    def show(sid):
-        mp.focus(sid)
-        pick.text = f"Ver: {names[sid]}" if sid else "Ver: vista general del predio"
-        pick.selected = bool(sid)
-        if sid:
-            mp.selected = sid
-            on_select(sid)
+    def show(eq):
+        key = f"E{eq}" if eq else ""
+        mp.focus(key)
+        pick.text = f"Ver: equipo de riego {eq} · toque un sector" if eq else "Ver: vista general del predio"
+        pick.selected = bool(eq)
 
     def open_menu(*_):
-        items = [("Vista general", "Todo el predio", lambda: show(""), c(theme.LEAF_SOFT))]
-        for sec in plan["sectors"]:
-            items.append((names[sec["id"]], describe(sec["id"]),
-                          lambda sid=sec["id"]: show(sid), equipo_chip(sec["equipo"])[0]))
-        pick_dialog("Elegir sector", items)
+        items = [("Vista general", "Todo el predio", lambda: show(0), c(theme.LEAF_SOFT))]
+        for eq in equipos:
+            secs = [s["id"] for s in plan["sectors"] if s["equipo"] == eq]
+            n = sum(1 for sid in secs if sid in status)
+            items.append((f"Equipo de riego {eq}", f"{len(secs)} sectores · {n} {data_word}",
+                          lambda eq=eq: show(eq), equipo_chip(eq)[0]))
+        pick_dialog("Ver en el plano", items)
 
     pick.bind(on_release=open_menu)
     box.add_widget(pick)
@@ -1058,7 +1059,7 @@ class SectorsScreen(MDScreen):
         if self.sel not in known:
             self.sel = ""
         self._map = sector_map_block(mbox, plan, status, self.sel, self.pick, describe,
-                                     "registrado esta semana")
+                                     "registrado esta semana", data_word="creados")
         self._fill(self.sel)
         if loose:
             box.add_widget(MDLabel(text="Otros (sin ubicar en el plano)", font_style="Caption",
@@ -1086,7 +1087,7 @@ class SectorsScreen(MDScreen):
         fast_clear(box)
         sec = next((s for s in self._plan["sectors"] if s["id"] == sid), None)
         if sec is None:
-            box.add_widget(MDLabel(text="Toque un sector del plano (o elíjalo en «Ver») para "
+            box.add_widget(MDLabel(text="Toque un sector del plano (con «Ver» se acerca un equipo de riego) para "
                                         "registrarlo o crearlo.", font_style="Body2",
                                    adaptive_height=True, theme_text_color="Custom",
                                    text_color=c(theme.MUTED)))
@@ -1708,9 +1709,12 @@ class VarietyForm(SectorIrrigationMixin, MDBoxLayout):
 
     def pick_catalog(self):
         def chosen(name, code):
+            import catalog
+            a = app()
             self.ids.name.text = name
-            if code:
-                self.ids.code.text = code
+            # Siempre con código: el del catálogo o, si falta, uno conocido o derivado.
+            self.ids.code.text = code or catalog.code_for(a.workspaces.shared, name, a.db,
+                                                          current_profile())
         pick_catalog(chosen)
 
 
@@ -3039,8 +3043,8 @@ class PreviewTab(MDScreen):
         box = self.ids.params
         fast_clear(box)
         if self.kind == "variety":
-            box.add_widget(MDLabel(text=("Toque un sector del plano para ver su información; con dos "
-                                         "dedos o «Ampliar» se acerca." if self._plan() else
+            box.add_widget(MDLabel(text=("Toque un sector del plano para ver su información; con «Ver» "
+                                         "se acerca un equipo de riego." if self._plan() else
                                          "Toque una frambuesa para ver todo el informe de esa variedad."),
                                    font_style="Caption", adaptive_height=True,
                                    theme_text_color="Custom", text_color=c(theme.MUTED)))

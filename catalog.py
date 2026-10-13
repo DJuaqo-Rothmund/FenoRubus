@@ -65,34 +65,21 @@ def remove(shared, profile: str, name: str) -> None:
     shared.execute("DELETE FROM variety_catalog WHERE profile=? AND name=? COLLATE NOCASE", (profile, name))
 
 
-def code_for(shared, profile: str, name: str) -> str:
+def code_for(shared, name: str, db=None, profile: str = "predio") -> str:
+    """Código de una variedad para completar el formulario, en este orden: el del catálogo
+    de este perfil, el de una unidad/variedad ya creada con ese nombre en esta base, el del
+    catálogo del otro perfil y, si no hay, la abreviatura de siempre («Meeker» -> «MEE»)."""
+    import phenology as ph
+    name = (name or "").strip()
+    if not name:
+        return ""
     ensure(shared)
-    row = shared.query_one("SELECT code FROM variety_catalog WHERE profile=? AND name=? COLLATE NOCASE",
-                           (profile, (name or "").strip()))
-    return (row or {}).get("code") or ""
-
-
-def seed_from_workspaces(wss) -> int:
-    """Una sola vez: las variedades con nombre real que ya existen en los ensayos y predios."""
-    shared = wss.shared
-    if shared.get_setting("catalog_seeded_v1"):
-        return 0
-    n = 0
-    for ws in wss.list() + wss.list(archived=True):
-        try:
-            db = wss.open(ws)
-        except Exception:  # noqa: BLE001 - un ensayo dañado no impide lo demás
-            continue
-        try:
-            for v in db.query("SELECT name, code, cultivar, treatment FROM varieties"):
-                if ws["profile"] == "predio":
-                    n += add(shared, "predio", v.get("cultivar") or "", v["code"] or "")
-                elif ws["kind"] == "variedades" and not v.get("treatment"):
-                    n += add(shared, "id", v["name"], v["code"] or "")
-            if ws["kind"] == "tratamientos":
-                for t in db.query("SELECT cultivar FROM treatments WHERE cultivar IS NOT NULL"):
-                    n += add(shared, "id", t["cultivar"])
-        finally:
-            db.close()
-    shared.set_setting("catalog_seeded_v1", True)
-    return n
+    sql = ("SELECT code FROM variety_catalog WHERE name=? COLLATE NOCASE AND IFNULL(code,'')<>'' "
+           "AND profile{} ? LIMIT 1")
+    row = shared.query_one(sql.format("="), (name, profile))
+    if row is None and db is not None:
+        row = db.query_one("SELECT code FROM varieties WHERE (lower(IFNULL(cultivar,''))=lower(?) "
+                           "OR lower(name)=lower(?)) AND IFNULL(code,'')<>'' LIMIT 1", (name, name))
+    if row is None:
+        row = shared.query_one(sql.format("<>"), (name, profile))
+    return row["code"] if row else ph.variety_tag(name).upper()

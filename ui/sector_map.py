@@ -237,21 +237,24 @@ class SectorMap(StencilView):
     focused = StringProperty("")      # sector enfocado ("" = vista general)
 
     def focus(self, sid: str = "", animate: bool = True):
-        """Acerca el plano a un sector (o vuelve a la vista general) sin salir de la
-        pantalla. Se anima en ~0,35 s."""
+        """Acerca el plano a un sector («E2-S7»), a un equipo de riego entero («E2») o
+        vuelve a la vista general («»), sin salir de la pantalla. Se anima en ~0,35 s."""
         self.focused = sid or ""
         if not self.width or not self.height:
             Clock.schedule_once(lambda *_: self.focus(sid, animate), 0)
             return
         target_zoom, target_pan = 1.0, [0.0, 0.0]
-        rings = [r for i, r, _m, _a in self._parts if i == sid]
+        whole = bool(sid) and "-" not in sid           # equipo completo
+        rings = [r for i, r, _m, _a in self._parts
+                 if (i.startswith(sid + "-") if whole else i == sid)]
         if rings:
             old_zoom, old_pan = self.zoom, list(self._pan)
             self.zoom, self._pan = 1.0, [0.0, 0.0]
             pts = [self._local(r[k], r[k + 1]) for r in rings for k in range(0, len(r), 2)]
             xs, ys = [p[0] for p in pts], [p[1] for p in pts]
             bw, bh = max(xs) - min(xs) or 1, max(ys) - min(ys) or 1
-            target_zoom = max(1.0, min(self.MAX_ZOOM, .62 * min(self.width / bw, self.height / bh)))
+            fill = .92 if whole else .62
+            target_zoom = max(1.0, min(self.MAX_ZOOM, fill * min(self.width / bw, self.height / bh)))
             self.zoom = target_zoom
             pts = [self._local(r[k], r[k + 1]) for r in rings for k in range(0, len(r), 2)]
             cx = (min(p[0] for p in pts) + max(p[0] for p in pts)) / 2
@@ -337,23 +340,29 @@ class SectorMap(StencilView):
                     Ellipse(pos=(ex - dp(1), ey - dp(1)), size=(r * 2 + dp(2), r * 2 + dp(2)))
                     Color(1, 1, 1, 1)
                     Ellipse(pos=(ex, ey), size=(r * 2, r * 2))
-            # Sector elegido: contorno fino en el tono oscuro de su equipo y un destello
-            # neón que lo recorre (se anima aparte, ver _neon_tick).
-            self._sel_paths = []
+            # Sector elegido: contorno fino en el tono oscuro de su equipo y un brillo neón
+            # que «respira» (sube y baja), ver _neon_tick.
+            self._neon_layers = []
             if sel in outlines:
                 eq = info[sel]["equipo"]
+                rgb = _hex(NEON.get(eq, "#FFFFFF"))
+                core = _mix(rgb, [1, 1, 1], .5)
+                for width, color, lo, hi in ((dp(9), rgb, .04, .26), (dp(5), rgb, .10, .5),
+                                             (dp(2.2), core, .35, 1.0)):
+                    col = Color(*color, lo)
+                    self._neon_layers.append((col, lo, hi))
+                    for pts in outlines[sel]:
+                        xy = [(pts[k], pts[k + 1]) for k in range(0, len(pts), 2)]
+                        verts, idx = _strip(xy + xy[:1], width)
+                        if verts:
+                            self._neon_layers.append((Mesh(vertices=verts, indices=idx,
+                                                           mode="triangles"), None, None))
                 Color(*_hex(EQUIPO_RAMP.get(eq, ("#999999", "#333333"))[1]), 1)
                 for pts in outlines[sel]:
-                    Line(points=pts, close=True, width=dp(1.3))
-                for pts in outlines[sel]:
-                    xy = [(pts[k], pts[k + 1]) for k in range(0, len(pts), 2)] + [(pts[0], pts[1])]
-                    cum = [0.0]
-                    for (x0, y0), (x1, y1) in zip(xy, xy[1:]):
-                        cum.append(cum[-1] + math.hypot(x1 - x0, y1 - y0))
-                    if cum[-1] > 1:
-                        self._sel_paths.append((xy, cum))
-                self._neon_rgb = _hex(NEON.get(eq, "#FFFFFF"))
+                    Line(points=pts, close=True, width=dp(1.1))
             self._neon = InstructionGroup()      # dentro del Translate del plano
+            for instr, _lo, _hi in self._neon_layers:
+                self._neon.add(instr)
             self.canvas.add(self._neon)
             if self.rotate:          # norte
                 nx, ny = w - dp(26), h - dp(26)
@@ -365,77 +374,27 @@ class SectorMap(StencilView):
                 Rectangle(texture=tex, size=tex.size, pos=(nx - tex.width / 2, ny + dp(6)))
             PopMatrix()
         ev = getattr(self, "_neon_ev", None)
-        if self._sel_paths and ev is None:
+        if self._neon_layers and ev is None:
             self._neon_t = 0.0
             self._neon_ev = Clock.schedule_interval(self._neon_tick, 1 / 30)
-        elif not self._sel_paths and ev is not None:
+        elif not self._neon_layers and ev is not None:
             ev.cancel()
             self._neon_ev = None
         self._neon_tick(0)
 
-    # Destello: recorre el contorno en LOOP_S segundos, con una cola que se desvanece.
-    LOOP_S, TAIL, PIECES = 2.4, .35, 12
-
-    @staticmethod
-    def _at(xy, cum, d):
-        import bisect
-        i = max(1, min(len(cum) - 1, bisect.bisect_left(cum, d)))
-        seg = cum[i] - cum[i - 1] or 1
-        k = (d - cum[i - 1]) / seg
-        (x0, y0), (x1, y1) = xy[i - 1], xy[i]
-        return x0 + (x1 - x0) * k, y0 + (y1 - y0) * k, i
-
-    def _sub(self, xy, cum, d0, d1):
-        """Tramo del contorno entre las distancias d0 y d1 (d1 > d0, con vuelta)."""
-        total = cum[-1]
-        out = []
-        while d0 < d1:
-            a = d0 % total
-            b = min(d1 - d0 + a, total)
-            x, y, i = self._at(xy, cum, a)
-            pts = [(x, y)]
-            while i < len(cum) and cum[i] < b:
-                pts.append(xy[i])
-                i += 1
-            x, y, _i = self._at(xy, cum, b)
-            pts.append((x, y))
-            out.append(pts)
-            d0 += b - a
-        return out
+    BREATH_S = 2.2      # una respiración completa (sube y baja el brillo)
 
     def _neon_tick(self, dt):
         if self.parent is None and getattr(self, "_neon_ev", None) is not None:
             self._neon_ev.cancel()
             self._neon_ev = None
             return False
-        g = getattr(self, "_neon", None)
-        if g is None:
-            return
-        self._neon_t = (getattr(self, "_neon_t", 0.0) + dt) % self.LOOP_S
-        g.clear()
-        if not self._sel_paths:
-            return
-        rgb = self._neon_rgb
-        core = _mix(rgb, [1, 1, 1], .55)
-        phase = self._neon_t / self.LOOP_S
-        for xy, cum in self._sel_paths:
-            total = cum[-1]
-            tail = total * self.TAIL
-            head = phase * total + tail
-            step = tail / self.PIECES
-            for p in range(self.PIECES):
-                k = (p + 1) / self.PIECES            # 0 cola … 1 cabeza
-                for pts in self._sub(xy, cum, head - tail + p * step, head - tail + (p + 1) * step):
-                    for width, color, alpha in ((dp(9), rgb, .2), (dp(5), rgb, .42),
-                                                (dp(2.2), core, 1.0)):
-                        verts, idx = _strip(pts, width)
-                        if verts:
-                            g.add(Color(*color, alpha * k * k))
-                            g.add(Mesh(vertices=verts, indices=idx, mode="triangles"))
-            x, y, _i = self._at(xy, cum, head % total)       # cabeza encendida
-            for r, color, alpha in ((dp(7), rgb, .28), (dp(4.2), rgb, .55), (dp(2.4), [1, 1, 1], 1)):
-                g.add(Color(*color, alpha))
-                g.add(Ellipse(pos=(x - r, y - r), size=(2 * r, 2 * r)))
+        self._neon_t = (getattr(self, "_neon_t", 0.0) + dt) % self.BREATH_S
+        k = .5 - .5 * math.cos(2 * math.pi * self._neon_t / self.BREATH_S)   # 0 → 1 → 0
+        k = k * k * (3 - 2 * k)                                               # suave en los extremos
+        for instr, lo, hi in getattr(self, "_neon_layers", []):
+            if lo is not None:
+                instr.a = lo + (hi - lo) * k
 
     def _north(self):
         if "_N" not in self._textures:

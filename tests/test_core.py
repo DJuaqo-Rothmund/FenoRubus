@@ -1515,3 +1515,19 @@ def test_am_map_upper_sector_1_1_is_one_piece():
     assert len(s11["parts"]) == 2
     top, low = sorted(s11["parts"], key=lambda p: -max(p[1::2]))
     assert min(top[1::2]) >= max(low[1::2]) - 1      # separadas por el camino horizontal
+
+
+def test_catalog_code_for_new_sector(tmp_path):
+    """Al crear un sector desde el catálogo el código siempre se completa: el del catálogo,
+    el de un sector ya creado con esa variedad o la abreviatura derivada."""
+    import catalog
+    from workspaces import Workspaces
+    wss = Workspaces(str(tmp_path))
+    db = wss.open(wss.by_code("AM"))
+    catalog.add(wss.shared, "predio", "Tulameen", "")          # en el catálogo sin código
+    catalog.add(wss.shared, "id", "Tulameen", "TUL")           # pero I+D sí lo tiene
+    assert catalog.code_for(wss.shared, "Tulameen", db) == "TUL"
+    db.save_unit("Wakefield", "WKF", 3, 2)
+    catalog.add(wss.shared, "predio", "Wakefield", "")
+    assert catalog.code_for(wss.shared, "Wakefield", db) == "WKF"
+    assert catalog.code_for(wss.shared, "Heritage", db) == "HER"
