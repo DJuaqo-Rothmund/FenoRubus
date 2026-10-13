@@ -38,6 +38,7 @@ from notifications import FREQUENCIES, can_schedule_exact, request_exact_alarm_p
 from platform_utils import IS_ANDROID, app_version, data_subdir
 from ui import theme
 from ui.arcade import MindSky  # noqa: F401 - registra la clase para el KV
+from ui.splash_anim import LogoAnim  # noqa: F401 - logo animado de la apertura
 from ui.theme import c
 
 
@@ -575,8 +576,13 @@ class SplashScreen(MDScreen):
     """Pantalla de inicio: logo, nombre y firma (idéntica al presplash de Android)."""
 
     def animate_in(self):
-        """Sin animación: la pantalla ya se ve idéntica al presplash de Android, así que
-        continúa la misma imagen (una sola pantalla de inicio, no dos)."""
+        """Continúa el presplash de Android (la frambuesa-reloj) y anima el resto del logo:
+        círculo, dibujos del ciclo y manijas que avanzan mientras carga la app."""
+        self.ids.logo.start()
+
+    def finish(self, done):
+        """Las manijas terminan en las 10:10 del logo y luego done()."""
+        self.ids.logo.finish(done)
 
 
 class HomeScreen(MDScreen):

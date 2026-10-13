@@ -316,12 +316,9 @@
             size_hint: 1, None
             height: root.height * .5
             pos_hint: {"center_x": .5, "center_y": .6}
-            Image:
+            LogoAnim:
                 id: logo
-                source: theme.LOGO
                 size_hint: .62, .62
-                fit_mode: "contain"
-                mipmap: True
         Image:
             id: name
             source: theme.WORDMARK

@@ -60,7 +60,8 @@ MIME = {".html": "text/html", ".zip": "application/zip", ".sqlite3": "applicatio
 
 class FenoRubusApp(MDApp):
     title = "PhenoRubus"
-    SPLASH_MIN_S = 1.6  # tiempo mínimo visible de la pantalla de inicio
+    SPLASH_MIN_S = 1.3  # tiempo mínimo visible de la pantalla de inicio
+    BOOT_AFTER_S = 0.9  # se arma la app cuando los dibujos del logo ya casi llegaron
 
     # ------------------------------------------------------------ build
     def build(self):
@@ -283,7 +284,9 @@ class FenoRubusApp(MDApp):
     def on_start(self):
         self._t_start = time.monotonic()
         self.sm.get_screen("splash").animate_in()
-        Clock.schedule_once(self._boot, 0.15)  # deja pintar el logo antes de trabajar
+        # Los dibujos del logo llegan a su lugar sin tirones; recién entonces se arma la
+        # app (las manijas siguen marcando la hora mientras tanto).
+        Clock.schedule_once(self._boot, self.BOOT_AFTER_S)
 
     def _boot(self, *_):
         self.home = HomeScreen(name="home")  # el resto de pantallas se crea al primer uso
@@ -291,7 +294,8 @@ class FenoRubusApp(MDApp):
         self.home.refresh_current()
         self.start   # la pantalla de inicio también se arma detrás del logo
         wait = max(0.0, self.SPLASH_MIN_S - (time.monotonic() - self._t_start))
-        Clock.schedule_once(self._leave_splash, wait)
+        splash = self.sm.get_screen("splash")
+        Clock.schedule_once(lambda *_: splash.finish(self._leave_splash), wait)
 
     def _leave_splash(self, *_):
         self.sm.transition = FadeTransition(duration=0.25)   # solo logo -> inicio

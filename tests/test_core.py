@@ -1531,3 +1531,22 @@ def test_catalog_code_for_new_sector(tmp_path):
     catalog.add(wss.shared, "predio", "Wakefield", "")
     assert catalog.code_for(wss.shared, "Wakefield", db) == "WKF"
     assert catalog.code_for(wss.shared, "Heritage", db) == "HER"
+
+
+def test_splash_clock_ends_at_logo_time():
+    """Logo animado: al terminar de cargar, las manijas quedan exactas en las 10:10 del
+    logo, sin pasarse ni retroceder, y siempre con un margen para acomodar la hora."""
+    import json
+    import ui.splash_anim as sa
+    o = sa.LogoAnim.__new__(sa.LogoAnim)
+    with open(os.path.join(sa.DIR, "layout.json"), encoding="utf-8") as f:
+        o.L = json.load(f)
+    assert len(o.L["icons"]) == 5
+    m0, h0 = o.L["minute"]["deg"], o.L["hour"]["deg"]
+    for t in (0.0, 0.37, 1.12, 1.16, 2.9, 7.31):
+        end = sa.LogoAnim.finish_time(t)
+        assert end - t >= .25
+        o._finish = {"t": t, "end": end, "done": None, "hour0": o._hour_deg(t)}
+        before, after = o._hands(end - 1e-4), o._hands(end + 1e-4)
+        assert abs((before[0] - m0) % 360) < .5 and abs((before[1] - h0) % 360) < .5
+        assert after == (m0, h0, True)
