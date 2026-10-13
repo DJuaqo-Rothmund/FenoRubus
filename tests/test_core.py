@@ -1534,20 +1534,39 @@ def test_catalog_code_for_new_sector(tmp_path):
 
 
 def test_splash_clock_ends_at_logo_time():
-    """Logo animado: arranca en 9:10 (como el presplash) y en una vuelta del minutero
-    queda exacto en las 10:10 del logo, sin pasarse; la animación dura ~1,2 s."""
-    import json
-    pytest.importorskip("kivy")                  # el CI de pruebas no instala Kivy
-    import ui.splash_anim as sa
-    o = sa.LogoAnim.__new__(sa.LogoAnim)
-    with open(os.path.join(sa.DIR, "layout.json"), encoding="utf-8") as f:
-        o.L = json.load(f)
-    assert len(o.L["icons"]) == 5
-    m0, h0 = o.L["minute"]["deg"], o.L["hour"]["deg"]
-    assert o.hands(0) == pytest.approx((m0, h0 + 30))
-    m, h = o.hands(sa.TOTAL_S)
+    """Logo animado: arranca en 9:10 y al terminar la primera vuelta del minutero (cuando
+    llega el último dibujo) marca las 10:10 del logo; después el reloj sigue andando."""
+    import ui.splash_timeline as tl
+    L = tl.load_layout()
+    assert len(L["icons"]) == 5
+    m0, h0 = L["minute"]["deg"], L["hour"]["deg"]
+    assert tl.hands(L, 0) == pytest.approx((m0, h0 + 30))
+    m, h = tl.hands(L, tl.INTRO_S)
     assert abs((m - m0) % 360) < 1e-6 and abs(h - h0) < 1e-6
-    assert o.hands(sa.TOTAL_S + 5) == (m, h)          # se queda quieto al terminar
-    assert 1.0 < sa.TOTAL_S < 1.4
-    last_icon = sa.ICON_DELAY + (len(o.L["icons"]) - 1) * sa.ICON_STAGGER + sa.ICON_S
-    assert abs(last_icon - sa.TOTAL_S) < .1           # el último dibujo llega con las 10:10
+    assert 1.0 < tl.INTRO_S < 1.4
+    last_icon = tl.ICON_DELAY + (len(L["icons"]) - 1) * tl.ICON_STAGGER + tl.ICON_S
+    assert abs(last_icon - tl.INTRO_S) < .1             # el último dibujo llega con las 10:10
+    assert all(st is not None and st[3] == 1 for st in tl.icons(L, tl.INTRO_S + .1))
+    assert tl.hands(L, 5)[0] < tl.hands(L, 4)[0]          # el reloj sigue andando
+
+
+def test_splash_lottie_matches_timeline():
+    """La animación nativa (Lottie) sale de la misma línea de tiempo que la de Kivy: así al
+    quitarla no se nota el cambio."""
+    import json
+    import ui.splash_timeline as tl
+    path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                        "assets", "splash_lottie.json")
+    with open(path, encoding="utf-8") as f:
+        d = json.load(f)
+    assert d["fr"] == tl.LOTTIE_FPS and d["w"] == 1080 and d["h"] == 2340
+    assert os.path.getsize(path) < 900 * 1024
+    refs = {a["id"] for a in d["assets"]}
+    assert all(l.get("refId", next(iter(refs))) in refs for l in d["layers"])
+    L = tl.load_layout()
+    minute = next(l for l in d["layers"] if l["nm"] == "minute")
+    kfs = {k["t"]: k["s"][0] for k in minute["ks"]["r"]["k"]}
+    assert len(kfs) > 100
+    for f in (0, 30, 90, 300):
+        if f in kfs:
+            assert kfs[f] == pytest.approx(-tl.hands(L, f / tl.LOTTIE_FPS)[0], abs=1e-2)

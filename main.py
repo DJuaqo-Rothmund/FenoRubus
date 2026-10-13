@@ -12,10 +12,17 @@ from __future__ import annotations
 import hashlib
 import os
 import threading
+import time
 from concurrent.futures import ThreadPoolExecutor
 from functools import cached_property
 
 os.environ.setdefault("KIVY_LOG_MODE", "PYTHON")
+
+# Lo primero: la pantalla de carga animada de Android se queda hasta que la app termine de
+# precargar (si no, el sistema la quitaría a los 5 s, en medio de la carga).
+import splash_native  # noqa: E402
+
+splash_native.hold()
 
 from kivy.config import Config  # noqa: E402
 
@@ -39,7 +46,13 @@ from kivy.uix.floatlayout import FloatLayout  # noqa: E402
 from kivy.uix.image import Image  # noqa: E402
 from kivy.uix.screenmanager import FadeTransition, NoTransition  # noqa: E402
 
+from kivy.base import EventLoopBase  # noqa: E402
+
 from ui import theme  # noqa: E402
+
+# Kivy quita la pantalla de carga en su primer cuadro; aquí la quita la app, cuando todo
+# está precargado y el logo de Kivy va en el mismo cuadro que la animación nativa.
+EventLoopBase.remove_android_splash = lambda self, *args: None
 
 theme.install_palette()  # antes de cargar widgets KivyMD con color
 
@@ -278,21 +291,100 @@ class FenoRubusApp(MDApp):
     def settings(self):
         return self._screen(SettingsScreen, "settings")
 
+    # --------------------------------------------- apertura y precarga
+    SPLASH_MIN_S = 1.5    # el logo completa su entrada aunque la carga sea instantánea
+    SPLASH_MAX_S = 12.0   # pase lo que pase, a los 12 s se entra a la app
+    SPLASH_TAIL_S = .45   # logo de Kivy a la vista antes del fundido al inicio
+
     def on_start(self):
-        # Todo se arma ANTES del primer cuadro: mientras tanto sigue a la vista el presplash
-        # de Android (la misma frambuesa-reloj). Así la animación del logo corre después de
-        # corrido; si se armara durante la animación, el teléfono la congelaba un rato y
-        # luego saltaba de golpe.
-        self.home = HomeScreen(name="home")  # el resto de pantallas se crea al primer uso
-        self.sm.add_widget(self.home)
-        self.home.refresh_current()
-        self.start   # la pantalla de inicio también queda lista detrás del logo
-        splash = self.sm.get_screen("splash")
-        # Dos cuadros de margen: el primero sube las imágenes del logo a la GPU.
-        Clock.schedule_once(lambda *_: Clock.schedule_once(
-            lambda *_: splash.animate_in(self._leave_splash), 0), 0)
+        """Mientras corre la animación del logo (nativa de Android encima y la de Kivy
+        detrás, en el mismo cuadro) se arma y precarga la app de a un paso por cuadro.
+        Los tirones de cada paso no se ven: la animación nativa la dibuja Android en su
+        propio hilo. Al terminar, se quita la nativa y sigue la de Kivy hasta el inicio."""
+        self._t_start = time.monotonic()
+        # Seguro: pase lo que pase, la pantalla de carga nativa no tapa la app para siempre.
+        Clock.schedule_once(lambda *_: splash_native.remove(), self.SPLASH_MAX_S + 3)
+        logo = self.sm.get_screen("splash").ids.logo
+        logo.start(splash_native.lottie_time() or 0.0)
+        # Lo que no toca la interfaz (numpy de la IA, Jinja2 de los informes) se importa
+        # en paralelo.
+        self.workers.submit(self._preload_modules)
+        self._preload = self._preload_steps()
+        Clock.schedule_once(self._preload_next, 0)
+
+    def _preload_steps(self):
+        """Pasos de la precarga, del más necesario al menos (uno por cuadro)."""
+        def home():
+            self.home = HomeScreen(name="home")
+            self.sm.add_widget(self.home)
+
+        return [home, lambda: self.home.refresh_current(), lambda: self.start,
+                lambda: self.workspaces_screen, lambda: self.observation,
+                lambda: self.settings, lambda: self.settings.ids.varieties.refresh(),
+                lambda: self.variety, lambda: self.measure, lambda: self.timeline,
+                lambda: self.sectors, lambda: self.ailab,
+                lambda: self.home.ids.reports.refresh(),
+                lambda: self.home.ids.preview.refresh(),
+                self._preload_images]
+
+    def _preload_modules(self):
+        for mod in ("numpy", "ai_classifier", "jinja2", "reporter", "pdf_report"):
+            try:
+                __import__(mod)
+            except Exception as exc:  # noqa: BLE001
+                print("preload", mod, exc)
+
+    def _preload_images(self):
+        """Imágenes de la interfaz y frambuesas a la caché de Kivy (se abren al instante)."""
+        from kivy.core.image import Image as CoreImage
+        for parts in (("assets", "ui"), ("assets", "ui", "berries")):
+            path = resource_path(*parts)
+            for name in sorted(os.listdir(path)) if os.path.isdir(path) else []:
+                if name.endswith(".png"):
+                    try:
+                        CoreImage(os.path.join(path, name))
+                    except Exception:  # noqa: BLE001
+                        pass
+
+    def _sync_logo(self) -> bool:
+        t = splash_native.lottie_time()
+        if t is not None:
+            self.sm.get_screen("splash").ids.logo.sync(t)
+        return t is not None
+
+    def _preload_next(self, *_):
+        self._sync_logo()
+        late = time.monotonic() - self._t_start > self.SPLASH_MAX_S
+        if self._preload and not late:
+            step = self._preload.pop(0)
+            try:
+                step()
+            except Exception as exc:  # noqa: BLE001 (la precarga nunca debe cerrar la app)
+                print("preload:", exc)
+            Clock.schedule_once(self._preload_next, 0)
+            return
+        if self.home is None:          # se agotó el tiempo: lo mínimo para entrar
+            self.home = HomeScreen(name="home")
+            self.sm.add_widget(self.home)
+            self.home.refresh_current()
+        self._reveal_logo()
+
+    def _reveal_logo(self, *_):
+        """Quita la animación nativa justo cuando el logo de Kivy va en su mismo cuadro."""
+        logo = self.sm.get_screen("splash").ids.logo
+        if logo.t < self.SPLASH_MIN_S and time.monotonic() - self._t_start < self.SPLASH_MAX_S:
+            self._sync_logo()
+            Clock.schedule_once(self._reveal_logo, 0)
+            return
+        # El cuadro de Kivy ya quedó igual al nativo: se quita en el próximo cuadro. Siempre
+        # se quita (también la imagen fija de respaldo, si Android no pudo mostrar la
+        # animación): ni Kivy ni el sistema la quitan solos (ver splash_native.hold).
+        self._sync_logo()
+        Clock.schedule_once(lambda *_: splash_native.remove(), 0)
+        Clock.schedule_once(self._leave_splash, self.SPLASH_TAIL_S)
 
     def _leave_splash(self, *_):
+        self.sm.get_screen("splash").ids.logo.stop()
         self.sm.transition = FadeTransition(duration=0.25)   # solo logo -> inicio
         self.start   # la pantalla de inicio es siempre lo primero al abrir la app
         self.sm.current = "start"
@@ -302,12 +394,6 @@ class FenoRubusApp(MDApp):
         request_runtime_permissions()
         self.reminders.apply()
         Clock.schedule_interval(lambda *_: self._check_reminder(), 60)
-        # Precarga, de a una y en reposo, las pantallas que más cuesta crear en teléfonos
-        # básicos (p. ej. Samsung A06): así se abren al instante al tocarlas.
-        self._prewarm = [lambda: self.observation,
-                         lambda: self.settings,
-                         lambda: self.settings.ids.varieties.refresh()]
-        Clock.schedule_once(self._prewarm_next, 2.5)
         # Nombres de foto «ddmmaaaa-…» (hasta la 1.1.30) -> «aaaammdd-…»: archivos de la app,
         # galería del teléfono y (al respaldar) Google Drive.
         Clock.schedule_once(lambda *_: self.workers.submit(self._rename_photos), 4)
@@ -342,23 +428,6 @@ class FenoRubusApp(MDApp):
             self.toast(f"Fotos renombradas (fecha año-mes-día y código del ensayo): {max(local, public)}")
         if self.db.get_setting("drive_enabled", False):
             self.drive.flush_async()   # renombra también las ya subidas a Drive
-
-    def _prewarm_next(self, *_):
-        """Crea la siguiente pantalla pendiente solo si el usuario está en reposo en el
-        inicio; si está usando la app, lo reintenta más tarde para no trabarla."""
-        if not self._prewarm:
-            return
-        # Solo en reposo en el muestreo: en la pantalla de inicio el usuario está por tocar
-        # algo y una precarga (≈0,5 s en teléfonos básicos) se sentiría como un tirón.
-        if self.sm.current != "home" or self.sm.transition.is_active:
-            Clock.schedule_once(self._prewarm_next, 3)
-            return
-        step = self._prewarm.pop(0)
-        try:
-            step()
-        except Exception as exc:  # noqa: BLE001 (la precarga nunca debe cerrar la app)
-            print("prewarm:", exc)
-        Clock.schedule_once(self._prewarm_next, 2)
 
     def on_resume(self):
         self.week = self.db.current_week() if self.week is None else self.week

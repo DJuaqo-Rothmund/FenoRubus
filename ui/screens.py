@@ -573,12 +573,8 @@ class NavTile(ButtonBehavior, BoxLayout):
 # Home
 # ===========================================================================
 class SplashScreen(MDScreen):
-    """Pantalla de inicio: logo, nombre y firma (idéntica al presplash de Android)."""
-
-    def animate_in(self, done=None):
-        """Continúa el presplash de Android (la frambuesa-reloj) y anima el resto del logo:
-        círculo, dibujos del ciclo y una vuelta del minutero hasta las 10:10; luego done()."""
-        self.ids.logo.start(done)
+    """Pantalla de apertura: logo animado, nombre y firma, igual que la pantalla de carga
+    nativa de Android. La animación la maneja la app (main.on_start)."""
 
 
 class HomeScreen(MDScreen):
