@@ -381,10 +381,13 @@ class PhenologyClassifier:
     def invalidate(self) -> None:
         self._cache = None
 
-    def add_reference(self, image_path: str, bbch_code: int, photo_id: int | None = None) -> int:
+    def add_reference(self, image_path: str, bbch_code: int, photo_id: int | None = None,
+                      db=None) -> int:
+        """db: base del ensayo/predio dueño de la foto (por defecto, el activo); la memoria
+        es común a todos."""
         emb = self.extractor.extract_path(image_path)
-        ref_id = self.db.add_reference(bbch_code, self.extractor.name, emb.tobytes(),
-                                       int(emb.size), image_path, photo_id)
+        ref_id = (db or self.db).add_reference(bbch_code, self.extractor.name, emb.tobytes(),
+                                               int(emb.size), image_path, photo_id)
         self.invalidate()
         return ref_id
 

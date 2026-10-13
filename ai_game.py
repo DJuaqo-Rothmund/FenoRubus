@@ -13,8 +13,9 @@ Cada día se generan 5 desafíos (deterministas para esa fecha):
   y con pocas referencias); el usuario aporta una foto, la IA dice qué vio y
   luego aprende con la etiqueta pedida.
 
-Puntos (XP), nivel, racha de días consecutivos y precisión en los quiz se
-guardan en settings («ai_game»).
+El entrenador es UNO para todo el teléfono: los desafíos, los puntos (XP), el nivel, la
+racha y la precisión viven en la base común (no cambian al pasar de I+D a un predio) y las
+fotos para nombrar salen de todos los ensayos y predios.
 """
 from __future__ import annotations
 
@@ -31,12 +32,57 @@ XP = {"quiz_ok": 15, "quiz_bad": 5, "teach": 10, "capture": 20, "capture_bonus":
 RECENT_DAYS = 14
 
 
+def detail_photos(dbs, season: int | None = None) -> list[dict]:
+    """Fotos de detalle de TODOS los ensayos y predios (las más recientes primero). Cada una
+    lleva «ws» (código) y «db» (su base) para etiquetarla donde corresponde."""
+    out = []
+    for db in dbs:
+        for p in db.list_detail_photos(season):
+            p["ws"], p["db"] = db.code, db
+            out.append(p)
+    out.sort(key=lambda p: (p["start_date"] or "", p["id"]), reverse=True)
+    return out
+
+
 class DailyChallenge:
     SETTING = "ai_game"
 
-    def __init__(self, db, classifier_getter):
+    def __init__(self, db, classifier_getter, sources=None):
+        """db: ensayo/predio activo (semana actual). sources(): todas las bases del teléfono
+        (por defecto solo db). Desafíos y puntaje van a la base común (db.ai_db)."""
         self.db = db
+        self.store = db.ai_db
+        self._sources = sources or (lambda: [db])
         self._classifier = classifier_getter  # carga diferida (numpy)
+        self._merge_old_stats()
+
+    def _merge_old_stats(self) -> None:
+        """Versiones anteriores guardaban el puntaje en cada ensayo: se suma una vez."""
+        if self.store is self.db or self.store.get_setting("ai_game_merged"):
+            return
+        st = dict(self.store.get_setting(self.SETTING) or {})
+        for src in self._sources():
+            row = src.query_one("SELECT value FROM settings WHERE key=?", (self.SETTING,))
+            if not row:
+                continue
+            try:
+                old = json.loads(row["value"]) or {}
+            except (TypeError, ValueError):
+                continue
+            for k in ("xp", "answered", "correct"):
+                st[k] = st.get(k, 0) + int(old.get(k) or 0)
+            st["best"] = max(st.get("best", 0), int(old.get("best") or 0))
+            if (old.get("last_day") or "") > (st.get("last_day") or ""):
+                st["last_day"], st["streak"] = old["last_day"], int(old.get("streak") or 0)
+        if st:
+            self.store.set_setting(self.SETTING, st)
+        self.store.set_setting("ai_game_merged", True)
+
+    def _db_for(self, code):
+        """Base dueña de una foto de desafío (por su código de ensayo/predio)."""
+        if code is None:
+            return self.db
+        return next((d for d in self._sources() if d.code == code), self.db)
 
     @property
     def classifier(self):
@@ -45,7 +91,7 @@ class DailyChallenge:
     # ------------------------------------------------------------- estado
     def stats(self) -> dict:
         st = {"xp": 0, "streak": 0, "best": 0, "last_day": None, "answered": 0, "correct": 0}
-        st.update(self.db.get_setting(self.SETTING) or {})
+        st.update(self.store.get_setting(self.SETTING) or {})
         st["level"] = st["xp"] // 100 + 1
         st["level_progress"] = (st["xp"] % 100) / 100
         st["accuracy"] = st["correct"] / st["answered"] if st["answered"] else None
@@ -53,11 +99,11 @@ class DailyChallenge:
 
     def _save(self, st: dict) -> None:
         keep = {k: st[k] for k in ("xp", "streak", "best", "last_day", "answered", "correct")}
-        self.db.set_setting(self.SETTING, keep)
+        self.store.set_setting(self.SETTING, keep)
 
     def challenges(self, day: _dt.date | None = None) -> list[dict]:
         day = (day or _dt.date.today()).isoformat()
-        rows = self.db.query("SELECT * FROM challenges WHERE day=? ORDER BY idx", (day,))
+        rows = self.store.query("SELECT * FROM challenges WHERE day=? ORDER BY idx", (day,))
         for r in rows:
             r["payload"] = json.loads(r["payload"])
         return rows
@@ -80,7 +126,7 @@ class DailyChallenge:
                   self._target_codes(week["week_number"], N_CHALLENGES - n_id, rnd)]
         now = _dt.datetime.now().isoformat(timespec="seconds")
         for i, (kind, payload) in enumerate(items):
-            self.db.execute(
+            self.store.execute(
                 "INSERT OR IGNORE INTO challenges(day, idx, kind, payload, created_at) VALUES (?,?,?,?,?)",
                 (day.isoformat(), i, kind, json.dumps(payload, ensure_ascii=False), now))
         return self.challenges(day)
@@ -88,12 +134,13 @@ class DailyChallenge:
     def _candidate_photos(self, day: _dt.date, rnd: random.Random) -> list[dict]:
         since = (day - _dt.timedelta(days=RECENT_DAYS)).isoformat()
         used = set()
-        for r in self.db.query("SELECT payload FROM challenges WHERE kind='identify' AND day>=?",
-                               (since,)):
-            used.add(json.loads(r["payload"]).get("photo_id"))
+        for r in self.store.query("SELECT payload FROM challenges WHERE kind='identify' AND day>=?",
+                                  (since,)):
+            pl = json.loads(r["payload"])
+            used.add((pl.get("ws", self.db.code), pl.get("photo_id")))
         import os
-        photos = [p for p in self.db.list_detail_photos()
-                  if p["id"] not in used and os.path.exists(p["path"])]
+        photos = [p for p in detail_photos(self._sources())
+                  if (p["ws"], p["id"]) not in used and os.path.exists(p["path"])]
         rnd.shuffle(photos)
         # Primero las que la IA aún no conoce (enseñan más).
         photos.sort(key=lambda p: bool(p["in_reference"]))
@@ -117,7 +164,8 @@ class DailyChallenge:
         while len(options) < 4 and pool:
             options.append(pool.pop(rnd.randrange(len(pool))))
         options = sorted(options[:4], key=ph.bbch_value)
-        return ("identify", {"photo_id": photo["id"], "path": photo["path"], "truth": truth,
+        return ("identify", {"photo_id": photo["id"], "ws": photo.get("ws"),
+                             "path": photo["path"], "truth": truth,
                              "ai": ai[0] if ai else None, "options": options,
                              "variety": photo["variety_name"], "week": ph.week_title(photo)})
 
@@ -181,7 +229,7 @@ class DailyChallenge:
                          self.db.current_week(day)["week_number"], 1, rnd)
             item = self._capture_payload(codes[0])
         idx = max((c["idx"] for c in rows), default=-1) + 1
-        self.db.execute(
+        self.store.execute(
             "INSERT INTO challenges(day, idx, kind, payload, created_at) VALUES (?,?,?,?,?)",
             (day.isoformat(), idx, item[0], json.dumps(item[1], ensure_ascii=False),
              _dt.datetime.now().isoformat(timespec="seconds")))
@@ -192,7 +240,7 @@ class DailyChallenge:
 
     def _finish(self, ch: dict, answer: str, correct: int | None, xp: int,
                 status: str = "done") -> dict:
-        self.db.execute("UPDATE challenges SET status=?, answer=?, correct=? WHERE id=?",
+        self.store.execute("UPDATE challenges SET status=?, answer=?, correct=? WHERE id=?",
                         (status, answer, correct, ch["id"]))
         st = self.stats()
         st["xp"] += xp
@@ -213,7 +261,7 @@ class DailyChallenge:
         return {"xp": xp, "day_done": day_done, "stats": self.stats()}
 
     def _get(self, ch_id: int) -> dict:
-        ch = self.db.query_one("SELECT * FROM challenges WHERE id=?", (ch_id,))
+        ch = self.store.query_one("SELECT * FROM challenges WHERE id=?", (ch_id,))
         ch["payload"] = json.loads(ch["payload"])
         return ch
 
@@ -231,11 +279,13 @@ class DailyChallenge:
             xp = XP["quiz_ok"] if ok else XP["quiz_bad"]
         else:
             ok, label, xp = None, int(code), XP["teach"]
-            obs = self.db.query_one("SELECT observation_id FROM photos WHERE id=?", (p["photo_id"],))
+        src = self._db_for(p.get("ws"))      # el ensayo o predio de la foto
+        if truth is None:
+            obs = src.query_one("SELECT observation_id FROM photos WHERE id=?", (p["photo_id"],))
             if obs:  # la respuesta etiqueta también el registro sin estado
-                self.db.update_observation(obs["observation_id"], bbch_code=label,
-                                           bbch_label=ph.bbch_label(label, self.db.bbch_names()))
-        self.classifier.add_reference(p["path"], label, photo_id=p["photo_id"])
+                src.update_observation(obs["observation_id"], bbch_code=label,
+                                       bbch_label=ph.bbch_label(label, src.bbch_names()))
+        self.classifier.add_reference(p["path"], label, photo_id=p["photo_id"], db=src)
         res = self._finish(ch, str(code), None if ok is None else int(ok), xp)
         res.update({"correct": ok, "truth": truth, "ai": p.get("ai"), "label": label})
         return res

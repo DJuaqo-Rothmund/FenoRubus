@@ -341,7 +341,7 @@
             pos_hint: {"center_x": .5, "y": .04}
 
 # ---------------------------------------------------------------------------
-# Inicio: I+D / Predio, Asistente IA y cuenta de Google
+# Inicio: I+D / Predio, Entrenador IA y cuenta de Google
 # ---------------------------------------------------------------------------
 <StartIcon>:
     orientation: "vertical"
@@ -569,7 +569,7 @@
             source: theme.START_AI_NIGHT
             bubble: theme.BLOB_AI
             glow: theme.AI_GLOW
-            label: "Asistente IA"
+            label: "Entrenador IA"
             color: c("#3A5AE6")
             diameter: dp(118)
             pos_hint: {"center_x": .5}
@@ -605,7 +605,7 @@
             id: bar
             title: "Muestreo semanal"
             left_action_items: [["home-outline", lambda x: app.open_start(), "Inicio"]]
-            right_action_items: [[theme.AI_BAR, lambda x: app.open_ai_lab(), "Asistente IA"], [theme.DRIVE_UP, lambda x: root.drive_quick(), "Subir a Google Drive"], ["cog-outline", lambda x: app.open_settings(), "Ajustes"]]
+            right_action_items: [[theme.AI_BAR, lambda x: app.open_ai_lab(), "Entrenador IA"], [theme.DRIVE_UP, lambda x: root.drive_quick(), "Subir a Google Drive"], ["cog-outline", lambda x: app.open_settings(), "Ajustes"]]
         WorkspaceBanner:
             id: ws_banner
             on_release: app.open_workspaces(app.workspace["profile"] if app.workspace else None)

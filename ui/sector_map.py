@@ -27,23 +27,36 @@ from kivy.uix.stencilview import StencilView
 from ui import theme
 from ui.theme import c
 
-# Relleno por macroestadio BBCH (más intenso que las fichas, para leerse en el plano):
-# (color, texto claro encima).
-MAP_STAGE = {
-    0: ("#A9805A", True), 1: ("#9CCB82", False), 3: ("#4E9A52", True), 5: ("#CFDC6A", False),
-    6: ("#F3EAB5", False), 7: ("#2F7D4F", True), 8: ("#C2185B", True), 9: ("#B08A3E", True),
+# Cada equipo de riego con su tono; dentro de él, del sector 1 (claro) al 10 (oscuro).
+EQUIPO_RAMP = {
+    1: ("#F2978B", "#7A1414"),   # rojos
+    2: ("#F2D266", "#8A5A06"),   # amarillos ocre
+    3: ("#93C0EC", "#163F78"),   # azules
+    4: ("#A3D88F", "#235A20"),   # verdes
 }
-NO_STAGE = ("#BFD9C2", False)   # con fotos o mediciones, sin estado BBCH
+EMPTY = "#E6E8E3"       # sector sin datos: su color, muy desvaído hacia este gris
+N_SECTORS = 10
 
 
-def stage_fill(code):
-    """(rgba, texto claro) del sector según su último estado BBCH (None = sin estado)."""
-    if code is None:
-        col, dark = NO_STAGE
-    else:
-        import phenology as ph
-        col, dark = MAP_STAGE.get(ph.macro_of(code), NO_STAGE)
-    return c(col), dark
+def _hex(col):
+    col = col.lstrip("#")
+    return [int(col[i:i + 2], 16) / 255 for i in (0, 2, 4)]
+
+
+def sector_color(equipo, sector, faded: bool = False):
+    """(rgba, texto claro encima) del sector según su equipo de riego y número."""
+    lo, hi = EQUIPO_RAMP.get(int(equipo or 0), ("#DDDDDD", "#555555"))
+    t = min(1.0, max(0.0, (int(sector or 1) - 1) / (N_SECTORS - 1)))
+    rgb = [a + (b - a) * t for a, b in zip(_hex(lo), _hex(hi))]
+    if faded:
+        rgb = [x * .14 + e * .86 for x, e in zip(rgb, _hex(EMPTY))]
+    lum = .299 * rgb[0] + .587 * rgb[1] + .114 * rgb[2]
+    return [*rgb, 1.0], (lum < .55 and not faded)
+
+
+def equipo_chip(equipo):
+    """Color medio del equipo (leyenda)."""
+    return sector_color(equipo, 6)
 
 
 MAPS_DIR = Path(__file__).resolve().parent.parent / "assets" / "maps"
@@ -107,8 +120,9 @@ def _label_point(ring):
 
 
 class SectorMap(StencilView):
-    """Plano de sectores (recortado a su recuadro al acercar).
-    `status` = {id_sector: {"fill": rgba, "dark": texto claro, "dot": tiene mediciones}}."""
+    """Plano de sectores (recortado a su recuadro al acercar), cada uno con el tono de su
+    equipo de riego; los que no tienen datos quedan desvaídos.
+    `status` = {id_sector: {"data": tiene registros o mediciones, "dot": tiene mediciones}}."""
     selected = StringProperty("")
     rotate = BooleanProperty(False)
     zoomable = BooleanProperty(False)
@@ -196,8 +210,8 @@ class SectorMap(StencilView):
     # ---------------------------------------------------------------- dibujo
     def _texture(self, sid):
         if sid not in self._textures:
-            eq, se = sid[1:].split("-S")
-            lb = CoreLabel(text=f"{eq}-{se}", font_size=sp(10), bold=True)
+            se = sid.split("-S")[-1]       # el equipo ya se reconoce por el color
+            lb = CoreLabel(text=se, font_size=sp(11), bold=True)
             lb.refresh()
             self._textures[sid] = lb.texture
         return self._textures[sid]
@@ -206,16 +220,18 @@ class SectorMap(StencilView):
         self.canvas.clear()
         if not self.width or not self.height:
             return
-        empty = c("#E3E6DF")
         sel = self.selected
+        info = {x["id"]: x for x in self.plan["sectors"]}
+        colors = {sid: sector_color(info[sid]["equipo"], info[sid]["sector"],
+                                    faded=not (self.status.get(sid) or {}).get("data"))
+                  for sid in info}
         ts = self._local
         w, h = self.size
         with self.canvas:
             PushMatrix()
             self._shift = Translate(*self.pos)
             for sid, ring, meshes, _a in self._parts:
-                st = self.status.get(sid) or {}
-                Color(*(st.get("fill") or empty))
+                Color(*colors[sid][0])
                 for verts, idx in meshes:
                     v = list(verts)
                     for k in range(0, len(v), 4):
@@ -238,21 +254,23 @@ class SectorMap(StencilView):
                 if math.sqrt(area) * s < tex.width * .9:
                     continue
                 st = self.status.get(sid) or {}
-                Color(*(c(theme.INK, .78) if not st.get("fill") else c("#FFFFFF", 1)
-                        if st.get("dark") else c(theme.INK, .9)))
+                Color(*(c("#FFFFFF") if colors[sid][1] else
+                        c(theme.INK, .9) if st.get("data") else c(theme.MUTED, .75)))
                 Rectangle(texture=tex, size=tex.size, pos=(x - tex.width / 2, y - tex.height / 2))
-                if st.get("dot"):
-                    r = dp(3.2)
-                    Color(*c(theme.BERRY))
-                    Ellipse(pos=(x + tex.width / 2 + dp(1), y + tex.height / 2 - r * 1.6),
-                            size=(r * 2, r * 2))
+                if st.get("dot"):        # mediciones: punto blanco con borde oscuro
+                    r = dp(3.4)
+                    ex, ey = x + tex.width / 2 + dp(2), y + tex.height / 2 - r * 1.7
+                    Color(*c(theme.INK, .8))
+                    Ellipse(pos=(ex - dp(1), ey - dp(1)), size=(r * 2 + dp(2), r * 2 + dp(2)))
+                    Color(1, 1, 1, 1)
+                    Ellipse(pos=(ex, ey), size=(r * 2, r * 2))
             if sel in outlines:
-                Color(*c(theme.INK, .35))
+                Color(*c(theme.INK, .9))
                 for pts in outlines[sel]:
-                    Line(points=pts, close=True, width=dp(4.2))
-                Color(*c(theme.BERRY))
+                    Line(points=pts, close=True, width=dp(3.6))
+                Color(1, 1, 1, 1)
                 for pts in outlines[sel]:
-                    Line(points=pts, close=True, width=dp(2.4))
+                    Line(points=pts, close=True, width=dp(1.4))
             if self.rotate:          # norte
                 nx, ny = w - dp(26), h - dp(26)
                 Color(*c(theme.LEAF_DARK, .85))

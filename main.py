@@ -164,6 +164,13 @@ class FenoRubusApp(MDApp):
         db.workspace = dict(ws)
         return db
 
+    def all_dbs(self) -> list:
+        """Bases de todos los ensayos y predios activos (el entrenador IA es uno solo)."""
+        dbs = [self.open_db(ws) for ws in self.workspaces.list()]
+        if self.db is not None and all(d is not self.db for d in dbs):
+            dbs.append(self.db)
+        return dbs
+
     def open_workspaces(self, profile: str | None = None):
         """profile: «id» o «predio» desde la pantalla de inicio (menú solo de ese perfil)."""
         scr = self.workspaces_screen
@@ -181,7 +188,7 @@ class FenoRubusApp(MDApp):
         return self._screen(StartScreen, "start")
 
     def open_start(self):
-        """Pantalla de inicio (I+D, Predio, Asistente IA, cuenta de Google)."""
+        """Pantalla de inicio (I+D, Predio, Entrenador IA, cuenta de Google)."""
         self.start
         self._history = []
         self.sm.current = "start"

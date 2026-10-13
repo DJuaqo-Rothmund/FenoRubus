@@ -674,7 +674,7 @@ class StartIcon(ButtonBehavior, BoxLayout):
     source = StringProperty()
     bubble = StringProperty("")
     glow = StringProperty("")
-    glow_level = NumericProperty(.55)   # brillo que «respira» (Asistente IA)
+    glow_level = NumericProperty(.55)   # brillo que «respira» (Entrenador IA)
     label = StringProperty()
     color = ColorProperty([0, 0, 0, 1])
     diameter = NumericProperty(dp(130))
@@ -695,7 +695,7 @@ class GoogleButton(ButtonBehavior, FloatLayout):
 
 
 class StartScreen(MDScreen):
-    """Lo primero que se ve al abrir la app: I+D, Predio, Asistente IA y la cuenta de Google."""
+    """Lo primero que se ve al abrir la app: I+D, Predio, Entrenador IA y la cuenta de Google."""
     _animated = False
 
     def on_pre_enter(self, *_):
@@ -2969,7 +2969,6 @@ class PreviewTab(MDScreen):
     # ------------------------------------------------------- plano del predio
     def _sector_data(self, sm, plan):
         """Por sector del plano: sus unidades y totales; y las unidades sin ubicar."""
-        from ui.sector_map import stage_fill
         counts = app().db.measure_counts(app().season)
         known = {s["id"]: s for s in plan["sectors"]}
         data = {sid: {"plan": s, "rows": [], "records": 0, "photos": 0, "measures": 0,
@@ -2993,12 +2992,11 @@ class PreviewTab(MDScreen):
         status = {}
         for sid, d in data.items():
             if d["records"] or d["measures"]:
-                fill, dark = stage_fill(d["last"][1]["code"] if d["last"] else None)
-                status[sid] = {"fill": fill, "dark": dark, "dot": d["measures"] > 0}
+                status[sid] = {"data": True, "dot": d["measures"] > 0}
         return data, status, loose
 
     def _build_map(self, sm, plan, box, span):
-        from ui.sector_map import MAP_STAGE, NO_STAGE, SectorMap
+        from ui.sector_map import SectorMap, equipo_chip
         data, status, loose = self._sector_data(sm, plan)
         self._sectors = data
         active = [sid for sid in data if sid in status]
@@ -3013,21 +3011,18 @@ class PreviewTab(MDScreen):
         mp.bind(width=lambda w, v: setattr(w, "height", max(dp(180), v * plan["h"] / plan["w"])))
         self._map = mp
         box.add_widget(mp)
-        # Leyenda (solo los estados presentes) y botón para ampliar.
+        # Leyenda: un color por equipo de riego (claro = sector 1 … oscuro = sector 10).
         from kivy.factory import Factory
         from kivy.uix.stacklayout import StackLayout
         legend = StackLayout(size_hint_y=None, spacing=dp(6))
         legend.bind(minimum_height=legend.setter("height"))
-        macros = sorted({ph.macro_of(d["last"][1]["code"]) for d in data.values() if d["last"]})
-        for m in macros:
-            col, dark = MAP_STAGE.get(m, NO_STAGE)
-            legend.add_widget(StageChip(text=ph.MACRO_STAGES.get(m, ""), bg=c(col),
-                                        fg=c("#FFFFFF") if dark else c(theme.INK)))
-        if any(sid in status and not data[sid]["last"] for sid in data):
-            legend.add_widget(StageChip(text="Sin estado", bg=c(NO_STAGE[0]), fg=c(theme.INK)))
-        legend.add_widget(StageChip(text="Sin datos", bg=c("#E3E6DF"), fg=c(theme.MUTED)))
+        for eq in sorted({s["equipo"] for s in plan["sectors"]}):
+            col, light = equipo_chip(eq)
+            legend.add_widget(StageChip(text=f"Equipo {eq}", bg=col,
+                                        fg=c("#FFFFFF") if light else c(theme.INK)))
+        legend.add_widget(StageChip(text="Desvaído: sin datos", bg=c("#EEF0EC"), fg=c(theme.MUTED)))
         if any(st["dot"] for st in status.values()):
-            legend.add_widget(StageChip(text="• con mediciones", bg=c("#FFFFFF"), fg=c(theme.BERRY)))
+            legend.add_widget(StageChip(text="• con mediciones", bg=c("#FFFFFF"), fg=c(theme.INK)))
         box.add_widget(legend)
         zoom = Factory.SegButton(text="Ampliar plano", size_hint=(None, None), height=dp(36),
                                  font_size="14sp", pos_hint={"center_x": .5})
@@ -3842,7 +3837,7 @@ class AILabScreen(MDScreen):
         a = app()
         if getattr(self, "_game", None) is None or self._game.db is not a.db:   # cambió de ensayo
             from ai_game import DailyChallenge
-            self._game = DailyChallenge(a.db, lambda: a.classifier)
+            self._game = DailyChallenge(a.db, lambda: a.classifier, a.all_dbs)
         return self._game
 
     _mode = None          # modo en juego («identify» / «capture»); None = sala de juego
@@ -4157,12 +4152,14 @@ class AILabScreen(MDScreen):
         self.ids.auto_learn.active = bool(a.db.get_setting("ai_auto_learn", True))
         box = self.ids.photos
         fast_clear(box)
-        photos = a.db.list_detail_photos(a.season)
+        from ai_game import detail_photos
+        photos = detail_photos(a.all_dbs(), a.season)   # de todos los ensayos y predios
+        several = len({p["ws"] for p in photos}) > 1
         limit = getattr(self, "_label_limit", 12)
         for p in photos[:limit]:
             code = p["bbch_code"]
             row = LabelPhotoRow(
-                title=f"{p['variety_name']} · {ph.week_short(p)}",
+                title=(f"{p['ws']} · " if several else "") + f"{p['variety_name']} · {ph.week_short(p)}",
                 subtitle=(f"BBCH {ph.code_str(code)}" if code is not None else "Sin estado")
                 + f" · {p['week_label']}", in_reference=bool(p["in_reference"]), photo=p)
             row.ids.thumb_box.add_widget(thumb_widget(p["path"]))
@@ -4186,12 +4183,14 @@ class AILabScreen(MDScreen):
     def label_dialog(self, caller, photo):
         a = app()
 
+        src = photo.get("db") or a.db     # el ensayo o predio dueño de la foto
+
         def assign(code):
-            a.classifier.add_reference(photo["path"], code, photo_id=photo["id"])
-            obs = a.db.query_one("SELECT * FROM observations WHERE id=?", (photo["observation_id"],))
+            a.classifier.add_reference(photo["path"], code, photo_id=photo["id"], db=src)
+            obs = src.query_one("SELECT * FROM observations WHERE id=?", (photo["observation_id"],))
             if obs and obs["bbch_code"] is None:
-                a.db.update_observation(obs["id"], bbch_code=code,
-                                        bbch_label=ph.bbch_label(code, a.db.bbch_names()))
+                src.update_observation(obs["id"], bbch_code=code,
+                                       bbch_label=ph.bbch_label(code, src.bbch_names()))
             a.toast(f"Referencia agregada: BBCH {ph.code_str(code)}")
             self.refresh_label()
 
@@ -4203,7 +4202,8 @@ class AILabScreen(MDScreen):
 
     def add_all_labeled(self):
         a = app()
-        todo = [p for p in a.db.list_detail_photos() if p["bbch_code"] is not None
+        from ai_game import detail_photos
+        todo = [p for p in detail_photos(a.all_dbs()) if p["bbch_code"] is not None
                 and not p["in_reference"] and os.path.exists(p["path"])]
         if not todo:
             a.toast("No hay fotos etiquetadas pendientes.")
@@ -4211,7 +4211,7 @@ class AILabScreen(MDScreen):
 
         def work():
             for p in todo:
-                a.classifier.add_reference(p["path"], p["bbch_code"], photo_id=p["id"])
+                a.classifier.add_reference(p["path"], p["bbch_code"], photo_id=p["id"], db=p["db"])
             Clock.schedule_once(lambda *_: (a.toast(f"{len(todo)} referencias agregadas"),
                                             self.refresh_label()))
 

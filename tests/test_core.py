@@ -1451,3 +1451,35 @@ def test_predio_map_sectors_and_measure_counts(db):
     assert db.measure_counts(w["season"]) == {vid: 1}
     row = next(r for r in report_summary(db, "matrix", w["season"])["rows"] if r["variety_id"] == vid)
     assert f"E{row['irrigation']}-S{row['sector']}" == "E2-S7"
+
+
+def test_ai_trainer_is_shared_between_workspaces(tmp_path):
+    """El Entrenador IA es uno por teléfono: puntaje y desafíos no cambian al pasar de I+D
+    a un predio, y nombra fotos de todos los ensayos y predios (la etiqueta vuelve al
+    registro de su propio predio)."""
+    import json
+    from ai_game import DailyChallenge, detail_photos
+    from workspaces import Workspaces
+    wss = Workspaces(str(tmp_path))
+    nv, am = wss.open(wss.by_code("NV")), wss.open(wss.by_code("AM"))
+    nv.set_setting("ai_game", {"xp": 40})      # versión anterior: puntaje en cada ensayo
+    am.conn.execute("INSERT OR REPLACE INTO settings(key, value) VALUES ('ai_game', ?)",
+                    (json.dumps({"xp": 30, "best": 2}),))
+    am.conn.commit()
+    week = am.current_week(dt.date(2026, 10, 5))
+    vid = am.save_unit("Heritage", "", 7, 2)
+    obs = am.get_or_create_observation(vid, week["id"])
+    pid = am.add_photo(obs["id"], "detail", synthetic_photo(65, "detail", str(tmp_path / "am.jpg"), 1))
+    clf = PhenologyClassifier(nv, HandcraftedExtractor())
+    sources = lambda: [nv, am]   # noqa: E731
+    g_nv = DailyChallenge(nv, lambda: clf, sources)
+    assert g_nv.stats()["xp"] == 70 and g_nv.stats()["best"] == 2
+    assert [(p["ws"], p["id"]) for p in detail_photos(sources())] == [("AM", pid)]
+    ch = g_nv.next_challenge("identify", day=dt.date(2026, 10, 6), create=False)
+    assert ch["payload"]["ws"] == "AM" and ch["payload"]["photo_id"] == pid
+    g_nv.answer_identify(ch["id"], 65)
+    assert am.get_observation(vid, week["id"])["bbch_code"] == 65
+    assert am.referenced_photo_ids() == {pid}
+    g_am = DailyChallenge(am, lambda: clf, sources)       # mismo puntaje y desafíos
+    assert g_am.stats()["xp"] == g_nv.stats()["xp"] > 70
+    assert g_am.challenges(dt.date(2026, 10, 6)) == g_nv.challenges(dt.date(2026, 10, 6))
