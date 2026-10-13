@@ -1649,7 +1649,6 @@
             id: art
             source: root.berry
             fit_mode: "contain"
-            mipmap: True
             size_hint: (.86, .96) if root.state == "normal" else (.78, .88)
             pos_hint: {"center_x": .5, "center_y": .5}
         BoxLayout:
@@ -1730,19 +1729,11 @@
             spacing: dp(12)
             PaperCard:
                 SectionLabel:
-                    text: "TIPO DE INFORME"
+                    text: "VISTA"
                 MDGridLayout:
                     cols: 2
                     spacing: dp(8)
                     adaptive_height: True
-                    SegButton:
-                        text: "Semanal"
-                        selected: root.kind == "weekly"
-                        on_release: root.set_kind("weekly")
-                    SegButton:
-                        text: "Mensual / período"
-                        selected: root.kind == "period"
-                        on_release: root.set_kind("period")
                     SegButton:
                         text: "Por variedad"
                         selected: root.kind == "variety"
@@ -2533,9 +2524,9 @@
 
 <MindOption>:
     orientation: "vertical"
-    size_hint_y: None
-    height: dp(64)
-    padding: dp(12), dp(8)
+    adaptive_height: True
+    spacing: dp(2)
+    padding: dp(12), dp(9)
     radius: [dp(16)]
     md_bg_color: (c(theme.MIND_OK, .22) if self.result == "ok" else c(theme.MIND_BAD, .22) if self.result == "bad" else (1, 1, 1, .06))
     line_color: (c(theme.MIND_OK) if self.result == "ok" else c(theme.MIND_BAD) if self.result == "bad" else c(theme.MIND_EDGE))
@@ -2550,7 +2541,6 @@
         text: root.subtitle
         font_style: "Caption"
         adaptive_height: True
-        shorten: True
         theme_text_color: "Custom"
         text_color: c(theme.MIND_MUTED)
 
@@ -2563,6 +2553,8 @@
             source: theme.MIND_BG
             pos: self.pos
             size: self.size
+    MindSky:
+        id: sky
     MDBoxLayout:
         orientation: "vertical"
         MindTopBar:
@@ -2947,6 +2939,11 @@
                         id: spark
                         size_hint_y: None
                         height: dp(110)
+                    GhostButton:
+                        id: report_btn
+                        icon: "file-document-outline"
+                        text: "Ver informe completo de la variedad"
+                        on_release: root.open_report()
                     BoxLayout:
                         id: film_box
                         size_hint_y: None

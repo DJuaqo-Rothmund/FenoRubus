@@ -36,6 +36,7 @@ from android_bridge import request_runtime_permissions, store_photo
 from notifications import FREQUENCIES, can_schedule_exact, request_exact_alarm_permission
 from platform_utils import IS_ANDROID, app_version, data_subdir
 from ui import theme
+from ui.arcade import MindSky  # noqa: F401 - registra la clase para el KV
 from ui.theme import c
 
 
@@ -1851,6 +1852,31 @@ class TimelineScreen(MDScreen):
         if target is not None:   # abre en la semana tocada
             Clock.schedule_once(lambda *_: self.jump(week_id, animate=False), .15)
 
+    def open_report(self):
+        """Informe completo de la variedad (ficha de la temporada), en vista previa."""
+        a = app()
+        r = a.configured_reports()
+        btn = self.ids.report_btn
+        btn.disabled, btn.text = True, "Preparando informe…"
+        vid = self.variety_id
+
+        def done(res, error):
+            btn.disabled, btn.text = False, "Ver informe completo de la variedad"
+            if error:
+                a.toast(f"No se pudo preparar el informe: {error}")
+            else:
+                a.media.preview(res.path, res.title)
+
+        def work():
+            try:
+                res = r.variety(vid, a.season, "preview")
+                Clock.schedule_once(lambda *_: done(res, None))
+            except Exception as exc:  # noqa: BLE001
+                error = exc
+                Clock.schedule_once(lambda *_: done(None, error))
+
+        a.workers.submit(work)
+
     # ---- tira de miniaturas (una por semana)
     def _frame(self, r, photos):
         """Miniatura de la semana (foto de detalle o general) con solo «S38» debajo."""
@@ -2594,16 +2620,11 @@ class PreviewTile(ButtonBehavior, BoxLayout):
     badge_bg = ColorProperty(c("#FFFFFF", .9))
     badge_fg = ColorProperty(c(theme.INK))
     berry = StringProperty()
-    _alpha_cache: dict = {}
 
     def collide_point(self, x, y):
         img = self.ids.get("art")
         if img is None or not img.collide_point(x, y) or not self.berry:
             return False
-        core = self._alpha_cache.get(self.berry)
-        if core is None:
-            from kivy.core.image import Image as CoreImage
-            core = self._alpha_cache[self.berry] = CoreImage(self.berry, keep_data=True)
         w, h = img.norm_image_size
         if not w or not h:
             return False
@@ -2611,11 +2632,69 @@ class PreviewTile(ButtonBehavior, BoxLayout):
         v = (y - (img.center_y - h / 2)) / h
         if not (0 <= u < 1 and 0 <= v < 1):
             return False
-        tw, th = core.size
-        try:
-            return core.read_pixel(int(u * tw), int((1 - v) * th))[3] > .25
-        except Exception:  # noqa: BLE001 - sin datos de la imagen: toda la figura
+        mask = berry_mask(self.berry)
+        if mask is None:
             return True
+        mw, mh = mask.size
+        return mask.getpixel((int(u * mw), int((1 - v) * mh))) > 60
+
+
+_berry_masks: dict = {}
+
+
+def berry_mask(path: str):
+    """Silueta (canal alfa reducido) de la frambuesa para saber si el toque cae en el
+    fruto. Se lee con Pillow, aparte: leerla con Kivy reemplazaba la textura en caché y
+    las frambuesas podían verse como cuadros negros."""
+    if path not in _berry_masks:
+        try:
+            from PIL import Image as PILImage
+            with PILImage.open(path) as im:
+                _berry_masks[path] = im.convert("RGBA").getchannel("A").resize((48, 56))
+        except Exception:  # noqa: BLE001
+            _berry_masks[path] = None
+    return _berry_masks[path]
+
+
+class StageNames(Widget):
+    """Columna fija con el nombre COMPLETO de cada variedad (a la par del mapa)."""
+    rows = ListProperty([])
+    MAX_W = dp(170)
+
+    def __init__(self, **kw):
+        super().__init__(**kw)
+        self.size_hint = (None, None)
+        self.bind(rows=self._layout, pos=self._redraw)
+        self._layout()
+
+    def _layout(self, *_):
+        from kivy.core.text import Label as CoreLabel
+        self._tex = []
+        widest = dp(40)
+        for r in self.rows:
+            lb = CoreLabel(text=r["name"], font_size=dp(11), bold=True)
+            lb.refresh()
+            tex = lb.texture
+            if tex.width > self.MAX_W:   # muy largo: en dos líneas
+                lb = CoreLabel(text=r["name"], font_size=dp(10), bold=True,
+                               text_size=(self.MAX_W, None), halign="left")
+                lb.refresh()
+                tex = lb.texture
+            self._tex.append(tex)
+            widest = max(widest, tex.width)
+        self.width = min(widest, self.MAX_W) + dp(8)
+        self.height = StageHeatmap.HEAD + len(self.rows) * (StageHeatmap.CELL_H + StageHeatmap.GAP)
+        self._redraw()
+
+    def _redraw(self, *_):
+        from kivy.graphics import Color, Rectangle
+        self.canvas.clear()
+        with self.canvas:
+            Color(*c(theme.INK))
+            for i, tex in enumerate(getattr(self, "_tex", [])):
+                y = self.top - StageHeatmap.HEAD - (i + 1) * (StageHeatmap.CELL_H + StageHeatmap.GAP)
+                Rectangle(texture=tex, size=tex.size,
+                          pos=(self.x, y + (StageHeatmap.CELL_H - tex.height) / 2))
 
 
 class StageHeatmap(Widget):
@@ -2623,7 +2702,7 @@ class StageHeatmap(Widget):
     Tocar una celda abre ese registro (on_cell)."""
     rows = ListProperty([])
     weeks = ListProperty([])
-    NAME_W, CELL_W, CELL_H, GAP, HEAD = dp(96), dp(34), dp(24), dp(3), dp(18)
+    NAME_W, CELL_W, CELL_H, GAP, HEAD = 0, dp(34), dp(24), dp(3), dp(18)   # nombres: StageNames
 
     def __init__(self, on_cell=None, **kw):
         super().__init__(**kw)
@@ -2661,11 +2740,6 @@ class StageHeatmap(Widget):
                 x = self.x + self.NAME_W + j * self.CELL_W + (self.CELL_W - t.size[0]) / 2
                 Rectangle(texture=t, size=t.size, pos=(x, self.top - self.HEAD + dp(3)))
             for i, r in enumerate(self.rows):
-                name = r["name"] if len(r["name"]) <= 14 else r["name"][:13] + "…"
-                t = self._text(name, dp(11), True)
-                _x, y, _w, h = self._cell_rect(i, 0)
-                Color(*c(theme.INK))
-                Rectangle(texture=t, size=t.size, pos=(self.x, y + (h - t.size[1]) / 2))
                 for j, cell in enumerate(r["cells"]):
                     x, y, w, h = self._cell_rect(i, j)
                     code = cell["code"]
@@ -2704,21 +2778,17 @@ class StageHeatmap(Widget):
 # Vista previa de informes (sin enviar)
 # ===========================================================================
 class PreviewTab(MDScreen):
-    kind = StringProperty("weekly")
-    KIND_NAMES = {"weekly": "Reporte semanal inter-varietal",
-                  "period": "Evolución mensual / por período",
-                  "variety": "Ficha completa por variedad",
-                  "matrix": "Matriz comparativa global"}
+    """Vista previa: «Por variedad» (la frambuesa de cada variedad; tocarla abre todo su
+    informe) y «Matriz global» (estados BBCH de la temporada, o de un mes)."""
+    kind = StringProperty("variety")
+    KIND_NAMES = {"variety": "Por variedad", "matrix": "Matriz global"}
+    sel_month = ObjectProperty(None, allownone=True)   # (año, mes) o None = toda la temporada
 
     def refresh(self):
         a = app()
-        weeks = a.db.list_weeks(a.season) or [a.db.current_week()]
         if getattr(self, "_season", None) != a.season:
             self._season = a.season
-            self.sel_week = a.week
-            self.sel_from, self.sel_to, self.sel_month = weeks[0], a.week, None
-            vs = a.db.list_varieties()
-            self.sel_variety = vs[0] if vs else None
+            self.sel_month = None
         self._build_params()
         self._summarize()
 
@@ -2727,95 +2797,63 @@ class PreviewTab(MDScreen):
         self.refresh()
 
     # ------------------------------------------------------------ parámetros
-    def _param_button(self, icon, text, callback):
-        from kivy.factory import Factory
-        btn = Factory.GhostButton(icon=icon, text=text)
-        btn.bind(on_release=callback)
-        return btn
+    def _months(self):
+        out = []
+        for w in app().db.list_weeks(app().season):
+            d = _dt.date.fromisoformat(w["start_date"])
+            if (d.year, d.month) not in out:
+                out.append((d.year, d.month))
+        return out
 
     def _build_params(self):
         box = self.ids.params
         fast_clear(box)
-        if self.kind == "weekly":
-            box.add_widget(self._param_button(
-                "calendar-week", f"{ph.week_title(self.sel_week)} · {self.sel_week['label']}",
-                lambda b: self._pick_week(b, "week")))
-        elif self.kind == "period":
-            month = (f"{ph.MESES[self.sel_month[1] - 1].capitalize()} {self.sel_month[0]}"
-                     if self.sel_month else "Elegir mes")
-            box.add_widget(self._param_button("calendar-month", month, self._pick_month))
-            row = MDBoxLayout(adaptive_height=True, spacing=dp(8))
-            row.add_widget(self._param_button("ray-start", f"Desde {ph.week_short(self.sel_from)}",
-                                              lambda b: self._pick_week(b, "from")))
-            row.add_widget(self._param_button("ray-end", f"Hasta {ph.week_short(self.sel_to)}",
-                                              lambda b: self._pick_week(b, "to")))
-            box.add_widget(row)
-        elif self.kind == "variety":
-            name = self.sel_variety["name"] if self.sel_variety else "Sin variedades"
-            box.add_widget(self._param_button("fruit-cherries", name, self._pick_variety))
-        else:
-            box.add_widget(MDLabel(text=f"Toda la temporada · {ph.season_title(app().season)}",
+        if self.kind == "variety":
+            box.add_widget(MDLabel(text="Toque una frambuesa para ver todo el informe de esa variedad.",
                                    font_style="Caption", adaptive_height=True,
                                    theme_text_color="Custom", text_color=c(theme.MUTED)))
+            return
+        from kivy.factory import Factory
+        from kivy.uix.stacklayout import StackLayout
+        chips = StackLayout(size_hint_y=None, spacing=dp(6))
+        chips.bind(minimum_height=chips.setter("height"))
+        options = [(None, "Toda la temporada")] + [
+            (ym, f"{ph.MESES[ym[1] - 1].capitalize()} {ym[0]}") for ym in self._months()]
+        for ym, label in options:
+            b = Factory.SegButton(text=label, selected=self.sel_month == ym, size_hint=(None, None),
+                                  height=dp(34))
+            b.width = dp(28) + len(label) * dp(7.2)
+            b.bind(on_release=lambda w, ym=ym: self._set_month(ym))
+            chips.add_widget(b)
+        box.add_widget(chips)
 
-    def _pick_week(self, caller, target):
-        a = app()
+    def _set_month(self, ym):
+        self.sel_month = ym
+        self.refresh()
 
-        def choose(w):
-            if target == "week":
-                self.sel_week = w
-            elif target == "from":
-                self.sel_from, self.sel_month = w, None
-            else:
-                self.sel_to, self.sel_month = w, None
-            self.refresh()
-
-        pick_dialog("Semana de muestreo", [(ph.week_title(w), w["label"], lambda w=w: choose(w))
-                                            for w in reversed(a.db.list_weeks(a.season))])
-
-    def _pick_month(self, caller):
-        a = app()
-        months = []
-        for w in a.db.list_weeks(a.season):
-            d = _dt.date.fromisoformat(w["start_date"])
-            if (d.year, d.month) not in months:
-                months.append((d.year, d.month))
-
-        def choose(ym):
-            ws = [w for w in a.db.list_weeks(a.season)
-                  if _dt.date.fromisoformat(w["start_date"]).timetuple()[:2] == ym]
-            self.sel_month, self.sel_from, self.sel_to = ym, ws[0], ws[-1]
-            self.refresh()
-
-        open_menu(caller, [(f"{ph.MESES[m - 1].capitalize()} {y}", lambda ym=(y, m): choose(ym))
-                           for y, m in months])
-
-    def _pick_variety(self, caller):
-        def choose(v):
-            self.sel_variety = v
-            self.refresh()
-        open_menu(caller, [(v["name"], lambda v=v: choose(v)) for v in app().db.list_varieties()])
+    def _range(self):
+        """(desde, hasta) en número de semana de muestreo; None = toda la temporada."""
+        if not self.sel_month:
+            return None
+        ws = [w for w in app().db.list_weeks(app().season)
+              if _dt.date.fromisoformat(w["start_date"]).timetuple()[:2] == tuple(self.sel_month)]
+        if not ws:
+            return None
+        return ws[0]["week_number"], ws[-1]["week_number"]
 
     # --------------------------------------------------------------- resumen
-    def _args(self) -> dict:
-        a = app()
-        if self.kind == "weekly":
-            return {"week_id": self.sel_week["id"]}
-        if self.kind == "period":
-            lo, hi = sorted((self.sel_from["week_number"], self.sel_to["week_number"]))
-            return {"week_from": lo, "week_to": hi}
-        if self.kind == "variety":
-            return {"variety_id": self.sel_variety["id"] if self.sel_variety else None}
-        return {"season": a.season}
-
     def _summarize(self):
         from reporter import report_summary
         a = app()
-        args = self._args()
-        args.pop("season", None)
-        sm = report_summary(a.db, self.kind, a.season, **args)
+        rng = self._range() if self.kind == "matrix" else None
+        if rng:
+            sm = report_summary(a.db, "period", a.season, week_from=rng[0], week_to=rng[1])
+        else:
+            sm = report_summary(a.db, "matrix", a.season)
         ids = self.ids
-        ids.sum_title.text = self.KIND_NAMES[self.kind]
+        ids.sum_title.text = ("Matriz global · " + (f"{ph.MESES[self.sel_month[1] - 1].capitalize()} "
+                                                   f"{self.sel_month[0]}" if rng else "toda la temporada")
+                              if self.kind == "matrix" else "Por variedad · toda la temporada")
         ratio = sm["complete"] / sm["cells"] if sm["cells"] else 0
         ids.ring.value = ratio
         ids.ring_text.text = f"{ratio:.0%}"
@@ -2833,17 +2871,17 @@ class PreviewTab(MDScreen):
         ids.lack_text.text_color = c(theme.BERRY) if lack else c(theme.LEAF)
         mb = sm["est_kb"] / 1024
         ids.size_text.text = f"≈ {mb:.1f} MB" if mb >= 1 else f"≈ {sm['est_kb']} KB"
+        # «Por variedad»: el informe completo se abre desde cada frambuesa.
+        ids.preview_btn.opacity = 1 if self.kind == "matrix" else 0
+        ids.preview_btn.disabled = self.kind != "matrix"
+        ids.preview_btn.height = dp(48) if self.kind == "matrix" else 0
 
-    # ------------------------------------------------- fichas y mapa de estados
-    MAX_TILES = 30
-
+    # ------------------------------------------------- frambuesas y mapa de estados
     def _open_cell(self, cell):
-        """Tocar una variedad (ficha o celda): su línea de tiempo con todas las fotos."""
+        """Celda del mapa: la línea de tiempo de esa variedad, en esa semana."""
         app().open_timeline(cell["variety_id"], cell["week_id"])
 
     def _build_visual(self, sm):
-        """Semanal: una ficha por variedad (foto + estado). Por variedad: una ficha por
-        semana. Período y matriz: mapa de estados BBCH. Todo se toca para completar."""
         a = app()
         box = self.ids.visual
         fast_clear(box)
@@ -2854,36 +2892,34 @@ class PreviewTab(MDScreen):
             lo, hi = min(codes, key=ph.bbch_value), max(codes, key=ph.bbch_value)
             span = (f"BBCH {ph.code_str(lo)}" if lo == hi
                     else f"BBCH {ph.code_str(lo)} a {ph.code_str(hi)}")
-        if self.kind in ("weekly", "variety"):
-            if self.kind == "weekly":
-                cells = [(r, r["cells"][0]) for r in sm["rows"] if r["cells"]]
-                ready = sum(1 for _r, cl in cells if cl["code"] is not None and cl["n_photos"])
-                head = f"{ready} de {len(cells)} {unit} listas"
-            else:
-                row = sm["rows"][0] if sm["rows"] else {"cells": []}
-                cells = [(row, cl) for cl in reversed(row["cells"])]   # la más reciente primero
-                head = f"{len(cells)} semanas de registro"
-            self.ids.headline.text = " · ".join(x for x in (head, span) if x) + \
-                ("  ·  toque una ficha para completarla" if cells else "")
+        if self.kind == "variety":
+            started = sum(1 for r in sm["rows"] if any(cl["code"] is not None or cl["n_photos"]
+                                                       for cl in r["cells"]))
+            self.ids.headline.text = " · ".join(x for x in (
+                f"{started} de {len(sm['rows'])} {unit} con registros", span) if x)
             from kivy.uix.gridlayout import GridLayout
             grid = GridLayout(cols=3, spacing=dp(8), size_hint_y=None)
             grid.bind(minimum_height=grid.setter("height"))
-            for r, cl in cells[:self.MAX_TILES]:
-                grid.add_widget(self._tile(r, cl))
+            for r in sm["rows"]:
+                grid.add_widget(self._tile(r))
             box.add_widget(grid)
-            if len(cells) > self.MAX_TILES:
-                box.add_widget(_muted_label(f"+ {len(cells) - self.MAX_TILES} más en el informe"))
             return
         self.ids.headline.text = " · ".join(x for x in (
             f"{len(sm['rows'])} {unit} × {len(sm['week_labels'])} semanas", span) if x) + \
             "  ·  toque una celda para abrir el registro"
         from kivy.uix.scrollview import ScrollView
+        names = StageNames(rows=sm["rows"])
         hm = StageHeatmap(on_cell=self._open_cell)
         hm.weeks, hm.rows = sm["week_labels"], sm["rows"]
-        sv = ScrollView(do_scroll_x=True, do_scroll_y=False, size_hint=(1, None), height=hm.height,
-                        bar_width=dp(3), scroll_type=["bars", "content"])
+        row = BoxLayout(size_hint_y=None, height=hm.height)
+        row.add_widget(names)
+        sv = ScrollView(do_scroll_x=True, do_scroll_y=False, bar_width=dp(3),
+                        scroll_type=["bars", "content"])
         sv.add_widget(hm)
-        box.add_widget(sv)
+        row.add_widget(sv)
+        box.add_widget(row)
+        if hm.width > dp(200):     # muchas semanas: arrancar en las más recientes
+            Clock.schedule_once(lambda *_: setattr(sv, "scroll_x", 1), 0)
         macros = sorted({ph.macro_of(cd) for cd in codes})
         if macros:
             from kivy.uix.stacklayout import StackLayout
@@ -2894,58 +2930,38 @@ class PreviewTab(MDScreen):
                 legend.add_widget(StageChip(text=ph.MACRO_STAGES.get(m, ""), bg=bg, fg=fg))
             box.add_widget(legend)
 
-    def _tile(self, row, cell):
-        code, n = cell["code"], cell["n_photos"]
-        if self.kind == "weekly":
-            title = row["name"]
-            ok_sub = row["cultivar"] or (ph.bbch_label(code) if code is not None else "")
+    def _tile(self, row):
+        """Frambuesa de la variedad: a color si tiene registros en la temporada."""
+        cells = [cl for cl in row["cells"] if cl["code"] is not None or cl["n_photos"]]
+        last = next((cl for cl in reversed(row["cells"]) if cl["code"] is not None), None)
+        if last is not None:
+            code = last["code"]
+            sub, col = f"{last['week']} · {ph.bbch_label(code)}", c(theme.MUTED)
         else:
-            d = _dt.date.fromisoformat(cell["date"])
-            title = f"{cell['week']} · {d.day} {ph.MESES[d.month - 1][:3]}"
-            ok_sub = ph.bbch_label(code) if code is not None else ""
-        if code is None and not n:
-            sub, col = "Sin registro", c(theme.BERRY)
-        elif not n:
-            sub, col = "Falta foto", c(theme.BERRY)
-        elif code is None:
-            sub, col = "Falta estado", c(theme.BERRY)
-        else:
-            sub, col = ok_sub, c(theme.MUTED)
+            code = None
+            sub, col = ("Sin estado registrado" if cells else "Sin registros"), c(theme.BERRY)
         bg, fg = bbch_tag_colors(code)
-        has_record = code is not None or bool(n)
-        tile = PreviewTile(title=title, subtitle=sub, sub_color=col,
+        tile = PreviewTile(title=row["name"], subtitle=sub, sub_color=col,
                            badge=f"BBCH {ph.code_str(code)}" if code is not None else "",
                            badge_bg=bg, badge_fg=fg,
                            berry=theme.berry_art(row.get("cultivar") or "", row["name"],
-                                                 gray=not has_record))
-        tile.bind(on_release=lambda *_: self._open_cell(cell))
+                                                 gray=not cells))
+        tile.bind(on_release=lambda *_: app().open_timeline(row["variety_id"]))
         return tile
 
     # ----------------------------------------------------------- vista previa
     def open_preview(self):
+        """Matriz global completa (de la temporada o del mes elegido)."""
         a = app()
         r = a.configured_reports()
-        args = self._args()
-        kind = self.kind
-        if kind == "weekly":
-            job = lambda: r.weekly(args["week_id"], "preview")  # noqa: E731
-        elif kind == "period":
-            if self.sel_month:
-                job = lambda: r.monthly(a.season, *self.sel_month, package="preview")  # noqa: E731
-            else:
-                job = lambda: r.period(a.season, args["week_from"], args["week_to"], "preview")  # noqa: E731
-        elif kind == "variety":
-            if not args["variety_id"]:
-                return
-            job = lambda: r.variety(args["variety_id"], a.season, "preview")  # noqa: E731
-        else:
-            job = lambda: r.matrix(a.season, package="preview")  # noqa: E731
+        rng = self._range()
         self.ids.preview_btn.disabled = True
         self.ids.preview_btn.text = "Preparando vista previa…"
 
         def work():
             try:
-                res = job()
+                res = (r.matrix(a.season, rng[0], rng[1], package="preview") if rng
+                       else r.matrix(a.season, package="preview"))
                 Clock.schedule_once(lambda *_: self._ready(res, None))
             except Exception as exc:  # noqa: BLE001
                 error = exc
@@ -3595,6 +3611,12 @@ class AILabScreen(MDScreen):
     def on_pre_enter(self, *_):
         self.refresh()
 
+    def on_enter(self, *_):
+        self.ids.sky.start()       # fondo vivo: destellos y píxeles
+
+    def on_leave(self, *_):
+        self.ids.sky.stop()
+
     def show(self, name: str):
         self.ids.seg.current = name
         self.refresh()
@@ -3621,14 +3643,12 @@ class AILabScreen(MDScreen):
         box = self.ids.task_box
         fast_clear(box)
         box.add_widget(self._mind_note("Cargando el siguiente desafío…"))
-        mode = self._mode
-        if mode == "endless":   # sin fin: 2 de cada 3 nombrar fotos (si quedan), 1 subir foto
-            mode = ("identify" if self._run % 3 != 2 and self.game.available("identify")
-                    else "capture")
+        mode, endless = self._mode, self._endless
 
         def work():
             try:
-                ch = self.game.next_challenge(mode)
+                # Sin fin: siempre hay otro; si no, solo los desafíos del día de ese modo.
+                ch = self.game.next_challenge(mode, create=endless)
                 Clock.schedule_once(lambda *_: self._render_challenge(ch))
             except Exception as exc:  # noqa: BLE001
                 error = exc
@@ -3642,9 +3662,9 @@ class AILabScreen(MDScreen):
                              "ya tenía estado es un quiz; si no, tu respuesta la etiqueta.",
                  "capture": "La IA te pide un estado y tú le muestras una foto (cámara o galería). "
                             "Dice qué vio y aprende con tu ejemplo.",
-                 "endless": "Modo sin fin: nombrar y subir fotos, una tras otra, sin parar. "
-                            "Cada 5 seguidas completas una ronda."}
-    _run = 0              # desafíos respondidos en esta partida (modo sin fin)
+                 }
+    _run = 0              # desafíos respondidos en esta partida
+    _endless = False      # casilla «Modo sin fin» (vale para nombrar o para subir fotos)
 
     def _render_lobby(self):
         from ui import arcade
@@ -3666,13 +3686,22 @@ class AILabScreen(MDScreen):
         card.add_widget(_mind("MindSection", text="ELIGE TU DESAFÍO"))
         row = MDBoxLayout(adaptive_height=True, spacing=dp(8))
         self._mode_btns = {}
-        for kind, label in (("identify", "Nombrar fotos"), ("capture", "Subir fotos"),
-                            ("endless", "Sin fin")):
+        for kind, label in (("identify", "Nombrar fotos"), ("capture", "Subir fotos")):
             b = _mind("MindSeg", text=label, selected=kind == self._pick)
             b.bind(on_release=lambda w, k=kind: self._choose_mode(k))
             self._mode_btns[kind] = b
             row.add_widget(b)
         card.add_widget(row)
+        from ui.arcade import AuraCheck
+        endless = MDBoxLayout(adaptive_height=True, spacing=dp(10), padding=(dp(4), dp(2)))
+        chk = AuraCheck(active=self._endless, pos_hint={"center_y": .5})
+        chk.bind(active=lambda w, v: (setattr(self, "_endless", v), self._choose_mode(self._pick)))
+        endless.add_widget(chk)
+        lbl = MDBoxLayout(orientation="vertical", adaptive_height=True, pos_hint={"center_y": .5})
+        lbl.add_widget(_mind("MindText", text="Modo sin fin", bold=True))
+        lbl.add_widget(_mind("MindMuted", text="Un desafío tras otro, sin parar · cada 5 seguidos, ronda completada"))
+        endless.add_widget(lbl)
+        card.add_widget(endless)
         self._mode_desc = _mind("MindMuted", text="")
         card.add_widget(self._mode_desc)
         start = _mind("MindButton", text="COMENZAR")
@@ -3690,6 +3719,8 @@ class AILabScreen(MDScreen):
         if kind == "identify":
             n = self.game.available("identify")
             extra = f"  ·  {n} foto(s) por nombrar" if n else "  ·  no quedan fotos por nombrar"
+        if not self._endless:
+            extra += "  ·  solo los desafíos de hoy"
         self._mode_desc.text = self.MODE_TEXT[kind] + extra
 
     def _start_game(self):
@@ -3737,19 +3768,22 @@ class AILabScreen(MDScreen):
         self._update_header()
         box = self.ids.task_box
         fast_clear(box)
-        if ch is None:   # no quedan fotos para nombrar
+        if ch is None:   # sin desafíos de hoy en este modo (o sin fotos para nombrar)
             card = _mind("MindCard")
             card.add_widget(_mind("MindSection", text="¡NIVEL DESPEJADO!"))
-            card.add_widget(MDLabel(text="Ya nombraste todas las fotos disponibles.", font_style="H6",
-                                    bold=True, adaptive_height=True, theme_text_color="Custom",
-                                    text_color=c(theme.MIND_TEXT)))
-            card.add_widget(_mind("MindMuted", text="Registra fotos nuevas en el muestreo o cambia a "
-                                                    "«Subir fotos» para seguir entrenando a la IA."))
+            no_photos = self._mode == "identify" and not self.game.available("identify")
+            card.add_widget(MDLabel(text="Ya nombraste todas las fotos disponibles." if no_photos
+                                    else "Completaste los desafíos de hoy de este modo.",
+                                    font_style="H6", bold=True, adaptive_height=True,
+                                    theme_text_color="Custom", text_color=c(theme.MIND_TEXT)))
+            card.add_widget(_mind("MindMuted", text=(
+                "Registra fotos nuevas en el muestreo o cambia a «Subir fotos» para seguir."
+                if no_photos else "Activa «Modo sin fin» para seguir jugando, o vuelve mañana.")))
             card.add_widget(self._exit_button())
             box.add_widget(card)
             return
         card = self._identify_card(ch) if ch["kind"] == "identify" else self._capture_card(ch)
-        if self._mode == "endless":
+        if self._endless:
             card.add_widget(_mind("MindSection", text=f"MODO SIN FIN · {self._run} SEGUIDOS"), index=len(card.children))
         card.add_widget(self._exit_button())
         box.add_widget(card)
@@ -3886,7 +3920,7 @@ class AILabScreen(MDScreen):
         if res.get("day_done"):
             arcade.party("DESAFIO\nCOMPLETADO",
                          f"Racha: {res['stats']['streak']} día(s) · {res['stats']['xp']} XP")
-        elif self._mode == "endless" and self._run % 5 == 0:
+        elif self._endless and self._run % 5 == 0:
             arcade.party(f"RONDA {self._run // 5}\nCOMPLETADA", f"{self._run} desafíos seguidos · ¡sigue!")
 
     def _feedback(self, msg, res, container=None):

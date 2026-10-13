@@ -156,15 +156,18 @@ class DailyChallenge:
             return max(open_, 1)                       # siempre se puede pedir uno más
         return open_ + len(self._candidate_photos(day, random.Random(0)))
 
-    def next_challenge(self, kind: str, day: _dt.date | None = None) -> dict | None:
-        """Siguiente desafío del modo elegido: el pendiente del día o uno nuevo (se puede
-        seguir jugando después de los 5 del día). None si no hay fotos para nombrar."""
+    def next_challenge(self, kind: str, day: _dt.date | None = None,
+                       create: bool = True) -> dict | None:
+        """Siguiente desafío del modo elegido: el pendiente del día o, con create (modo sin
+        fin), uno nuevo. None si no quedan (o no hay fotos para nombrar)."""
         day = day or _dt.date.today()
         self.ensure_today(day)
         rows = self.challenges(day)
         for c in rows:
             if c["kind"] == kind and c["status"] == "open":
                 return c
+        if not create:
+            return None
         rnd = random.Random()
         if kind == "identify":
             photos = self._candidate_photos(day, rnd)

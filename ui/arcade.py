@@ -22,7 +22,8 @@ from kivy.clock import Clock
 from kivy.core.window import Window
 from kivy.graphics import Color, Ellipse, Rectangle
 from kivy.metrics import dp
-from kivy.properties import ColorProperty, ListProperty, NumericProperty, StringProperty
+from kivy.properties import (BooleanProperty, ColorProperty, ListProperty, NumericProperty,
+                             StringProperty)
 from kivy.uix.behaviors import ButtonBehavior
 from kivy.uix.floatlayout import FloatLayout
 from kivy.uix.widget import Widget
@@ -381,3 +382,137 @@ def party(title: str, subtitle: str = "", duration: float = 3.6):
     burst(W / 2, H / 2, 40)
     ev = Clock.schedule_interval(step, 1 / 30)
     return layer
+
+
+class MindSky(Widget):
+    """Fondo vivo del «cerebro de la app»: estrellas que titilan, píxeles que suben como
+    burbujas de datos y, de vez en cuando, un destello que cruza (sinapsis).
+    Se anima solo mientras se ve (start/stop desde la pantalla)."""
+
+    def __init__(self, **kw):
+        super().__init__(**kw)
+        self._ev = None
+        self._t = 0.0
+        rnd = random.Random(11)
+        self.stars = [{"x": rnd.random(), "y": rnd.random(), "r": rnd.choice((dp(1.2), dp(1.8), dp(2.4))),
+                       "ph": rnd.uniform(0, 6.3), "sp": rnd.uniform(1.2, 3.2),
+                       "col": rnd.choice(("#9ECBFF", "#4FC3F7", "#C4B5FD", "#FFFFFF"))} for _ in range(40)]
+        self.bits = [{"x": rnd.random(), "y": rnd.random(), "v": rnd.uniform(.015, .05),
+                      "s": rnd.choice((dp(2), dp(3), dp(4))), "col": rnd.choice(NEON),
+                      "ph": rnd.uniform(0, 6.3)} for _ in range(22)]
+        self.spark = None
+
+    def start(self):
+        if self._ev is None:
+            self._ev = Clock.schedule_interval(self._step, 1 / 30)
+
+    def stop(self):
+        if self._ev is not None:
+            self._ev.cancel()
+            self._ev = None
+        self.canvas.clear()
+
+    def _step(self, dt):
+        if self.get_root_window() is None:
+            self.stop()
+            return
+        self._t += dt
+        t, w, h = self._t, self.width, self.height
+        if self.spark is None and random.random() < dt / 2.5:      # ~1 destello cada 2,5 s
+            y = random.uniform(.15, .9)
+            self.spark = {"x": -.2, "y": y, "dy": random.uniform(-.15, .15), "col": random.choice(NEON)}
+        self.canvas.clear()
+        with self.canvas:
+            for st in self.stars:
+                a = .25 + .75 * (.5 + .5 * math.sin(t * st["sp"] + st["ph"])) ** 3
+                Color(*c(st["col"], a))
+                r = st["r"]
+                Ellipse(pos=(self.x + st["x"] * w - r, self.y + st["y"] * h - r), size=(2 * r, 2 * r))
+            for b in self.bits:
+                b["y"] += b["v"] * dt
+                if b["y"] > 1.05:
+                    b["y"], b["x"] = -.05, random.random()
+                s = b["s"]
+                x = self.x + (b["x"] + .01 * math.sin(t * 1.3 + b["ph"])) * w
+                Color(*c(b["col"], .35 + .3 * math.sin(t * 2 + b["ph"])))
+                Rectangle(pos=(round(x / s) * s, round((self.y + b["y"] * h) / s) * s), size=(s, s))
+            sp = self.spark
+            if sp is not None:
+                sp["x"] += dt * .9
+                sp["y"] += sp["dy"] * dt
+                for k in range(14):                                   # cola del destello
+                    px = self.x + (sp["x"] - k * .018) * w
+                    py = self.y + (sp["y"] - k * sp["dy"] * .02) * h
+                    Color(*c(sp["col"], max(0, .9 - k * .065)))
+                    Rectangle(pos=(px, py), size=(dp(3), dp(3)))
+                if sp["x"] > 1.3:
+                    self.spark = None
+
+
+class AuraCheck(ButtonBehavior, Widget):
+    """Casilla redonda; al activarla se enciende con un aura de llamas azules animadas."""
+    active = BooleanProperty(False)
+
+    def __init__(self, **kw):
+        super().__init__(**kw)
+        self.size_hint = (None, None)
+        self.size = (dp(46), dp(46))
+        self._ev = None
+        self._t = 0.0
+        self._flames = []
+        self.bind(pos=self._draw, size=self._draw, active=self._toggle, state=self._draw)
+        self._draw()
+
+    def on_release(self):
+        self.active = not self.active
+
+    def _toggle(self, *_):
+        if self.active and self._ev is None:
+            self._ev = Clock.schedule_interval(self._step, 1 / 30)
+        elif not self.active and self._ev is not None:
+            self._ev.cancel()
+            self._ev = None
+            self._flames = []
+        self._draw()
+
+    def _step(self, dt):
+        if self.get_root_window() is None:
+            self._ev.cancel()
+            self._ev = None
+            return
+        self._t += dt
+        for _ in range(2):                        # nuevas lengüetas alrededor del círculo
+            ang = random.uniform(0, 2 * math.pi)
+            self._flames.append({"a": ang, "life": 0.0, "max": random.uniform(.45, .8),
+                                 "s": random.uniform(dp(3), dp(6))})
+        for f in self._flames:
+            f["life"] += dt
+        self._flames = [f for f in self._flames if f["life"] < f["max"]]
+        self._draw()
+
+    def _draw(self, *_):
+        cx, cy = self.center
+        r = dp(13) * (.9 if self.state == "down" else 1)
+        self.canvas.clear()
+        with self.canvas:
+            if self.active:
+                for i, a in enumerate((.10, .16, .24)):            # halo azul que late
+                    rr = r + dp(10) - i * dp(3) + dp(1.5) * math.sin(self._t * 6)
+                    Color(*c("#38BDF8", a))
+                    Ellipse(pos=(cx - rr, cy - rr), size=(2 * rr, 2 * rr))
+                for f in self._flames:                              # llamitas que suben
+                    k = f["life"] / f["max"]
+                    d = r + dp(2) + k * dp(10)
+                    x = cx + math.cos(f["a"]) * d
+                    y = cy + math.sin(f["a"]) * d + k * dp(8)
+                    s = f["s"] * (1 - k * .6)
+                    Color(*c("#7DD3FC" if k < .5 else "#2563EB", (1 - k) * .9))
+                    Ellipse(pos=(x - s / 2, y - s / 2), size=(s, s * 1.4))
+            Color(*c("#0B1630"))
+            Ellipse(pos=(cx - r, cy - r), size=(2 * r, 2 * r))
+            Color(*c("#38BDF8" if self.active else theme.MIND_MUTED))
+            from kivy.graphics import Line
+            Line(circle=(cx, cy, r), width=dp(1.6))
+            if self.active:
+                Color(*c("#BAE6FD"))
+                Ellipse(pos=(cx - r * .55, cy - r * .55), size=(r * 1.1, r * 1.1))
