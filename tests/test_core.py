@@ -1575,3 +1575,28 @@ def test_splash_lottie_matches_timeline():
 def test_week_long_label():
     """Pie de la pantalla de sectores: «Semana 42 del año 2026»."""
     assert ph.week_long("2026-10-12") == "Semana 42 del año 2026"
+
+
+def test_treatment_meaning_in_cards_and_reports(tmp_path):
+    """Ensayo de tratamientos: con T1 = «Testigo» la tarjeta muestra «Testigo» y la parcela
+    T1R1 queda como etiqueta chica; los informes la nombran «Testigo (T1R1)»."""
+    from reporter import LabeledDB, report_summary
+    from workspaces import Workspaces
+    wss = Workspaces(str(tmp_path))
+    ws = wss.create("id", "tratamientos", "Ensayo nitrógeno", "EN")
+    db = wss.open(ws)
+    db.setup_trial(2, 2)
+    db.update_treatment(1, "Testigo")
+    names = db.treatment_names()
+    assert names == {1: "Testigo"}
+    v11 = next(v for v in db.list_varieties() if v["name"] == "T1R1")
+    v21 = next(v for v in db.list_varieties() if v["name"] == "T2R1")
+    assert db.parcel_labels(v11, names) == ("Testigo", "T1R1")
+    assert db.parcel_labels(v21, names) == ("T2R1", "")        # sin definir: como antes
+    assert db.display_name(v11) == "Testigo (T1R1)"
+    shown = {v["name"] for v in LabeledDB(db).list_varieties()}
+    assert "Testigo (T1R1)" in shown and "T2R1" in shown
+    assert db.get_variety(v11["id"])["name"] == "T1R1"          # la base no cambia
+    week = db.current_week(dt.date(2026, 10, 5))
+    rows = report_summary(db, "matrix", week["season"])["rows"]
+    assert "Testigo (T1R2)" in {r["name"] for r in rows}

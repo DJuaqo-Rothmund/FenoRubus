@@ -262,9 +262,55 @@ class ReportResult:
     size_kb: int
 
 
+class LabeledDB:
+    """La base vista por los informes: en ensayos de tratamientos, cada parcela lleva el
+    significado de su tratamiento («Testigo (T1R1)» en vez de «T1R1»). Todo lo demás pasa
+    tal cual a la base real."""
+
+    def __init__(self, db):
+        self._db = db
+
+    def __getattr__(self, name):
+        return getattr(self._db, name)
+
+    def _names(self):
+        return self._db.treatment_names() if getattr(self._db, "is_trial", False) else {}
+
+    def _label(self, v, names):
+        if v and names and v.get("treatment"):
+            v = dict(v)
+            v["name"] = self._db.display_name(v, names)
+        return v
+
+    def list_varieties(self, *a, **kw):
+        names = self._names()
+        return [self._label(v, names) for v in self._db.list_varieties(*a, **kw)]
+
+    def get_variety(self, variety_id):
+        return self._label(self._db.get_variety(variety_id), self._names())
+
+    def week_overview(self, *a, **kw):
+        names = self._names()
+        rows = self._db.week_overview(*a, **kw)
+        for r in rows:
+            r["variety"] = self._label(r["variety"], names)
+        return rows
+
+    def list_entries(self, *a, **kw):
+        names = self._names()
+        rows = self._db.list_entries(*a, **kw)
+        if names:
+            by_id = {v["id"]: v for v in self._db.list_varieties(include_archived=True)}
+            for e in rows:
+                v = by_id.get(e.get("variety_id"))
+                if v and v.get("treatment"):
+                    e["variety_name"] = self._db.display_name(v, names)
+        return rows
+
+
 class ReportGenerator:
     def __init__(self, db, out_dir: str, preview_dir: str | None = None):
-        self.db = db
+        self.db = LabeledDB(db)
         self.out_dir = out_dir
         self.preview_dir = preview_dir or os.path.join(os.path.dirname(out_dir), "preview")
         os.makedirs(out_dir, exist_ok=True)
@@ -809,6 +855,7 @@ def report_summary(db, kind: str, season: int, week_id: int | None = None,
                    week_from: int | None = None, week_to: int | None = None,
                    variety_id: int | None = None) -> dict:
     """Qué incluirá el informe y qué datos faltan (sin generar nada)."""
+    db = db if isinstance(db, LabeledDB) else LabeledDB(db)
     varieties = db.list_varieties()
     weeks = db.list_weeks(season, include_skipped=(kind == "weekly"))
     if kind == "weekly":

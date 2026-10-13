@@ -604,6 +604,25 @@ class Database:
     def treatment_label(t: dict) -> str:
         return f"T{t['num']} · {t['name']}" if (t.get("name") or "").strip() else f"T{t['num']}"
 
+    def treatment_names(self) -> dict[int, str]:
+        """{número: significado} de los tratamientos con nombre («Testigo», «N 120 kg/ha»…)."""
+        return {r["num"]: r["name"].strip() for r in self.query("SELECT num, name FROM treatments")
+                if (r["name"] or "").strip()}
+
+    @staticmethod
+    def parcel_labels(v: dict, names: dict | None = None) -> tuple[str, str]:
+        """(título, etiqueta chica) de una fila: en un ensayo de tratamientos con el
+        tratamiento definido, («Testigo», «T1R1»); si no, (nombre, «»)."""
+        t = v.get("treatment")
+        if t and names and names.get(t):
+            return names[t], v["name"]
+        return v["name"], ""
+
+    def display_name(self, v: dict, names: dict | None = None) -> str:
+        """Nombre para informes: «Testigo (T1R1)» o el nombre tal cual."""
+        title, tag = self.parcel_labels(v, self.treatment_names() if names is None else names)
+        return f"{title} ({tag})" if tag else title
+
     @property
     def trial_cultivar(self) -> str:
         """Variedad de todo el ensayo (opcional; cada tratamiento puede tener otra)."""

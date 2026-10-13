@@ -1144,6 +1144,17 @@
         adaptive_height: True
         spacing: dp(2)
         MDLabel:
+            # Ensayo de tratamientos: la parcela (T1R1) en letra chica sobre su significado.
+            text: root.kicker
+            font_size: "11sp"
+            bold: True
+            theme_text_color: "Custom"
+            text_color: c(theme.BERRY)
+            size_hint_y: None
+            height: self.texture_size[1] if root.kicker else 0
+            opacity: 1 if root.kicker else 0
+            shorten: True
+        MDLabel:
             text: root.title
             font_style: "Subtitle1"
             bold: True

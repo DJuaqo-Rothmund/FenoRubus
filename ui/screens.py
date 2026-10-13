@@ -1350,8 +1350,11 @@ class WorkspacesScreen(MDScreen):
         state["kind"] = "variedades" if is_id else "predio"
         if is_id:
             seg = MDBoxLayout(adaptive_height=True, spacing=dp(8))
-            b_var = SegButton(text="Variedades", selected=True)
-            b_trt = SegButton(text="Tratamientos × rep.")
+            # Altos y en dos líneas: «Tratamientos × repeticiones» se leía cortado («…»).
+            b_var = SegButton(text="Variedades", selected=True, height=dp(54), shorten=False,
+                              font_size="14sp")
+            b_trt = SegButton(text="Tratamientos\n× repeticiones", height=dp(54), shorten=False,
+                              font_size="14sp", line_height=1.05)
             seg.add_widget(b_var)
             seg.add_widget(b_trt)
             trt = MDBoxLayout(adaptive_height=True, spacing=dp(8))
@@ -1368,6 +1371,36 @@ class WorkspacesScreen(MDScreen):
             form.add_widget(seg)
             form.add_widget(trt)
             form.add_widget(info)
+            # Qué es cada tratamiento (T1 = Testigo…): opcional, también en Ajustes › Registros.
+            from kivy.uix.scrollview import ScrollView
+            meanings = MDBoxLayout(orientation="vertical", adaptive_height=True, spacing=dp(6))
+            m_title = MDLabel(text="Qué es cada tratamiento (opcional)", font_style="Caption",
+                              bold=True, adaptive_height=True, theme_text_color="Custom",
+                              text_color=c(theme.LEAF_DARK))
+            m_scroll = ScrollView(size_hint_y=None, height=0, do_scroll_x=False, bar_width=dp(3))
+            m_scroll.add_widget(meanings)
+            form.add_widget(m_title)
+            form.add_widget(m_scroll)
+            state["meanings"] = []
+
+            def build_meanings(*_):
+                show = state["kind"] == "tratamientos"
+                try:
+                    t = min(int(n_t.text or 0), 20) if show else 0
+                except ValueError:
+                    t = 0
+                old = [f.text for f in state["meanings"]]
+                fast_clear(meanings)
+                state["meanings"] = []
+                for i in range(1, t + 1):
+                    f = Factory.Field(hint_text=f"T{i} = (ej.: {'Testigo' if i == 1 else 'producto, dosis…'})",
+                                      text=old[i - 1] if i <= len(old) else "")
+                    meanings.add_widget(f)
+                    state["meanings"].append(f)
+                m_title.opacity = 1 if t else 0
+                m_title.height = m_title.texture_size[1] if t else 0
+                Clock.schedule_once(lambda *_: setattr(
+                    m_scroll, "height", min(dp(190), meanings.height) if t else 0), 0)
 
             def set_kind(kind):
                 state["kind"] = kind
@@ -1375,6 +1408,7 @@ class WorkspacesScreen(MDScreen):
                 trt.disabled = kind != "tratamientos"
                 trt.opacity = 1 if kind == "tratamientos" else .35
                 update_info()
+                build_meanings()
 
             def update_info(*_):
                 if state["kind"] == "variedades":
@@ -1392,6 +1426,7 @@ class WorkspacesScreen(MDScreen):
             b_var.bind(on_release=lambda *_: set_kind("variedades"))
             b_trt.bind(on_release=lambda *_: set_kind("tratamientos"))
             n_t.bind(text=update_info)
+            n_t.bind(text=build_meanings)
             n_r.bind(text=update_info)
             set_kind("variedades")
 
@@ -1412,13 +1447,19 @@ class WorkspacesScreen(MDScreen):
             except ValueError as exc:
                 a.toast(str(exc))
                 return False
+            named = 0
             if size:
                 db = a.open_db(ws)
                 db.setup_trial(*size)
+                for i, f in enumerate(state.get("meanings", [])[:size[0]], 1):
+                    if f.text.strip():
+                        db.update_treatment(i, f.text)
+                        named += 1
             a.open_workspace(ws["id"], target="sectors" if ws["profile"] == "predio" else "home")
             if size:
-                a.toast(f"«{ws['name']}» creado con {size[0] * size[1]} parcelas. Ponga nombre a los "
-                        "tratamientos en Ajustes › Parcelas")
+                a.toast(f"«{ws['name']}» creado con {size[0] * size[1]} parcelas"
+                        + ("" if named == size[0] else
+                           ". Defina qué es cada tratamiento en Ajustes › Registros"))
             else:
                 a.toast(f"«{ws['name']}» creado: agregue sus "
                         + ("variedades en Ajustes › Registros" if is_id
@@ -1449,6 +1490,7 @@ class SettingsScreen(MDScreen):
 
 
 class VarietyRow(GlassButton):
+    kicker = StringProperty()      # parcela «T1R1» (chica) cuando el tratamiento tiene nombre
     title = StringProperty()
     subtitle = StringProperty()
     photos = NumericProperty(0)
@@ -1496,6 +1538,7 @@ class SamplingTab(MDBoxLayout):
             self._rows = cache
         complete = 0
         names = a.db.bbch_names()
+        trt_names = a.db.treatment_names() if a.db.is_trial else {}
         for r in rows:
             obs, photos, v = r["observation"], r["photos"], r["variety"]
             code = obs["bbch_code"] if obs else None
@@ -1503,7 +1546,7 @@ class SamplingTab(MDBoxLayout):
             complete += code is not None and n >= 1   # basta una foto (canopia o detalle)
             bg, fg = bbch_tag_colors(code)
             row = cache[v["id"]]
-            row.title = v["name"]
+            row.title, row.kicker = a.db.parcel_labels(v, trt_names)
             row.subtitle = (obs["bbch_label"] or ph.bbch_label(code, names)) if code is not None \
                 else ("Foto sin estado asignado" if n else "Pendiente de registro")
             if v.get("cultivar"):   # predio: «Equipo de riego n, sector m» + variedad
@@ -1811,23 +1854,29 @@ class VarietiesTab(MDScreen):
         card.add_widget(Factory.SectionLabel(text="TRATAMIENTOS × REPETICIONES"))
         card.add_widget(Factory.Body(text=f"{nt} tratamientos × {nr} repeticiones = {nt * nr} parcelas"
                                      if nt else "Aún sin definir"))
-        names = [t["label"] for t in db.list_treatments() if t["name"]]
-        if names:
-            card.add_widget(Factory.Muted(text=" · ".join(names)))
-        row = MDBoxLayout(adaptive_height=True, spacing=dp(8))
         b1 = Factory.GhostButton(icon="grid", text="Cambiar número")
         b1.bind(on_release=lambda *_: self.trial_size_dialog())
-        b2 = Factory.GhostButton(icon="tag-text-outline", text="Nombres")
-        b2.bind(on_release=lambda *_: self.treatments_dialog())
-        row.add_widget(b1)
-        row.add_widget(b2)
-        card.add_widget(row)
+        card.add_widget(b1)
         tv = db.trial_cultivar
         b3 = Factory.GhostButton(icon="sprout-outline",
                                  text=f"Variedad del ensayo: {tv}" if tv else "Variedad del ensayo: (ninguna)")
         b3.bind(on_release=lambda *_: pick_catalog(self._set_trial_variety, "id",
                                                    allow_none="— Sin variedad para todo el ensayo"))
         card.add_widget(b3)
+        box.add_widget(card)
+        box.add_widget(Widget(size_hint_y=None, height=dp(8)))
+        # Qué significa cada tratamiento: se ve en la ficha de muestreo y en los informes.
+        card = Factory.PaperCard()
+        card.add_widget(Factory.SectionLabel(text="SIGNIFICADO DE LOS TRATAMIENTOS"))
+        card.add_widget(Factory.Muted(
+            text="Qué es cada T (ej.: T1 = Testigo, T2 = N 120 kg/ha). Se muestra en las tarjetas "
+                 "del muestreo y en los informes; T1R1, T1R2… quedan en letra chica."))
+        for t in db.list_treatments():
+            b = Factory.GhostButton(icon="tag-text-outline" if t["name"] else "tag-plus-outline",
+                                    text=f"T{t['num']}: {t['name']}" if t["name"]
+                                    else f"T{t['num']}: (sin definir · tocar)")
+            b.bind(on_release=lambda *_, t=t: self.edit_treatment(t))
+            card.add_widget(b)
         box.add_widget(card)
         box.add_widget(Widget(size_hint_y=None, height=dp(8)))
 
@@ -1867,44 +1916,39 @@ class VarietiesTab(MDScreen):
 
         form_dialog("Tratamientos × repeticiones", form, ok)
 
-    def treatments_dialog(self):
+    def edit_treatment(self, t: dict):
+        """Significado de un tratamiento (nombre corto, descripción y variedad)."""
+        from kivy.factory import Factory
         a = app()
+        form = MDBoxLayout(orientation="vertical", adaptive_height=True, spacing=dp(8),
+                           padding=(0, dp(12), 0, 0))
+        f_n = Factory.Field(hint_text=f"Qué es T{t['num']} (ej.: Testigo)", text=t["name"] or "")
+        f_d = Factory.Field(hint_text="Descripción (dosis, producto, momento…)",
+                            text=t["description"] or "", multiline=True)
+        form.add_widget(f_n)
+        form.add_widget(f_d)
+        chosen = {"v": (t.get("cultivar") or "").strip()}
+        default = a.db.trial_cultivar
+        vb = Factory.GhostButton(icon="sprout-outline")
 
-        def edit(t):
-            from kivy.factory import Factory
-            form = MDBoxLayout(orientation="vertical", adaptive_height=True, spacing=dp(8),
-                               padding=(0, dp(12), 0, 0))
-            f_n = Factory.Field(hint_text=f"Nombre de T{t['num']} (ej.: Testigo)", text=t["name"] or "")
-            f_d = Factory.Field(hint_text="Descripción (dosis, producto, momento…)",
-                                text=t["description"] or "", multiline=True)
-            form.add_widget(f_n)
-            form.add_widget(f_d)
-            chosen = {"v": (t.get("cultivar") or "").strip()}
-            default = a.db.trial_cultivar
-            vb = Factory.GhostButton(icon="sprout-outline")
+        def label():
+            vb.text = (f"Variedad: {chosen['v']}" if chosen["v"] else
+                       f"Variedad: la del ensayo ({default})" if default else "Variedad: (ninguna)")
 
-            def label():
-                vb.text = (f"Variedad: {chosen['v']}" if chosen["v"] else
-                           f"Variedad: la del ensayo ({default})" if default else "Variedad: (ninguna)")
-
-            def pick(name, _code):
-                chosen["v"] = name
-                label()
-
-            vb.bind(on_release=lambda *_: pick_catalog(pick, "id", allow_none="— La del ensayo / ninguna"))
+        def pick(name, _code):
+            chosen["v"] = name
             label()
-            form.add_widget(vb)
 
-            def ok(_f):
-                a.db.update_treatment(t["num"], f_n.text, f_d.text, chosen["v"])
-                self.refresh()
+        vb.bind(on_release=lambda *_: pick_catalog(pick, "id", allow_none="— La del ensayo / ninguna"))
+        label()
+        form.add_widget(vb)
 
-            form_dialog(f"Tratamiento T{t['num']}", form, ok)
+        def ok(_f):
+            a.db.update_treatment(t["num"], f_n.text, f_d.text, chosen["v"])
+            self.refresh()
+            a.refresh_home()
 
-        pick_dialog("Nombres de los tratamientos",
-                    [(t["label"], " · ".join(x for x in (t["variety"], t["description"]) if x)
-                      or f"Parcelas: {', '.join(p['name'] for p in t['parcels'])}",
-                      lambda t=t: edit(t)) for t in a.db.list_treatments()])
+        form_dialog(f"Tratamiento T{t['num']}", form, ok)
 
     def add_dialog(self):
         if app().db.is_trial:
@@ -2411,7 +2455,7 @@ class ObservationScreen(MDScreen):
         self.variety = a.db.get_variety(variety_id)
         self.week = a.db.get_week(week_id)
         self.obs = a.db.get_or_create_observation(variety_id, week_id)
-        self.ids.bar.title = self.variety["name"]
+        self.ids.bar.title = a.db.display_name(self.variety) if a.db.is_trial else self.variety["name"]
         self.ids.week_caption.text = f"{ph.week_title(self.week)} · {self.week['label']}"
         self._refresh_slot("canopy")
         self._refresh_slot("detail")
