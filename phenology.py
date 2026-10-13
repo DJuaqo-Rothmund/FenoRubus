@@ -451,6 +451,39 @@ def unit_name(sector, irrigation) -> str:
     return ", ".join(parts)
 
 
+def is_unit(v: dict) -> bool:
+    """¿Es una unidad de predio (variedad + equipo de riego/sector)?"""
+    return bool((v.get("cultivar") or "").strip() and (v.get("sector") or v.get("irrigation"))
+                and not v.get("treatment"))
+
+
+def unit_main(v: dict) -> str:
+    """Nombre principal de una unidad de predio: «Meeker · 2019» (variedad y año de
+    plantación). Para lo que no es unidad de predio, su nombre."""
+    if not is_unit(v):
+        return v.get("name") or ""
+    return " · ".join(str(x) for x in (v["cultivar"].strip(), v.get("plant_year")) if x)
+
+
+def unit_place(v: dict) -> str:
+    """Ubicación de la unidad, para ir en letra chica: «Equipo de riego 1 · sector 1»."""
+    return ph_unit_place(v.get("sector"), v.get("irrigation")) if is_unit(v) else ""
+
+
+def ph_unit_place(sector, irrigation) -> str:
+    return unit_name(sector, irrigation).replace(", ", " · ")
+
+
+def unit_compact(v: dict) -> str:
+    """En una sola línea (listas y celdas angostas): «Meeker 2019 · E1-S1»."""
+    if not is_unit(v):
+        return v.get("name") or ""
+    where = "-".join(x for x in (f"E{v['irrigation']}" if v.get("irrigation") else "",
+                                 f"S{v['sector']}" if v.get("sector") else "") if x)
+    main = " ".join(str(x) for x in (v["cultivar"].strip(), v.get("plant_year")) if x)
+    return f"{main} · {where}" if where else main
+
+
 def unit_label(v: dict) -> str:
     """Variedad de una unidad de predio con su año de plantación y código:
     «Meeker · 2019 · MEE»."""

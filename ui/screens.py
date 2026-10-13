@@ -1026,9 +1026,10 @@ class SectorsScreen(MDScreen):
 
     def _row(self, v, code, title=None):
         a = app()
+        where = "" if title else (ph.unit_place(v) or "")
         row = SectorRow(variety_id=v["id"], screen=self, done=code is not None,
-                        badge=ph.location_tag(v) or "—", title=title or v["name"],
-                        subtitle=(f"{v.get('cultivar') or 'Sin variedad'} · " if not title else "") + (
+                        badge=ph.location_tag(v) or "—", title=title or ph.unit_main(v),
+                        subtitle=(f"{where} · " if where else "") + (
                             f"BBCH {ph.code_str(code)} registrado" if code is not None
                             else "sin registro esta semana"))
         row.bind(on_release=lambda w: a.open_observation(w.variety_id, a.week["id"]))
@@ -1547,10 +1548,10 @@ class SamplingTab(MDBoxLayout):
             bg, fg = bbch_tag_colors(code)
             row = cache[v["id"]]
             row.title, row.kicker = a.db.parcel_labels(v, trt_names)
+            if ph.is_unit(v):   # predio: la variedad (y su año) grande; equipo y sector, chico
+                row.title, row.kicker = ph.unit_main(v), ph.unit_place(v)
             row.subtitle = (obs["bbch_label"] or ph.bbch_label(code, names)) if code is not None \
                 else ("Foto sin estado asignado" if n else "Pendiente de registro")
-            if v.get("cultivar"):   # predio: «Equipo de riego n, sector m» + variedad
-                row.subtitle = f"{v['cultivar']} · {row.subtitle}"
             row.photos, row.photo_tag = n, ("SIN FOTOS" if not n else f"{n} FOTO" + ("S" if n > 1 else ""))
             row.code_tag = f"BBCH {ph.code_str(code)}" if code is not None else "BBCH —"
             row.code_bg, row.code_fg, row.done = bg, fg, code is not None
@@ -1796,17 +1797,20 @@ class VarietiesTab(MDScreen):
         for v in varieties:
             m = a.db.get_metrics(v["id"], season)
             parts = []
-            if v["sector"]:
-                parts.append(f"Sector {v['sector']}")
-            if v["irrigation"]:
-                parts.append(f"Riego ER{v['irrigation']}")
+            if not ph.is_unit(v):       # predio: equipo y sector ya van al comienzo
+                if v["sector"]:
+                    parts.append(f"Sector {v['sector']}")
+                if v["irrigation"]:
+                    parts.append(f"Riego ER{v['irrigation']}")
             if m["historical_yield"] is not None:
                 parts.append(f"hist. {m['historical_yield']:g} {m['historical_yield_unit']}")
             if m["projected_yield"] is not None:
                 parts.append(f"proy. {m['projected_yield']:g} {m['projected_yield_unit']}")
             if m["basal_canes"] is not None:
                 parts.append(f"{m['basal_canes']:g} cañas {m['basal_canes_unit']}")
-            if v.get("cultivar"):
+            if ph.is_unit(v):          # predio: la variedad va en el título
+                parts.insert(0, ph.unit_place(v))
+            elif v.get("cultivar"):
                 parts.insert(0, v["cultivar"])
             if v.get("treatment"):
                 t = trts.get(v["treatment"])
@@ -1815,7 +1819,7 @@ class VarietiesTab(MDScreen):
             if n_custom:
                 parts.append(f"{n_custom} campo(s) extra")
             row = cache[v["id"]]
-            row.title, row.code = v["name"], v["code"] or ""
+            row.title, row.code = ph.unit_main(v), v["code"] or ""
             row.summary = " · ".join(parts) or "Sin parámetros cargados"
 
     def open_variety(self, variety_id: int):
@@ -2078,7 +2082,7 @@ class TimelineScreen(MDScreen):
         a = app()
         self.variety_id = variety_id
         v = a.db.get_variety(variety_id)
-        self.ids.bar.title = v["name"]
+        self.ids.bar.title = ph.unit_main(v)
         rows = a.db.variety_timeline(variety_id, a.season)
         codes = [r["bbch_code"] for r in rows if r["bbch_code"] is not None]
         n_photos = 0
@@ -2270,7 +2274,7 @@ class VarietyScreen(SectorIrrigationMixin, MDScreen):
         a = app()
         self.variety_id = variety_id
         v = a.db.get_variety(variety_id)
-        self.ids.bar.title = v["name"]
+        self.ids.bar.title = ph.unit_main(v)
         self.predio = a.db.is_predio
         # Predio: se edita la variedad; el nombre («Equipo de riego n, sector m») sale solo.
         self.ids.name.hint_text = "Variedad" if self.predio else "Nombre de la variedad"
@@ -2358,7 +2362,7 @@ class VarietyScreen(SectorIrrigationMixin, MDScreen):
         values["historical_note"] = self.ids.historical_note.text
         a.db.save_metrics(self.variety_id, a.season, **values)
         a.toast("Ficha guardada")
-        self.ids.bar.title = name
+        self.ids.bar.title = ph.unit_main(a.db.get_variety(self.variety_id))
 
     def custom_dialog(self, field: dict | None = None):
         a = app()
@@ -2455,8 +2459,11 @@ class ObservationScreen(MDScreen):
         self.variety = a.db.get_variety(variety_id)
         self.week = a.db.get_week(week_id)
         self.obs = a.db.get_or_create_observation(variety_id, week_id)
-        self.ids.bar.title = a.db.display_name(self.variety) if a.db.is_trial else self.variety["name"]
-        self.ids.week_caption.text = f"{ph.week_title(self.week)} · {self.week['label']}"
+        self.ids.bar.title = (a.db.display_name(self.variety) if a.db.is_trial
+                              else ph.unit_main(self.variety))
+        where = ph.unit_place(self.variety)       # predio: equipo y sector, en la línea de abajo
+        self.ids.week_caption.text = (f"{where} · " if where else "") + \
+            f"{ph.week_title(self.week)} · {self.week['label']}"
         self._refresh_slot("canopy")
         self._refresh_slot("detail")
         self.load_attachments()
@@ -3205,9 +3212,10 @@ class PreviewTab(MDScreen):
             f"{len(sm['rows'])} {unit} × {len(sm['week_labels'])} semanas", span) if x) + \
             "  ·  toque una celda para abrir el registro"
         from kivy.uix.scrollview import ScrollView
-        names = StageNames(rows=sm["rows"])
+        rows = [dict(r, name=ph.unit_compact(r)) for r in sm["rows"]]   # predio: «Meeker 2019 · E1-S1»
+        names = StageNames(rows=rows)
         hm = StageHeatmap(on_cell=self._open_cell)
-        hm.weeks, hm.rows = sm["week_labels"], sm["rows"]
+        hm.weeks, hm.rows = sm["week_labels"], rows
         row = BoxLayout(size_hint_y=None, height=hm.height)
         row.add_widget(names)
         sv = ScrollView(do_scroll_x=True, do_scroll_y=False, bar_width=dp(3),
@@ -3347,7 +3355,7 @@ class PreviewTab(MDScreen):
             code = None
             sub, col = ("Sin estado registrado" if cells else "Sin registros"), c(theme.BERRY)
         bg, fg = bbch_tag_colors(code)
-        tile = PreviewTile(title=row.get("display") or row["name"], subtitle=sub, sub_color=col,
+        tile = PreviewTile(title=row.get("display") or ph.unit_main(row), subtitle=sub, sub_color=col,
                            badge=f"BBCH {ph.code_str(code)}" if code is not None else "",
                            badge_bg=bg, badge_fg=fg,
                            berry=theme.berry_art(row.get("cultivar") or "", row["name"],
@@ -3461,7 +3469,7 @@ class ReportsTab(MDScreen):
         ids.to_btn.text = f"Hasta {ph.week_short(self.sel_to)}"
         ids.month_btn.text = (f"Mes: {ph.MESES[self.sel_month[1] - 1].capitalize()} {self.sel_month[0]}"
                               if self.sel_month else "Elegir mes (o rango abajo)")
-        ids.variety_btn.text = self.sel_variety["name"] if self.sel_variety else "Sin variedades"
+        ids.variety_btn.text = ph.unit_compact(self.sel_variety) if self.sel_variety else "Sin variedades"
 
     def pick_week(self, caller, target: str):
         a = app()
@@ -3501,7 +3509,7 @@ class ReportsTab(MDScreen):
         def choose(v):
             self.sel_variety = v
             self._labels()
-        open_menu(caller, [(v["name"], lambda v=v: choose(v)) for v in app().db.list_varieties()])
+        open_menu(caller, [(ph.unit_compact(v), lambda v=v: choose(v)) for v in app().db.list_varieties()])
 
     def pick_photo_mode(self):
         a = app()
@@ -4667,9 +4675,22 @@ class EntryRow(MDBoxLayout):
     screen = ObjectProperty()
 
 
-def _variety_label(variety_id, varieties) -> str:
+def _variety_label(variety_id, varieties, two_lines: bool = False) -> str:
+    """Nombre de la variedad de un registro. Predio: «Meeker 2019 · E1-S1» (o en dos
+    líneas para la celda angosta de la planilla)."""
     v = next((v for v in varieties if v["id"] == variety_id), None)
-    return v["name"] if v else "General"
+    if not v:
+        return "General"
+    if two_lines and ph.is_unit(v):
+        main, _sep, where = ph.unit_compact(v).rpartition(" · ")
+        return f"{main}\n{where}"
+    return ph.unit_compact(v)
+
+
+def _variety_choices(varieties, choose):
+    """Filas de un selector de variedad: predio = variedad y año, con equipo y sector abajo."""
+    return [(ph.unit_main(v), " · ".join(x for x in (ph.unit_place(v), v["code"] or "") if x),
+             lambda v=v: choose(v["id"])) for v in varieties]
 
 
 def open_measures_menu():
@@ -4787,12 +4808,15 @@ def new_measure_dialog():
 
 
 def _cell_button(text, width, bold=False, bg=None, fg=None, on_release=None):
-    """Celda-botón de la grilla (encabezados, n.º de fila, variedad)."""
+    """Celda-botón de la grilla (encabezados, n.º de fila, variedad). Un texto en dos
+    líneas va más chico y sin cortar."""
     from kivy.uix.button import Button
-    b = Button(text=text, size_hint=(None, None), size=(width, dp(42)), font_size="13sp",
+    two = "\n" in text
+    b = Button(text=text, size_hint=(None, None), size=(width, dp(42)),
+               font_size="11.5sp" if two else "13sp", line_height=.95 if two else 1,
                bold=bold, background_normal="", background_down="",
                background_color=bg or c(theme.LEAF_SOFT), color=fg or c(theme.INK),
-               halign="center", valign="middle", shorten=True, shorten_from="right")
+               halign="center", valign="middle", shorten=not two, shorten_from="right")
     b.bind(size=lambda w, sz: setattr(w, "text_size", (sz[0] - dp(8), sz[1])))
     if on_release:
         b.bind(on_release=on_release)
@@ -4868,15 +4892,17 @@ class MeasureScreen(MDScreen):
         grid.bind(minimum_width=grid.setter("width"), minimum_height=grid.setter("height"))
         head_bg, head_fg = c(theme.LEAF_DARK), c("#FFFFFF")
         grid.add_widget(_cell_button("#", self.NUM_W, True, head_bg, head_fg))
-        grid.add_widget(_cell_button("Variedad", self.VAR_W, True, head_bg, head_fg))
+        self.var_w = dp(150) if app().db.is_predio else self.VAR_W   # predio: variedad y año
+        grid.add_widget(_cell_button("Variedad", self.var_w, True, head_bg, head_fg))
         for col in cols:
             grid.add_widget(_cell_button(col, self.COL_W, True, head_bg, head_fg,
                                          on_release=lambda *_, col=col: self.column_menu(col)))
         for i, e in enumerate(entries):
             grid.add_widget(_cell_button(str(i + 1), self.NUM_W, bg=c(theme.LEAF_SOFT),
                                          on_release=lambda *_, e=e, n=i + 1: self.row_menu(e, n)))
-            grid.add_widget(_cell_button(_variety_label(e["variety_id"], varieties) if e["variety_id"]
-                                         else "—", self.VAR_W, bg=c("#FFFFFF"), fg=c(theme.LEAF_DARK),
+            grid.add_widget(_cell_button(_variety_label(e["variety_id"], varieties, two_lines=True)
+                                         if e["variety_id"] else "—", self.var_w, bg=c("#FFFFFF"),
+                                         fg=c(theme.LEAF_DARK),
                                          on_release=lambda *_, e=e: self.pick_row_variety(e)))
             row_cells = []
             for col in cols:
@@ -5036,8 +5062,7 @@ class MeasureScreen(MDScreen):
             self.refresh()
 
         pick_dialog("Variedad de la fila", [("— General", "Sin variedad específica", lambda: choose(None))]
-                    + [(v["name"], v["code"] or "", lambda v=v: choose(v["id"]))
-                       for v in a.db.list_varieties()])
+                    + _variety_choices(a.db.list_varieties(), choose))
 
     # ----------------------------------------------------------- registros
     def entry_dialog(self, entry: dict):
@@ -5057,7 +5082,7 @@ class MeasureScreen(MDScreen):
 
         vbtn.bind(on_release=lambda *_: pick_dialog(
             "Variedad", [("General", "Sin variedad específica", lambda: set_variety(None))]
-            + [(v["name"], v["code"] or "", lambda v=v: set_variety(v["id"])) for v in varieties]))
+            + _variety_choices(varieties, set_variety)))
         set_variety(state["variety_id"])
         form.add_widget(caption)
         form.add_widget(vbtn)

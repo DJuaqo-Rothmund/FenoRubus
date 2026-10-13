@@ -1129,7 +1129,7 @@
     radius: [dp(12)]
     elevation: 0
     size_hint_y: None
-    height: dp(76)
+    height: max(dp(76), row_text.height + dp(20))   # crece con el texto (sin «…»)
     md_bg_color: c(theme.GLASS)
     line_color: c(theme.GLASS_EDGE)
     ripple_behavior: True
@@ -1139,6 +1139,7 @@
         size: dp(56), dp(56)
         pos_hint: {"center_y": .5}
     MDBoxLayout:
+        id: row_text
         orientation: "vertical"
         pos_hint: {"center_y": .5}
         adaptive_height: True
@@ -1152,8 +1153,8 @@
             text_color: c(theme.BERRY)
             size_hint_y: None
             height: self.texture_size[1] if root.kicker else 0
+            text_size: self.width, None
             opacity: 1 if root.kicker else 0
-            shorten: True
         MDLabel:
             text: root.title
             font_style: "Subtitle1"
@@ -1161,14 +1162,12 @@
             theme_text_color: "Custom"
             text_color: c(theme.INK)
             adaptive_height: True
-            shorten: True
         MDLabel:
             text: root.subtitle
             font_style: "Caption"
             theme_text_color: "Custom"
             text_color: c(theme.INK_2) if root.done else c(theme.MUTED)
             adaptive_height: True
-            shorten: True
     MDBoxLayout:
         orientation: "vertical"
         adaptive_size: True
@@ -1219,11 +1218,12 @@
     radius: [dp(12)]
     elevation: 0
     size_hint_y: None
-    height: dp(76)
+    height: max(dp(76), cat_text.height + dp(20))   # crece con el texto (sin «…»)
     md_bg_color: c(theme.GLASS)
     line_color: c(theme.GLASS_EDGE)
     ripple_behavior: True
     MDBoxLayout:
+        id: cat_text
         orientation: "vertical"
         adaptive_height: True
         pos_hint: {"center_y": .5}
@@ -1239,7 +1239,8 @@
                 theme_text_color: "Custom"
                 text_color: c(theme.INK)
             Tag:
-                text: root.code
+                # Sin código: un espacio (vacía, una etiqueta mide 100 de alto y estira la tarjeta).
+                text: root.code or " "
                 opacity: 1 if root.code else 0
                 bg: c(theme.BERRY_SOFT)
                 fg: c(theme.LEAF_DARK)
@@ -1250,7 +1251,6 @@
             theme_text_color: "Custom"
             text_color: c(theme.MUTED)
             adaptive_height: True
-            shorten: True
     MDIconButton:
         icon: "pencil-outline"
         pos_hint: {"center_y": .5}

@@ -1600,3 +1600,14 @@ def test_treatment_meaning_in_cards_and_reports(tmp_path):
     week = db.current_week(dt.date(2026, 10, 5))
     rows = report_summary(db, "matrix", week["season"])["rows"]
     assert "Testigo (T1R2)" in {r["name"] for r in rows}
+
+
+def test_predio_unit_display_names():
+    """Predio: la variedad y su año en grande; equipo y sector aparte (o abreviados)."""
+    v = {"name": "Equipo de riego 1, sector 1 · Cascade Harvest", "cultivar": "Cascade Harvest",
+         "sector": 1, "irrigation": 1, "plant_year": 2019}
+    assert ph.unit_main(v) == "Cascade Harvest · 2019"
+    assert ph.unit_place(v) == "Equipo de riego 1 · sector 1"
+    assert ph.unit_compact(v) == "Cascade Harvest 2019 · E1-S1"
+    assert ph.unit_main(dict(v, plant_year=None)) == "Cascade Harvest"
+    assert ph.unit_main({"name": "Meeker"}) == "Meeker" and ph.unit_place({"name": "Meeker"}) == ""
