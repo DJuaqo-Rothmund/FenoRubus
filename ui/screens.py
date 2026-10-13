@@ -15,6 +15,7 @@ from kivy.metrics import dp
 from kivy.uix.behaviors import ButtonBehavior
 from kivy.uix.boxlayout import BoxLayout
 from kivy.uix.floatlayout import FloatLayout
+from kivy.uix.label import Label
 from kivy.uix.layout import Layout
 from kivy.uix.widget import Widget
 from kivy.properties import (BooleanProperty, ColorProperty, ListProperty, NumericProperty,
@@ -106,8 +107,21 @@ class UnitButton(MDRectangleFlatButton):
             self.text = self.options[(i + 1) % len(self.options)]
 
 
-class SegButton(MDRaisedButton):
+class PillButton(ButtonBehavior, Label):
+    """Botón píldora dibujado con UNA forma redondeada (sin la sombra rectangular de los
+    botones con relieve de KivyMD, que en algunos teléfonos se veía desplazada junto con
+    el color de «presionado»)."""
     selected = BooleanProperty(False)
+    bg_on = ColorProperty(c(theme.BERRY))
+    bg_off = ColorProperty(c("#FFFFFF", .55))
+    fg_on = ColorProperty(c("#FFFFFF"))
+    fg_off = ColorProperty(c(theme.LEAF_DARK))
+    edge = ColorProperty(c(theme.GLASS_EDGE))
+    press_tint = ColorProperty(c("#000000", .10))
+
+
+class SegButton(PillButton):
+    pass
 
 
 def open_menu(caller, items: list[tuple[str, callable]], width_mult: int = 5):
@@ -2820,9 +2834,11 @@ class PreviewTab(MDScreen):
         options = [(None, "Toda la temporada")] + [
             (ym, f"{ph.MESES[ym[1] - 1].capitalize()} {ym[0]}") for ym in self._months()]
         for ym, label in options:
-            b = Factory.SegButton(text=label, selected=self.sel_month == ym, size_hint=(None, None),
-                                  height=dp(34))
-            b.width = dp(28) + len(label) * dp(7.2)
+            b = Factory.SegButton(text=label, selected=self.sel_month == ym, size_hint_x=None,
+                                  height=dp(36), font_size="14sp")
+            b.text_size = (None, None)          # el ancho lo da el texto (no se corta)
+            b.texture_update()
+            b.width = b.texture_size[0] + dp(30)
             b.bind(on_release=lambda w, ym=ym: self._set_month(ym))
             chips.add_widget(b)
         box.add_widget(chips)
@@ -3576,8 +3592,8 @@ class LabelPhotoRow(GlassButton):
     photo = ObjectProperty()
 
 
-class MindSeg(MDRaisedButton):
-    selected = BooleanProperty(False)
+class MindSeg(PillButton):
+    pass
 
 
 class MindTopBar(MDTopAppBar):

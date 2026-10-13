@@ -2408,14 +2408,36 @@
 # ---------------------------------------------------------------------------
 # Módulo de calibración IA
 # ---------------------------------------------------------------------------
+<PillButton>:
+    size_hint_y: None
+    height: dp(44)
+    font_size: "15sp"
+    halign: "center"
+    valign: "middle"
+    text_size: self.width - dp(16), None
+    shorten: True
+    color: self.fg_on if self.selected else self.fg_off
+    canvas.before:
+        Color:
+            rgba: self.bg_on if self.selected else self.bg_off
+        RoundedRectangle:
+            pos: self.pos
+            size: self.size
+            radius: [self.height / 2]
+        Color:
+            rgba: self.press_tint if self.state == "down" else (0, 0, 0, 0)
+        RoundedRectangle:
+            pos: self.pos
+            size: self.size
+            radius: [self.height / 2]
+        Color:
+            rgba: (0, 0, 0, 0) if self.selected else self.edge
+        Line:
+            rounded_rectangle: (self.x, self.y, self.width, self.height, self.height / 2)
+            width: dp(1)
+
 <SegButton>:
     size_hint_x: 1
-    elevation: 0
-    rounded_button: True
-    md_bg_color: c(theme.BERRY) if self.selected else (1, 1, 1, .55)
-    theme_text_color: "Custom"
-    text_color: (1, 1, 1, 1) if self.selected else c(theme.LEAF_DARK)
-    line_color: c(theme.GLASS_EDGE)
 
 # ---------------------------------------------------------------------------
 # «Mente del sistema»: estilos oscuros del módulo de IA
@@ -2471,13 +2493,14 @@
 
 <MindSeg>:
     size_hint_x: 1
-    elevation: 0
-    rounded_button: True
-    font_size: "13sp"
-    md_bg_color: c(theme.MIND_ACCENT) if self.selected else (1, 1, 1, .06)
-    theme_text_color: "Custom"
-    text_color: c(theme.MIND_INK) if self.selected else c(theme.MIND_TEXT)
-    line_color: c(theme.MIND_EDGE)
+    height: dp(40)
+    font_size: "14sp"
+    bg_on: c(theme.MIND_ACCENT)
+    bg_off: 1, 1, 1, .06
+    fg_on: c(theme.MIND_INK)
+    fg_off: c(theme.MIND_TEXT)
+    edge: c(theme.MIND_EDGE)
+    press_tint: 1, 1, 1, .12
 
 <MindTopBar>:
     elevation: 0
