@@ -1504,10 +1504,35 @@ class VarietyRow(GlassButton):
     thumb_src = StringProperty("")
 
 
+def season_dialog(on_done=None):
+    """Elegir temporada (abril-marzo): cambia la temporada de toda la app."""
+    a = app()
+    items = []
+    for s in a.db.season_list():
+        first, last = s["first"], s["last"]
+        n = s["records"]
+        sub = (f"{first.day} {ph.MESES[first.month - 1][:3]} {first.year} – "
+               f"{last.day} {ph.MESES[last.month - 1][:3]} {last.year} · "
+               + (f"{n} registro{'s' if n != 1 else ''}" if n else "sin registros")
+               + (" · en curso" if s["current"] else ""))
+
+        def choose(season=s["season"]):
+            a.set_season(season)
+            if on_done:
+                on_done()
+        accent = c(theme.LEAF) if s["season"] == a.season else None
+        items.append((s["title"], sub, choose, accent))
+    pick_dialog("Temporada", items)
+
+
 class SamplingTab(MDBoxLayout):
+    def pick_season(self):
+        season_dialog(self.refresh)
+
     def refresh(self):
         a = app()
         week = a.week
+        self.ids.season_chip.text = ph.season_title(a.season)
         start = _dt.date.fromisoformat(week["start_date"])
         end = start + _dt.timedelta(days=6)
         self.ids.week_kicker.text = ph.week_title(week).upper()
@@ -1606,16 +1631,22 @@ class SamplingTab(MDBoxLayout):
 
     def shift_week(self, delta: int):
         a = app()
+        season = a.week["season"]
         n = a.week["week_number"] + delta
         if n < 1:
             a.toast("Es la primera semana de muestreo de la temporada.")
             return
-        a.week = a.db.ensure_week(a.week["season"], n)
+        start = ph.week_start(a.db.season_start(season), n)
+        if ph.season_of(start) != season:   # la semana 52/53 sigue en la 1, hasta marzo
+            a.toast(f"Es la última semana de la {ph.season_title(season)}.")
+            return
+        a.week = a.db.ensure_week(season, n)
         self.refresh()
 
     def go_current(self):
         a = app()
         a.week = a.db.current_week()
+        a.season = a.week["season"]
         self.refresh()
 
 
@@ -3075,11 +3106,15 @@ class PreviewTab(MDScreen):
         from ui.sector_map import load_map
         return load_map(ws.get("code"))
 
+    def pick_season(self):
+        season_dialog(self.refresh)
+
     def refresh(self):
         a = app()
         if getattr(self, "_season", None) != a.season:
             self._season = a.season
             self.sel_month = None
+        self.ids.season_chip.text = ph.season_title(a.season)
         plan = self._plan()
         if plan is not getattr(self, "_plan_on", None):
             self._plan_on, self.sel_sector = plan, ""
@@ -3094,7 +3129,7 @@ class PreviewTab(MDScreen):
     # ------------------------------------------------------------ parámetros
     def _months(self):
         out = []
-        for w in app().db.list_weeks(app().season):
+        for w in app().db.list_weeks(app().season, trim_empty=True):
             d = _dt.date.fromisoformat(w["start_date"])
             if (d.year, d.month) not in out:
                 out.append((d.year, d.month))

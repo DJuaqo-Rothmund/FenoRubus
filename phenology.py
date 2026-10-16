@@ -294,14 +294,40 @@ MESES = ["enero", "febrero", "marzo", "abril", "mayo", "junio", "julio",
 DIAS = ["lunes", "martes", "miércoles", "jueves", "viernes", "sábado", "domingo"]
 
 
+SEASON_MONTH = 4   # la temporada agrícola va de abril a marzo
+
+
+def season_first_monday(season: int) -> _dt.date:
+    """Lunes de la semana que contiene el 1 de abril: primera semana de la temporada."""
+    d = _dt.date(season, SEASON_MONTH, 1)
+    return d - _dt.timedelta(days=d.weekday())
+
+
 def season_of(date: _dt.date) -> int:
-    """Temporada agrícola (hemisferio sur): jul-jun. 2026-09 -> 2026; 2027-02 -> 2026."""
-    return date.year if date.month >= 7 else date.year - 1
+    """Temporada agrícola abril-marzo («Temporada 2026-2027» = 2026). Se decide por el
+    lunes de la semana, así una semana nunca queda partida entre dos temporadas:
+    2026-10-16 -> 2026; 2027-02-01 -> 2026; 2027-03-31 (semana del 29-03) -> 2027."""
+    monday = date - _dt.timedelta(days=date.weekday())
+    return monday.year if monday >= season_first_monday(monday.year) else monday.year - 1
+
+
+def season_bounds(season: int) -> tuple[_dt.date, _dt.date]:
+    """(1 de abril, 31 de marzo del año siguiente)."""
+    return _dt.date(season, SEASON_MONTH, 1), _dt.date(season + 1, SEASON_MONTH, 1) - _dt.timedelta(days=1)
 
 
 def default_season_start(season: int) -> _dt.date:
-    """Semana 1 por defecto: semana del 7 de septiembre de la temporada."""
+    """Semana 1 por defecto: la semana del 1 de abril (se puede cambiar en Ajustes)."""
+    return season_first_monday(season)
+
+
+def legacy_season_start(season: int) -> _dt.date:
+    """Semana 1 del esquema anterior (temporada julio-junio): 7 de septiembre."""
     return _dt.date(season, 9, 7)
+
+
+def legacy_season_of(date: _dt.date) -> int:
+    return date.year if date.month >= 7 else date.year - 1
 
 
 def week_label(start: _dt.date) -> str:
@@ -365,8 +391,8 @@ def week_of_year(week) -> int:
 
 
 def season_title(season: int) -> str:
-    """Rótulo de una temporada completa: «Año 2026»."""
-    return f"Año {season}"
+    """Rótulo de una temporada completa: «Temporada 2026-2027»."""
+    return f"Temporada {season}-{season + 1}"
 
 
 def week_start(season_start: _dt.date, number: int) -> _dt.date:

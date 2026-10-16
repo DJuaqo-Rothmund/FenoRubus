@@ -529,6 +529,15 @@ class FenoRubusApp(MDApp):
             return None
         return os.path.join(data_subdir("thumbs"), key + ".jpg")
 
+    def set_season(self, season: int) -> None:
+        """Temporada que muestran muestreo, vista previa e informes (sin mezclar registros):
+        en la temporada en curso, la semana actual; en otra, su última semana con datos."""
+        if season == self.db.current_season():
+            self.week = self.db.current_week()
+        else:
+            self.week = self.db.last_week(season) or self.db.ensure_week(season, 1)
+        self.season = self.week["season"]
+
     def thumb(self, path: str, size: int = 320) -> str:
         """Miniatura cacheada (síncrona; usar thumb_async desde la interfaz)."""
         dest = self._thumb_dest(path, size)

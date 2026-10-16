@@ -692,10 +692,20 @@
                         icon: "chevron-left"
                         pos_hint: {"center_y": .5}
                         on_release: root.shift_week(-1)
-                    MDBoxLayout:
+                    WeekHeader:
+                        # Tocar la semana abre el selector de temporada.
                         orientation: "vertical"
                         adaptive_height: True
+                        spacing: dp(2)
+                        padding: 0, dp(2), 0, dp(4)
                         pos_hint: {"center_y": .5}
+                        on_release: root.pick_season()
+                        AnchorLayout:
+                            size_hint_y: None
+                            height: dp(34)
+                            SeasonChip:
+                                id: season_chip
+                                on_release: root.pick_season()
                         SectionLabel:
                             id: week_kicker
                             halign: "center"
@@ -863,6 +873,56 @@
         elevation: 2
         pos_hint: {"right": .95, "y": .035}
         on_release: root.new_item()
+
+<SeasonChip@ButtonBehavior+BoxLayout>:
+    # «Temporada 2026-2027 ⌄»: abre el selector de temporada.
+    text: ""
+    size_hint: None, None
+    height: dp(30)
+    width: lbl.texture_size[0] + dp(58)
+    padding: dp(10), 0, dp(8), 0
+    spacing: dp(4)
+    canvas.before:
+        Color:
+            rgba: c(theme.LEAF_SOFT) if self.state == "normal" else c(theme.LEAF, .3)
+        RoundedRectangle:
+            pos: self.pos
+            size: self.size
+            radius: [self.height / 2]
+    MDIcon:
+        icon: "calendar-range"
+        font_size: "16sp"
+        size_hint: None, None
+        size: dp(18), dp(18)
+        pos_hint: {"center_y": .5}
+        theme_text_color: "Custom"
+        text_color: c(theme.LEAF_DARK)
+    Label:
+        id: lbl
+        text: root.text
+        bold: True
+        font_size: "13sp"
+        color: c(theme.LEAF_DARK)
+        size_hint: None, None
+        size: self.texture_size
+        pos_hint: {"center_y": .5}
+    MDIcon:
+        icon: "chevron-down"
+        font_size: "18sp"
+        size_hint: None, None
+        size: dp(18), dp(18)
+        pos_hint: {"center_y": .5}
+        theme_text_color: "Custom"
+        text_color: c(theme.LEAF_DARK)
+
+<WeekHeader@ButtonBehavior+MDBoxLayout>:
+    canvas.before:
+        Color:
+            rgba: c(theme.LEAF, .08) if self.state == "down" else (0, 0, 0, 0)
+        RoundedRectangle:
+            pos: self.pos
+            size: self.size
+            radius: [dp(12)]
 
 <SamplingCTA@ButtonBehavior+BoxLayout>:
     # Botón destacado «Muestreo» (pantalla de sectores del predio, en la barra).
@@ -1796,8 +1856,15 @@
             padding: dp(16), dp(10), dp(16), dp(24)
             spacing: dp(12)
             PaperCard:
-                SectionLabel:
-                    text: "VISTA"
+                MDBoxLayout:
+                    adaptive_height: True
+                    SectionLabel:
+                        text: "VISTA"
+                        pos_hint: {"center_y": .5}
+                    SeasonChip:
+                        id: season_chip
+                        pos_hint: {"center_y": .5}
+                        on_release: root.pick_season()
                 MDGridLayout:
                     cols: 2
                     spacing: dp(8)

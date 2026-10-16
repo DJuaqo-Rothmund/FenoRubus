@@ -279,6 +279,7 @@ class Database:
         self.conn.execute("PRAGMA synchronous = NORMAL")
         self.conn.execute("PRAGMA temp_store = MEMORY")
         self.init_schema()
+        self._migrate_seasons_apr()
         if seed:
             self.seed_defaults()
         if shared is None and seed:
@@ -334,6 +335,65 @@ class Database:
                 if name not in have:
                     self.conn.execute(f"ALTER TABLE {table} ADD COLUMN {name} {typ}")
         self.conn.execute("UPDATE meta SET value=? WHERE key='schema_version'", (str(SCHEMA_VERSION),))
+
+    def _migrate_seasons_apr(self) -> None:
+        """
+        Temporada julio-junio -> abril-marzo (una sola vez, sin tocar registros ni fotos).
+
+        * Cada temporada con semanas conserva su Semana 1 (7 de septiembre o la elegida en
+          Ajustes): así ninguna semana se renumera.
+        * Las semanas que en el esquema nuevo caen en otra temporada (abril-junio) se
+          pasan a esa temporada con su número recalculado (si son anteriores a su Semana 1,
+          esta se adelanta); antes se guarda una copia de la base (…pre-temporadas.bak).
+          Los registros, fotos y fechas no cambian: cuelgan del id de la semana.
+        """
+        if self.conn.execute("SELECT 1 FROM meta WHERE key='season_scheme'").fetchone():
+            return
+        seasons = [r[0] for r in self.conn.execute("SELECT DISTINCT season FROM sampling_weeks")]
+        for season in seasons:
+            if self.get_setting(f"season_start:{season}") is None:
+                self.set_setting(f"season_start:{season}", ph.legacy_season_start(season).isoformat())
+        rows = self.query("SELECT id, season, week_number, start_date FROM sampling_weeks")
+        moves = []
+        for w in rows:
+            target = ph.season_of(_dt.date.fromisoformat(w["start_date"][:10]))
+            if target != w["season"]:
+                moves.append((w, target))
+        if moves:
+            try:
+                bak = sqlite3.connect(self.path + ".pre-temporadas.bak")
+                with bak:
+                    self.conn.backup(bak)
+                bak.close()
+            except Exception as exc:  # noqa: BLE001 (sin copia no se mueve nada)
+                print("temporadas: sin copia de seguridad:", exc)
+                moves = []
+        with self._lock:
+            for target in sorted({t for _, t in moves}):
+                mine = [w for w, t in moves if t == target]
+                raw = self.get_setting(f"season_start:{target}")
+                first = _dt.date.fromisoformat(raw) if raw else ph.default_season_start(target)
+                earliest = min(_dt.date.fromisoformat(w["start_date"][:10]) for w in mine)
+                if earliest < first:
+                    # La Semana 1 se adelanta a la semana más antigua que llega: las que ya
+                    # estaban solo corren su número interno (fechas y semana del año iguales).
+                    k = -(-(first - earliest).days // 7)
+                    self.conn.execute("UPDATE sampling_weeks SET week_number=-week_number WHERE season=?",
+                                      (target,))
+                    self.conn.execute("UPDATE sampling_weeks SET week_number=-week_number+? WHERE season=?",
+                                      (k, target))
+                    first = first - _dt.timedelta(days=7 * k)
+                    self.conn.execute("INSERT OR REPLACE INTO settings(key, value) VALUES (?, ?)",
+                                      (f"season_start:{target}", json.dumps(first.isoformat())))
+                for w in mine:
+                    n = ph.week_number_for(_dt.date.fromisoformat(w["start_date"][:10]), first)
+                    taken = self.conn.execute(
+                        "SELECT 1 FROM sampling_weeks WHERE season=? AND week_number=?", (target, n)).fetchone()
+                    if n >= 1 and not taken:
+                        self.conn.execute("UPDATE sampling_weeks SET season=?, week_number=? WHERE id=?",
+                                          (target, n, w["id"]))
+            self.conn.execute("INSERT OR REPLACE INTO meta(key, value) VALUES ('season_scheme', 'abr-mar')")
+            self.conn.commit()
 
     def _migrate_photos_v2(self) -> None:
         """
@@ -964,13 +1024,54 @@ class Database:
             self.ensure_week(season, n)
         return self.list_weeks(season)
 
-    def list_weeks(self, season: int, include_skipped: bool = True) -> list[dict]:
+    def list_weeks(self, season: int, include_skipped: bool = True,
+                   trim_empty: bool | None = None) -> list[dict]:
         """Semanas de la temporada. include_skipped=False quita las marcadas como
-        «no muestreada» (los informes de varias semanas no las muestran)."""
+        «no muestreada» (los informes de varias semanas no las muestran).
+        trim_empty (por defecto, igual que en los informes): quita las semanas vacías del
+        comienzo (la temporada parte en abril aunque se muestree desde más tarde)."""
         sql = "SELECT * FROM sampling_weeks WHERE season=?"
         if not include_skipped:
             sql += " AND COALESCE(skipped, 0) = 0"
-        return self.query(sql + " ORDER BY week_number", (season,))
+        weeks = self.query(sql + " ORDER BY week_number", (season,))
+        if trim_empty if trim_empty is not None else not include_skipped:
+            first = self.first_week_with_data(season)
+            if first is not None:
+                weeks = [w for w in weeks if w["week_number"] >= first]
+        return weeks
+
+    def first_week_with_data(self, season: int) -> int | None:
+        """N.º de la primera semana con algún registro (estado, foto, nota, medición o
+        foto adjunta); None si la temporada está vacía."""
+        row = self.query_one(
+            "SELECT MIN(w.week_number) AS n FROM sampling_weeks w WHERE w.season=? AND ("
+            " EXISTS (SELECT 1 FROM observations o WHERE o.week_id=w.id AND (o.bbch_code IS NOT NULL"
+            "   OR COALESCE(o.notes, '') <> '' OR EXISTS (SELECT 1 FROM photos p WHERE p.observation_id=o.id)))"
+            " OR EXISTS (SELECT 1 FROM measure_entries e WHERE e.week_id=w.id)"
+            " OR EXISTS (SELECT 1 FROM variety_attachments a WHERE a.week_id=w.id))", (season,))
+        return row["n"] if row else None
+
+    def season_list(self, today: _dt.date | None = None) -> list[dict]:
+        """Temporadas de este ensayo (la más nueva primero) con cuántos registros tiene
+        cada una; siempre incluye la temporada en curso."""
+        now = ph.season_of(today or _dt.date.today())
+        found = {r["season"] for r in self.query("SELECT DISTINCT season FROM sampling_weeks")}
+        out = []
+        for s in sorted(found | {now}, reverse=True):
+            first, last = ph.season_bounds(s)
+            out.append({"season": s, "title": ph.season_title(s), "current": s == now,
+                        "records": self.count_observations(s), "first": first, "last": last})
+        return out
+
+    def last_week(self, season: int) -> dict | None:
+        """Última semana con registros de la temporada (o la última creada)."""
+        row = self.query_one(
+            "SELECT w.* FROM sampling_weeks w JOIN observations o ON o.week_id=w.id "
+            "WHERE w.season=? AND (o.bbch_code IS NOT NULL OR EXISTS "
+            "(SELECT 1 FROM photos p WHERE p.observation_id=o.id)) "
+            "ORDER BY w.week_number DESC LIMIT 1", (season,))
+        return row or self.query_one(
+            "SELECT * FROM sampling_weeks WHERE season=? ORDER BY week_number DESC LIMIT 1", (season,))
 
     def set_week_skipped(self, week_id: int, skipped: bool) -> None:
         self.execute("UPDATE sampling_weeks SET skipped=? WHERE id=?", (int(bool(skipped)), week_id))

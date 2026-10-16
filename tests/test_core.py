@@ -25,7 +25,7 @@ def db(tmp_path):
 
 # ------------------------------------------------------------------ semanas
 def test_week_labels_start_on_september_7():
-    start = ph.default_season_start(2026)
+    start = ph.legacy_season_start(2026)
     weeks = ph.generate_weeks(start, 3)
     assert [w.label for w in weeks] == ["Semana del 7 de septiembre",
                                         "Semana del 14 de septiembre",
@@ -36,11 +36,91 @@ def test_week_labels_start_on_september_7():
 
 
 def test_current_week_and_season_start_relabel(db):
+    db.set_season_start(2026, dt.date(2026, 9, 7))
     w = db.current_week(dt.date(2026, 9, 25))
     assert w["week_number"] == 3 and w["label"] == "Semana del 21 de septiembre"
     assert len(db.list_weeks(2026)) == 3
     db.set_season_start(2026, dt.date(2026, 9, 1))
     assert db.list_weeks(2026)[0]["label"] == "Semana del 1 de septiembre"
+
+
+def test_seasons_april_to_march():
+    assert ph.season_of(dt.date(2026, 10, 16)) == 2026
+    assert ph.season_of(dt.date(2027, 2, 1)) == 2026
+    assert ph.season_of(dt.date(2026, 3, 15)) == 2025
+    assert ph.season_of(dt.date(2027, 3, 31)) == 2027        # semana del lunes 29-03-2027
+    assert ph.season_of(dt.date(2026, 3, 31)) == 2026        # semana del lunes 30-03-2026
+    assert ph.season_bounds(2025) == (dt.date(2025, 4, 1), dt.date(2026, 3, 31))
+    assert ph.season_title(2025) == "Temporada 2025-2026"
+    assert ph.default_season_start(2026) == dt.date(2026, 3, 30)
+    # La semana 52 sigue en la 1 dentro de la misma temporada.
+    start = ph.default_season_start(2026)
+    weeks = [ph.week_start(start, n) for n in range(1, 54)]
+    assert {ph.season_of(d) for d in weeks[:52]} == {2026}
+    assert [ph.week_of_year(d.isoformat()) for d in weeks[39:42]] == [53, 1, 2]
+
+
+def test_season_migration_keeps_records(tmp_path):
+    """Base del esquema julio-junio: nada se renumera y abril-junio pasa a su temporada."""
+    import sqlite3
+    path = str(tmp_path / "old.sqlite3")
+    old = Database(path)
+    old.execute("DELETE FROM meta WHERE key='season_scheme'")
+    v = old.list_varieties()[0]
+    ids = {}
+    for season, n, start in ((2026, 1, "2026-09-07"), (2026, 6, "2026-10-12"),
+                             (2025, 31, "2026-04-06"), (2025, 30, "2026-03-30"),
+                             (2025, 20, "2026-01-19")):
+        cur = old.execute("INSERT INTO sampling_weeks(season, week_number, start_date, label) "
+                          "VALUES (?,?,?,?)", (season, n, start, "x"))
+        ids[start] = cur.lastrowid
+        obs = old.get_or_create_observation(v["id"], cur.lastrowid)
+        old.update_observation(obs["id"], bbch_code=31, bbch_label="x")
+    old.close()
+    db = Database(path)
+    week = lambda i: db.get_week(ids[i])  # noqa: E731
+    assert (week("2026-09-07")["season"], week("2026-09-07")["week_number"]) == (2026, 24)
+    assert (week("2026-10-12")["season"], week("2026-10-12")["week_number"]) == (2026, 29)
+    assert week("2026-01-19")["season"] == 2025
+    assert week("2026-03-30")["season"] == week("2026-04-06")["season"] == 2026
+    assert db.season_start(2026) == dt.date(2026, 3, 30)       # se adelantó a lo que llegó
+    assert [ph.week_title(w) for w in db.list_weeks(2026)][:2] == ["Semana 14, año 2026",
+                                                                   "Semana 15, año 2026"]
+    assert ph.week_title(week("2026-09-07")) == "Semana 37, año 2026"   # misma semana del año
+    assert db.count_observations(2026) == 4 and db.count_observations(2025) == 1
+    assert db.query_one("SELECT COUNT(*) AS n FROM observations")["n"] == 5
+    assert os.path.exists(path + ".pre-temporadas.bak")
+    db.close()
+    sqlite3.connect(path).close()
+    again = Database(path)                                      # una sola vez
+    assert again.get_week(ids["2026-09-07"])["week_number"] == 24
+    assert [s["season"] for s in again.season_list(dt.date(2026, 10, 16))] == [2026, 2025]
+    again.close()
+
+
+def test_season_migration_without_moves_keeps_numbers(tmp_path):
+    path = str(tmp_path / "old.sqlite3")
+    old = Database(path)
+    old.execute("DELETE FROM meta WHERE key='season_scheme'")
+    old.execute("INSERT INTO sampling_weeks(season, week_number, start_date, label) "
+                "VALUES (2026, 6, '2026-10-12', 'x')")
+    old.close()
+    db = Database(path)
+    assert db.season_start(2026) == dt.date(2026, 9, 7)
+    assert db.list_weeks(2026)[0]["week_number"] == 6
+    assert db.current_week(dt.date(2026, 10, 16))["week_number"] == 6
+    assert not os.path.exists(path + ".pre-temporadas.bak")
+    db.close()
+
+
+def test_reports_skip_empty_leading_weeks(db):
+    week = db.current_week(dt.date(2026, 9, 14))           # semana 25 desde el 30 de marzo
+    assert len(db.list_weeks(2026)) == week["week_number"]
+    v = db.list_varieties()[0]
+    obs = db.get_or_create_observation(v["id"], week["id"])
+    db.update_observation(obs["id"], bbch_code=31, bbch_label="x")
+    assert [w["id"] for w in db.list_weeks(2026, include_skipped=False)] == [week["id"]]
+    assert db.last_week(2026)["id"] == week["id"]
 
 
 # --------------------------------------------------------------- variedades
@@ -131,6 +211,7 @@ def test_document_parsing(db, tmp_path):
 # --------------------------------------------------------------- reportes
 def test_reports(db, tmp_path):
     season = 2026
+    db.set_season_start(season, dt.date(2026, 9, 7))
     db.ensure_weeks(season, 4)
     for vi, v in enumerate(db.list_varieties()[:3]):
         for w in db.list_weeks(season):
@@ -194,7 +275,7 @@ def test_any_start_week_and_reset(db):
     w = db.current_week(dt.date(2026, 9, 25))
     assert w["label"] == "Semana del 24 de septiembre" and w["week_number"] == 6
     db.set_season_start(2026, ph.default_season_start(2026))
-    assert db.list_weeks(2026)[0]["label"] == "Semana del 7 de septiembre"
+    assert db.list_weeks(2026)[0]["label"] == "Semana del 30 de marzo"
 
 
 def test_multiple_photos_primary_average_and_report(db, tmp_path):
@@ -677,6 +758,7 @@ def test_gps_keeps_best_reading_and_stops_at_10m():
 def test_skipped_week_excluded_from_reports(db, tmp_path):
     from reporter import report_summary
     season = 2026
+    db.set_season_start(season, dt.date(2026, 9, 7))
     db.ensure_weeks(season, 3)
     ws = db.list_weeks(season)
     v = db.list_varieties()[0]
