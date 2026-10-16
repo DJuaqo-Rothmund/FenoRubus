@@ -55,7 +55,8 @@ def _reserve(dest_dir: str, base: str) -> str:
 
 def store_photo(src: str, dest_dir: str, basename: str, max_side: int = 1600,
                 exact: bool = False) -> str:
-    """Normaliza (EXIF, tamaño, JPEG q88) y guarda la foto en el almacenamiento de la app.
+    """Normaliza (EXIF, lado mayor ≤ 1600 px, JPEG liviano q78 ≈ 250-350 KB) y guarda la
+    foto en el almacenamiento de la app.
 
     exact=True: usa `basename` tal cual (+ «-2», «-3»… si ya existe) en vez de agregar la hora.
     """
@@ -74,7 +75,8 @@ def store_photo(src: str, dest_dir: str, basename: str, max_side: int = 1600,
         img.draft("RGB", (int(w * scale), int(h * scale)))
     img = ImageOps.exif_transpose(img).convert("RGB")
     img.thumbnail((max_side, max_side), Image.LANCZOS)
-    img.save(dest, "JPEG", quality=88)
+    from photo_optimizer import save_jpeg
+    save_jpeg(img, dest)
     return dest
 
 
@@ -83,7 +85,7 @@ def make_thumbnail(src: str, dest: str, size: int) -> str:
     img.draft("RGB", (size, size))
     img = ImageOps.exif_transpose(img).convert("RGB")
     img.thumbnail((size, size))
-    img.save(dest, "JPEG", quality=80)
+    img.save(dest, "JPEG", quality=72, optimize=True)
     return dest
 
 

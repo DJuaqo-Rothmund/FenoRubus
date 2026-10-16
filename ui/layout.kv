@@ -1572,10 +1572,10 @@
                     on_release: root.pick_start()
                 GhostButton:
                     icon: "calendar-refresh"
-                    text: "Restablecer: semana del 7 de septiembre"
+                    text: "Restablecer: semana del 1 de abril"
                     on_release: root.reset_start()
                 Muted:
-                    text: "Elija la fecha de la primera semana de muestreo; las siguientes se generan cada 7 días. Cada semana se identifica por su número en el año (p. ej. «Semana 37, año 2026»). Por defecto: semana del 7 de septiembre."
+                    text: "La temporada va del 1 de abril al 31 de marzo (p. ej. «Temporada 2026-2027»); para ver otra, toque la semana en Muestreo. Elija la fecha de la primera semana de muestreo; las siguientes se generan cada 7 días. Cada semana se identifica por su número en el año (p. ej. «Semana 37, año 2026»)."
             PaperCard:
                 SectionLabel:
                     text: "FOTOS EN EL TELÉFONO"
@@ -1584,6 +1584,13 @@
                     adaptive_height: True
                 Muted:
                     text: "Para respaldarlas en Google Fotos: Biblioteca › Fotos del dispositivo › «Imágenes de Fenología» › activar «Copia de seguridad»."
+                GhostButton:
+                    icon: "image-size-select-small"
+                    text: "Optimizar fotos guardadas"
+                    on_release: root.optimize_photos()
+                Muted:
+                    id: photo_text
+                    text: "Las fotos nuevas se guardan livianas (lado mayor 1600 px, ≈300 KB). Este botón aligera también las antiguas en el teléfono, sin cambiar sus nombres ni ubicación; lo que ya está en Drive no se toca."
             PaperCard:
                 SectionLabel:
                     text: "RESPALDO EN GOOGLE DRIVE"

@@ -1693,3 +1693,30 @@ def test_predio_unit_display_names():
     assert ph.unit_compact(v) == "Cascade Harvest 2019 · E1-S1"
     assert ph.unit_main(dict(v, plant_year=None)) == "Cascade Harvest"
     assert ph.unit_main({"name": "Meeker"}) == "Meeker" and ph.unit_place({"name": "Meeker"}) == ""
+
+
+def test_photo_optimizer_keeps_paths(db, tmp_path):
+    import numpy as np
+    from PIL import Image
+    import photo_optimizer as po
+    from android_bridge import store_photo
+    rng = np.random.default_rng(1)
+    big = str(tmp_path / "big.jpg")      # foto «antigua»: 3000 px y calidad alta
+    Image.fromarray(rng.integers(0, 255, (2000, 3000, 3), dtype=np.uint8)).save(big, quality=95)
+    week = db.current_week(dt.date(2026, 10, 5))
+    v = db.list_varieties()[0]
+    obs = db.get_or_create_observation(v["id"], week["id"])
+    db.set_photo(obs["id"], "detail", big)
+    mtime = os.path.getmtime(big)
+    found = po.scan([db])
+    assert found["paths"] == [big] and found["total"] == 1
+    res = po.optimize(found["paths"])
+    assert res["optimized"] == 1 and res["saved"] > 0
+    assert os.path.exists(big) and os.path.getmtime(big) == mtime     # misma ruta y fecha
+    with Image.open(big) as im:
+        assert max(im.size) == 1600
+    assert po.scan([db])["paths"] == []                              # ya liviana
+    # Las fotos nuevas se guardan livianas.
+    new = store_photo(big, str(tmp_path / "out"), "x")
+    with Image.open(new) as im:
+        assert max(im.size) <= 1600

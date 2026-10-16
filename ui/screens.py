@@ -3897,6 +3897,56 @@ class SettingsTab(MDScreen):
     def _busy(self, text):
         self.ids.backup_text.text = text
 
+    def optimize_photos(self):
+        """Aligera las fotos antiguas (mismo archivo y ruta) en segundo plano."""
+        if getattr(self, "_optimizing", False):
+            app().toast("Ya se están optimizando las fotos…")
+            return
+        a = app()
+        import photo_optimizer as po
+        dbs = a.all_dbs() + ([a.db.shared] if getattr(a.db, "shared", None) is not None else [])
+        self.ids.photo_text.text = "Revisando fotos…"
+
+        def show(text):
+            Clock.schedule_once(lambda *_: setattr(self.ids.photo_text, "text", text))
+
+        def run(found):
+            self._optimizing = True
+
+            def progress(i, n, saved):
+                if i == n or i % 5 == 0:
+                    show(f"Optimizando fotos: {i} de {n} · {saved / 1e6:.1f} MB liberados")
+
+            def work():
+                try:
+                    res = po.optimize(found["paths"], progress)
+                    msg = (f"Listo: {res['optimized']} fotos optimizadas, "
+                           f"{res['saved'] / 1e6:.1f} MB liberados.")
+                except Exception as exc:  # noqa: BLE001
+                    msg = f"No se pudieron optimizar las fotos: {exc}"
+                self._optimizing = False
+                show(msg)
+                Clock.schedule_once(lambda *_: a.toast(msg))
+            a.workers.submit(work)
+
+        def ask(found):
+            n, mb = len(found["paths"]), found["bytes"] / 1e6
+            if not n:
+                self.ids.photo_text.text = (f"Las {found['total']} fotos del teléfono ya están "
+                                            "livianas: no hay nada que optimizar.")
+                return
+            self.ids.photo_text.text = f"{n} fotos pesadas ({mb:.0f} MB)."
+            confirm("Optimizar fotos guardadas",
+                    f"Hay {n} fotos pesadas ({mb:.0f} MB). Se reducirán a 1600 px y JPEG liviano "
+                    f"(quedan en ≈{n * .3:.0f} MB), en el mismo archivo: registros, informes e IA "
+                    "siguen igual. Las copias en Drive no se modifican. ¿Continuar?",
+                    [("Optimizar", lambda: run(found))])
+
+        def scan():
+            found = po.scan(dbs)
+            Clock.schedule_once(lambda *_: ask(found))
+        a.workers.submit(scan)
+
     def full_backup(self):
         a = app()
         self._busy("Creando copia de seguridad…")
