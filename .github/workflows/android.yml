@@ -147,6 +147,9 @@ jobs:
           KIVY_LOG_MODE: PYTHON
           KIVY_NO_CONSOLELOG: "1"
           KIVY_NO_ARGS: "1"
+          # El análisis abre una ventana de Kivy: el servidor no tiene GPU (OpenGL 1.1) y con
+          # el motor por defecto Kivy mostraba un aviso que esperaba un clic para siempre.
+          KIVY_GL_BACKEND: angle_sdl2
         timeout-minutes: 25
         # Si el análisis se traba, a los 12 min se imprime dónde está cada hilo y se corta.
         run: >

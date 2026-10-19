@@ -4,6 +4,7 @@ import logging
 import os
 
 os.environ.setdefault("KIVY_LOG_MODE", "PYTHON")    # que Kivy no suba el registro a TRACE
+os.environ.setdefault("KIVY_GL_BACKEND", "angle_sdl2")  # sin GPU en el servidor (ver main.py)
 
 from kivy_deps import angle, glew, sdl2
 from kivymd import hooks_path as kivymd_hooks_path

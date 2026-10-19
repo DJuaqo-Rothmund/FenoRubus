@@ -18,6 +18,10 @@ import datetime as _dt
 from functools import cached_property
 
 os.environ.setdefault("KIVY_LOG_MODE", "PYTHON")
+if os.name == "nt":
+    # Windows: gráficos por ANGLE (DirectX), como Chrome. Funciona también en PCs de empresa,
+    # escritorios remotos o máquinas virtuales que solo traen OpenGL 1.1.
+    os.environ.setdefault("KIVY_GL_BACKEND", "angle_sdl2")
 
 # Lo primero: la pantalla de carga animada de Android se queda hasta que la app termine de
 # precargar (si no, el sistema la quitaría a los 5 s, en medio de la carga).
