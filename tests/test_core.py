@@ -1924,3 +1924,32 @@ def test_drive_sync_phone_and_pc(tmp_path):
     before = len(fake.files)
     assert cel.run()["sent"] == 0 and pc.run()["applied"] == 0
     assert len(fake.files) == before
+
+
+def test_drive_sync_downloads_photos_when_available(tmp_path):
+    fake = FakeDrive()
+    cel, cws, copen, cdir = _device(tmp_path, "cel", fake)
+    pc, pws, popen, pdir = _device(tmp_path, "pc", fake)
+    am = copen(cws.by_code("AM"))
+    vid = am.add_variety("Glen Lyon")
+    w = am.week_for_date(dt.date(2026, 10, 12))
+    oid = am.get_or_create_observation(vid, w["id"])["id"]
+    photo = os.path.join(cdir, "photos", "T2026", "S06", "20261012-AM-GlenD.jpg")
+    os.makedirs(os.path.dirname(photo))
+    open(photo, "wb").write(b"JPEGDATA")
+    am.add_photo(oid, "detail", photo)
+    cel.run()
+    r = pc.run()                                   # el registro llega, la foto aún no está en Drive
+    local = os.path.join(pdir, "photos", "T2026", "S06", "20261012-AM-GlenD.jpg")
+    assert r["downloaded"] == 0 and r["pending_photos"] == 1 and not os.path.exists(local)
+    # El celular la respalda en Drive (su cola de fotos) y el PC la baja en la siguiente vuelta.
+    fake.files["fx"] = {"name": "20261012-AM-GlenD.jpg", "parents": ["semana"],
+                        "data": b"JPEGDATA", "folder": False}
+    r = pc.run()
+    assert r["downloaded"] == 1 and r["pending_photos"] == 0
+    assert open(local, "rb").read() == b"JPEGDATA"
+    pam = popen(pws.by_code("AM"))
+    assert pam.query_one("SELECT status, drive_id FROM drive_queue WHERE path=?", (local,)) == \
+        {"status": "done", "drive_id": "fx"}                    # no se vuelve a subir
+    from sync_drive import summary
+    assert "foto" in summary({"applied": 1, "sent": 0, "downloaded": 1})

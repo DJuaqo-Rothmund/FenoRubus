@@ -185,7 +185,7 @@ class FenoRubusApp(MDApp):
     def _after_sync(self, res, msg, manual):
         if manual:
             self.toast(msg)
-        if res and (res["applied"] or res["created"]) and self.home is not None:
+        if res and (res["applied"] or res["created"] or res["downloaded"]) and self.home is not None:
             self.refresh_home()       # lo que llegó del otro equipo se ve ya
         if self.sm.has_screen("settings"):
             for w in self.sm.get_screen("settings").walk():

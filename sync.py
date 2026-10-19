@@ -76,6 +76,8 @@ def install(conn, settings_get=None, settings_set=None) -> None:
                  "ts TEXT NOT NULL, deleted INTEGER NOT NULL DEFAULT 0, PRIMARY KEY (entity, uid))")
     conn.execute("CREATE TABLE IF NOT EXISTS sync_state (key TEXT PRIMARY KEY, value TEXT)")
     conn.execute("CREATE TABLE IF NOT EXISTS sync_seen (name TEXT PRIMARY KEY)")   # paquetes leídos
+    conn.execute("CREATE TABLE IF NOT EXISTS sync_missing (path TEXT PRIMARY KEY, "   # fotos por bajar
+                 "tries INTEGER NOT NULL DEFAULT 0, last TEXT)")
     conn.execute("INSERT OR IGNORE INTO sync_state(key, value) VALUES ('applying', '0')")
     if not conn.execute("SELECT value FROM sync_state WHERE key='device'").fetchone():
         conn.execute("INSERT INTO sync_state(key, value) VALUES ('device', ?)", (uuid.uuid4().hex[:12],))

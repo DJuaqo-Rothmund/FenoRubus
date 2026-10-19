@@ -21,6 +21,7 @@ from __future__ import annotations
 import datetime as _dt
 import hashlib
 import json
+import os
 import urllib.parse
 import uuid
 
@@ -28,6 +29,7 @@ import sync
 from drive_backup import API, ROOT_FOLDER, UPLOAD, DriveError
 
 SYNC_FOLDER = "Sincronización"
+MAX_DOWNLOADS = 40          # fotos por sincronización (el resto, en la siguiente)
 WS_FIELDS = ("profile", "kind", "name", "code")
 
 
@@ -115,6 +117,8 @@ class DriveSync:
             stats["received"] += 1
             stats["applied"] += res["applied"]
             stats["missing_files"] += res["missing_files"]
+            for path in res["missing_files"]:
+                db.execute("INSERT OR IGNORE INTO sync_missing(path) VALUES (?)", (path,))
             db.execute("INSERT OR IGNORE INTO sync_seen(name) VALUES (?)", (name,))
         bundle = sync.export_changes(db, self.data_dir)
         settings_hash = hashlib.sha1(json.dumps(bundle["settings"], sort_keys=True).encode()).hexdigest()
@@ -127,6 +131,46 @@ class DriveSync:
             stats["sent"] = len(bundle["changes"])
         return stats
 
+    # ------------------------------------------------------------ fotos
+    def fetch_missing(self, db, limit: int = MAX_DOWNLOADS) -> tuple[int, int]:
+        """Baja de Drive las fotos de registros que llegaron del otro equipo. Se buscan por su
+        nombre (fecha, código del ensayo y tipo: no se repiten); si el otro equipo aún no la
+        subió, se reintenta en la próxima sincronización. Devuelve (bajadas, pendientes)."""
+        rows = db.query("SELECT * FROM sync_missing ORDER BY tries, path")
+        got = 0
+        for i, r in enumerate(rows):
+            path = r["path"]
+            if os.path.exists(path):
+                db.execute("DELETE FROM sync_missing WHERE path=?", (path,))
+                continue
+            if got >= limit or i >= limit * 3:
+                break
+            name = os.path.basename(path).replace("\\", "\\\\").replace("'", "\\'")
+            found = self.drive._call("GET", f"{API}?" + urllib.parse.urlencode(
+                {"q": f"name='{name}' and trashed=false", "fields": "files(id)",
+                 "spaces": "drive"})).get("files", [])
+            if not found:
+                db.execute("UPDATE sync_missing SET tries=tries+1, last=? WHERE path=?",
+                           (_dt.datetime.now().isoformat(timespec="seconds"), path))
+                continue
+            data = self._get(found[0]["id"])
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+            tmp = path + ".part"
+            with open(tmp, "wb") as f:
+                f.write(data)
+            os.replace(tmp, path)
+            # Ya está en Drive: que el respaldo de este equipo no la vuelva a subir.
+            photo = db.query_one("SELECT id FROM photos WHERE path=?", (path,))
+            db.execute("INSERT INTO drive_queue(photo_id, path, name, status, drive_id, created_at, "
+                       "uploaded_at) VALUES (?,?,?,?,?,?,?)",
+                       (photo["id"] if photo else None, path, os.path.basename(path), "done",
+                        found[0]["id"], _dt.datetime.now().isoformat(timespec="seconds"),
+                        _dt.datetime.now().isoformat(timespec="seconds")))
+            db.execute("DELETE FROM sync_missing WHERE path=?", (path,))
+            got += 1
+        left = db.query_one("SELECT COUNT(*) AS n FROM sync_missing")["n"]
+        return got, left
+
     # ------------------------------------------------------------ todo
     def run(self) -> dict:
         """Sincroniza todos los ensayos y predios. Devuelve un resumen para la pantalla."""
@@ -134,7 +178,7 @@ class DriveSync:
         files = self._list(root)
         device = sync.device_id(self.workspaces.shared)
         total = {"workspaces": 0, "created": 0, "received": 0, "sent": 0, "applied": 0,
-                 "missing_files": [], "when": _dt.datetime.now().isoformat(timespec="seconds")}
+                 "missing_files": [], "downloaded": 0, "pending_photos": 0, "when": _dt.datetime.now().isoformat(timespec="seconds")}
         total["created"] = self._sync_workspaces(root, device, files)
         folders = {f["name"]: f["id"] for f in files}
         for ws in self.workspaces.list():
@@ -144,8 +188,17 @@ class DriveSync:
             total["workspaces"] += 1
             for k in ("received", "sent", "applied"):
                 total[k] += res[k]
-            total["missing_files"] += res["missing_files"]
+            if self.photos_allowed():
+                got, left = self.fetch_missing(db)
+                total["downloaded"] += got
+                total["pending_photos"] += left
+            else:
+                total["pending_photos"] += db.query_one("SELECT COUNT(*) AS n FROM sync_missing")["n"]
         return total
+
+    def photos_allowed(self) -> bool:
+        """Las fotos se bajan con Wi-Fi si así está el respaldo («Subir solo con Wi-Fi»)."""
+        return not (self.drive.wifi_only and self.drive.metered())
 
 
 def summary(res: dict) -> str:
@@ -155,6 +208,8 @@ def summary(res: dict) -> str:
         parts.append(f"{res['created']} ensayo(s) nuevo(s)")
     parts.append(f"{res.get('applied', 0)} cambio(s) recibido(s)")
     parts.append(f"{res.get('sent', 0)} enviado(s)")
-    if res.get("missing_files"):
-        parts.append(f"{len(res['missing_files'])} foto(s) por bajar")
+    if res.get("downloaded"):
+        parts.append(f"{res['downloaded']} foto(s) descargada(s)")
+    if res.get("pending_photos"):
+        parts.append(f"{res['pending_photos']} foto(s) por bajar")
     return "Sincronizado: " + ", ".join(parts)
