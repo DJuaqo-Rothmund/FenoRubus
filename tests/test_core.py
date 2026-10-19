@@ -1953,3 +1953,48 @@ def test_drive_sync_downloads_photos_when_available(tmp_path):
         {"status": "done", "drive_id": "fx"}                    # no se vuelve a subir
     from sync_drive import summary
     assert "foto" in summary({"applied": 1, "sent": 0, "downloaded": 1})
+
+
+def test_desktop_google_login_with_browser_and_refresh(db):
+    """PC: el navegador vuelve con el código (PKCE) y luego se renueva sin navegador."""
+    import base64
+    import json
+    import threading
+    import urllib.parse
+    import urllib.request
+    from desktop_auth import DesktopAuthorizer
+    from drive_backup import NeedsConsent
+    posts = []
+    idt = "x." + base64.urlsafe_b64encode(json.dumps({"email": "yo@gmail.com"}).encode()).decode() + ".y"
+
+    def transport(method, url, headers, body):
+        form = dict(urllib.parse.parse_qsl(body.decode()))
+        posts.append(form)
+        if form["grant_type"] == "authorization_code":
+            assert form["code"] == "abc" and form["code_verifier"]
+            return 200, json.dumps({"access_token": "A1", "refresh_token": "R1", "id_token": idt}).encode()
+        if form["refresh_token"] == "R1":
+            return 200, json.dumps({"access_token": "A2"}).encode()
+        return 400, b'{"error": "invalid_grant"}'
+
+    def browser(url):                     # «Google» redirige de vuelta a la app
+        q = dict(urllib.parse.parse_qsl(urllib.parse.urlsplit(url).query))
+        assert q["code_challenge_method"] == "S256" and "drive.file" in q["scope"]
+        back = f"{q['redirect_uri']}/?code=abc&state={q['state']}"
+        threading.Thread(target=lambda: urllib.request.urlopen(back).read(), daemon=True).start()
+
+    auth = DesktopAuthorizer(db, transport, ("cid", "sec"), open_browser=browser)
+    try:
+        auth.get_token(interactive=False)
+        assert False, "sin sesión no debe abrir el navegador"
+    except NeedsConsent:
+        pass
+    assert auth.get_token(interactive=True, timeout=10) == "A1"
+    assert db.get_setting("drive_account") == "yo@gmail.com" and auth.account == "yo@gmail.com"
+    assert auth.get_token(interactive=False) == "A2"           # renovación silenciosa
+    db.set_setting("drive_refresh_token", "vencido")
+    try:
+        auth.get_token(interactive=False)
+        assert False
+    except NeedsConsent:
+        assert db.get_setting("drive_refresh_token") is None  # pide iniciar sesión de nuevo

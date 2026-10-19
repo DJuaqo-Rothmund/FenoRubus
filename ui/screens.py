@@ -3718,7 +3718,7 @@ class SettingsTab(MDScreen):
         on = st["enabled"]
         total = st["pending"] + st["done"] + st["errors"]
         if not st["available"]:
-            title, icon, col = "Disponible en el teléfono", "cloud-off-outline", theme.MUTED
+            title, icon, col = ("Disponible en el teléfono" if IS_ANDROID else "Requiere la versión instalada"), "cloud-off-outline", theme.MUTED
         elif not on:
             title, icon, col = "Sin conectar", "cloud-off-outline", theme.MUTED
         elif st["running"]:
@@ -3766,9 +3766,10 @@ class SettingsTab(MDScreen):
     def drive_connect(self):
         a = app()
         if not a.drive.available:
-            a.toast("El respaldo en Google Drive funciona en el teléfono (Android).")
+            a.toast("Esta copia de la app no trae la credencial de Google (use la versión instalada).")
             return
-        a.toast("Elija la cuenta de Google y acepte el permiso")
+        a.toast("Elija la cuenta de Google y acepte el permiso" if IS_ANDROID else
+                "Se abrirá el navegador: elija su cuenta de Google y acepte el permiso")
 
         def done(ok, msg):
             Clock.schedule_once(lambda *_: (a.toast(msg), self.refresh_drive()))

@@ -7,3 +7,4 @@ bin/
 *.sqlite3-*
 .venv/
 version.txt
+google_client.py

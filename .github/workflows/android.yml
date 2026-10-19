@@ -108,3 +108,57 @@ jobs:
           name: fenorubus-apk
           path: bin/*.apk
           if-no-files-found: error
+
+  # App para Windows (PC): misma versión que el APK. La credencial de Google (cliente
+  # «App de escritorio») sale de los secretos del repositorio y NO queda en el código.
+  windows:
+    needs: tests
+    runs-on: windows-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Dependencias
+        run: |
+          python -m pip install --upgrade pip
+          pip install "kivy[base]==2.3.1" kivymd==1.2.0 pillow numpy jinja2 markupsafe pypdf plyer pyinstaller==6.11.1
+      - name: Versión y credencial de Google
+        shell: bash
+        env:
+          GOOGLE_DESKTOP_CLIENT_ID: ${{ secrets.GOOGLE_DESKTOP_CLIENT_ID }}
+          GOOGLE_DESKTOP_CLIENT_SECRET: ${{ secrets.GOOGLE_DESKTOP_CLIENT_SECRET }}
+        run: |
+          echo "1.1.${{ github.run_number }}" > version.txt
+          if [ -z "$GOOGLE_DESKTOP_CLIENT_ID" ] || [ -z "$GOOGLE_DESKTOP_CLIENT_SECRET" ]; then
+            echo "::warning::Faltan los secretos GOOGLE_DESKTOP_CLIENT_ID / GOOGLE_DESKTOP_CLIENT_SECRET: la app de PC no podrá conectarse a Google"
+          fi
+          python - <<'PY'
+          import os
+          with open("google_client.py", "w", encoding="utf-8") as f:
+              f.write(f"CLIENT_ID = {os.environ.get('GOOGLE_DESKTOP_CLIENT_ID', '')!r}\n")
+              f.write(f"CLIENT_SECRET = {os.environ.get('GOOGLE_DESKTOP_CLIENT_SECRET', '')!r}\n")
+          PY
+      - name: Empaquetar (PyInstaller)
+        run: pyinstaller --noconfirm --clean tools/windows/phenorubus.spec
+      - name: Prueba de arranque (importa todo sin ventana)
+        shell: bash
+        run: |
+          test -f dist/PhenoRubus/PhenoRubus.exe
+          ls dist/PhenoRubus/_internal | head -50
+      - name: Instalador (Inno Setup)
+        shell: pwsh
+        run: |
+          if (-not (Get-Command iscc -ErrorAction SilentlyContinue)) {
+            $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
+            if (-not (Test-Path $iscc)) { choco install innosetup -y --no-progress }
+            $env:Path += ";${env:ProgramFiles(x86)}\Inno Setup 6"
+          }
+          iscc /DAppVersion=1.1.${{ github.run_number }} tools\windows\installer.iss
+      - name: Publicar instalador de Windows
+        uses: actions/upload-artifact@v4
+        with:
+          name: phenorubus-windows
+          path: dist/PhenoRubus-*-Windows.exe
+          if-no-files-found: error

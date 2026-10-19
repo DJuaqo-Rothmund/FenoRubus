@@ -376,6 +376,13 @@ class DriveBackup:
             # ClassNotFoundException · «No se encontró un componente…»).
             self._authorizer = AndroidAuthorizer._on_main(lambda: AndroidAuthorizer(log=self.log))
             self._authorizer.account = self.account
+        elif self._authorizer is None:
+            # PC (Windows): inicio de sesión en el navegador, si esta copia trae la credencial.
+            from desktop_auth import DesktopAuthorizer, client_config
+            from platform_utils import get_data_dir
+            client = client_config(get_data_dir())
+            if client:
+                self._authorizer = DesktopAuthorizer(self.db, self.transport, client, log=self.log)
         return self._authorizer
 
     @property
@@ -564,7 +571,7 @@ class DriveBackup:
             try:
                 self.log("Conectando con Google…")
                 if not self.available:
-                    raise DriveError("El respaldo en Drive está disponible en el teléfono (Android)")
+                    raise DriveError("Esta copia de la app no trae la credencial de Google")
                 auth = self.authorizer
                 if choose and hasattr(auth, "choose_account"):
                     name = auth.choose_account()
@@ -617,6 +624,8 @@ class DriveBackup:
         token = self._token[0] if self._token else None
         self.db.set_setting("drive_enabled", False)
         self._token = None
+        if hasattr(self._authorizer, "forget"):
+            self._authorizer.forget()          # PC: la próxima vez vuelve a pedir la cuenta
         if token:   # revocar en Google: la próxima conexión vuelve a pedir cuenta y permiso
             def revoke():
                 try:
