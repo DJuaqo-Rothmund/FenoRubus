@@ -29,11 +29,14 @@ from dataclasses import dataclass
 BBCH_TABLE: list[tuple[int, str | None, str | None]] = [
     (0, None, "Dormancia"),
     (7, None, "Inicio de la brotación"),
-    (9, "Los brotes rompen la superficie del suelo", "Las yemas muestran puntas verdes"),
+    (8, None, "Puntas verdes"),
+    (9, "Los brotes rompen la superficie del suelo", "Orejas de ratón"),
     (10, "Primeras hojas extendidas", "Primeras hojas extendidas"),
     (11, "Primera hoja desplegada", "Primera hoja desplegada"),
     (12, "Segunda hoja desplegada", "Segunda hoja desplegada"),
-    (13, "Tercera hoja desplegada; etc.", "Tercera hoja desplegada; etc."),
+    (13, "Tercera hoja desplegada", "Tercera hoja desplegada"),
+    (14, "Cuarta hoja desplegada", "Cuarta hoja desplegada"),
+    (15, "Quinta hoja desplegada", "Quinta hoja desplegada"),
     (16, "Seis o más hojas desplegadas", "Seis o más hojas desplegadas"),
     (31, "10 % del crecimiento máximo alcanzado (25 cm)", None),
     (33, "30 % del crecimiento máximo alcanzado (75 cm)", None),
@@ -49,13 +52,14 @@ BBCH_TABLE: list[tuple[int, str | None, str | None]] = [
     (59, "Los pétalos (blancos) son visibles, la flor aún está cerrada (etapa muy corta)",
      "Los pétalos (blancos) son visibles, la flor aún está cerrada (etapa muy corta)"),
     (60, "Primeras flores abiertas en casos aislados", "Primeras flores abiertas en casos aislados"),
-    (61, "Inicio de la floración: 10 % de las flores abiertas o marchitas",
-     "Inicio de la floración: 10 % de las flores abiertas o marchitas"),
-    (63, "30 % de las flores abiertas o marchitas", "30 % de las flores abiertas o marchitas"),
-    (65, "Final de la floración: 50 % de las flores abiertas o marchitas",
-     "Final de la floración: 50 % de las flores abiertas o marchitas"),
-    (69, "Fin de la floración: la mayoría de las flores marchitas y fructifican",
-     "Fin de la floración: la mayoría de las flores marchitas y fructifican"),
+    (61, "Inicio de la floración: 10 % de las flores abiertas o sin pétalos",
+     "Inicio de la floración: 10 % de las flores abiertas o sin pétalos"),
+    (63, "30 % de las flores abiertas o sin pétalos", "30 % de las flores abiertas o sin pétalos"),
+    (65, "Final de la floración: 50 % de las flores abiertas o sin pétalos",
+     "Final de la floración: 50 % de las flores abiertas o sin pétalos"),
+    (67, "La mayoría de las flores sin pétalos", "La mayoría de las flores sin pétalos"),
+    (69, "Fin de la floración: la mayoría de las flores sin pétalos y fructifican",
+     "Fin de la floración: la mayoría de las flores sin pétalos y fructifican"),
     (71, "10 % de frutos jóvenes visibles", "10 % de frutos jóvenes visibles"),
     (73, "30 % de frutos jóvenes visibles", "30 % de frutos jóvenes visibles"),
     (75, "50 % de frutos jóvenes visibles", "50 % de frutos jóvenes visibles"),
@@ -80,6 +84,10 @@ BBCH_TABLE: list[tuple[int, str | None, str | None]] = [
 ]
 
 
+# Estados con dos textos en que se nombra primero el de los brotes laterales.
+LATERALS_FIRST = {9}
+
+
 def _lower1(t: str) -> str:
     return t[0].lower() + t[1:] if t else t
 
@@ -88,7 +96,9 @@ def _table_entry(code: int, canes: str | None, laterals: str | None):
     """(código, nombre, descripción, palabras clave) a partir de las dos columnas."""
     import re
     import unicodedata
-    if canes and laterals and canes != laterals:
+    if canes and laterals and canes != laterals and code in LATERALS_FIRST:
+        label = f"Laterales: {_lower1(laterals)} · Cañas: {_lower1(canes)}"
+    elif canes and laterals and canes != laterals:
         label = f"Cañas: {_lower1(canes)} · Laterales: {_lower1(laterals)}"
     elif canes and not laterals:
         label = f"Cañas anuales: {_lower1(canes)}"
@@ -123,15 +133,11 @@ _PREVIOUS: list[tuple[int, str, str, str]] = [
      "oreja raton hojas separandose"),
     (11, "Primeras hojas desplegadas", "Primeras hojas desplegadas.",
      "primeras hojas desplegadas"),
-    (15, "Más hojas desplegadas", "Varias hojas desplegadas, laterales en crecimiento.",
-     "hojas desplegadas laterales"),
     (19, "Hojas completamente expandidas", "Primeras hojas alcanzan tamaño final.",
      "hojas expandidas tamano final"),
     # 3: Crecimiento de brotes / laterales / cañas
     (31, "Inicio crecimiento de brotes", "Ejes de laterales y cañas nuevas visibles.",
      "crecimiento brotes laterales canas nuevas primocana"),
-    (35, "Brotes al 50 %", "Laterales / cañas al 50 % de su longitud final.",
-     "brotes 50 largo final"),
     (39, "Brotes al 90 %", "Laterales / cañas al 90 % de su longitud final.",
      "brotes 90 largo final"),
     # 5: Aparición del órgano floral
@@ -150,8 +156,6 @@ _PREVIOUS: list[tuple[int, str, str, str]] = [
      "inicio floracion 10 flores"),
     (65, "Plena floración", "~50 % de flores abiertas; primeros pétalos caen.",
      "plena floracion 50 flores blancas abiertas"),
-    (67, "Flores marchitándose", "Mayoría de pétalos caídos.",
-     "flores marchitas petalos caidos"),
     (69, "Fin de floración", "Todos los pétalos caídos; estambres secos.",
      "fin floracion estambres secos"),
     # 7: Desarrollo del fruto
@@ -185,7 +189,10 @@ _PREVIOUS: list[tuple[int, str, str, str]] = [
      "fin caida hojas reposo"),
 ]
 
-BBCH_SCALE_VERSION = 3   # sube cuando cambia la escala base (se actualiza en las bases)
+BBCH_SCALE_VERSION = 4   # sube cuando cambia la escala base (se actualiza en las bases)
+# Estados quitados de la escala base: ya no se ofrecen; los registros guardados conservan
+# su código y su nombre.
+BBCH_REMOVED = {35}
 # Códigos de la escala base que se corrigieron: antiguo -> nuevo (los registros se pasan solos).
 BBCH_RENAMED = {553: 53}
 

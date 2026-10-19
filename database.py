@@ -440,6 +440,8 @@ class Database:
         for old, new in ph.BBCH_RENAMED.items():
             ai.execute("DELETE FROM bbch_stages WHERE code=? AND source='base'", (old,))
             ai.execute("UPDATE ai_references SET bbch_code=? WHERE bbch_code=?", (new, old))
+        for old in ph.BBCH_REMOVED:
+            ai.execute("DELETE FROM bbch_stages WHERE code=? AND source='base'", (old,))
         have = {r["code"]: r for r in ai.query("SELECT code, source FROM bbch_stages")}
         n = 0
         for code, label, desc, kw in ph.BBCH_RUBUS:

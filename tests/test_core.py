@@ -1144,10 +1144,13 @@ def test_bbch_scale_canes_laterals_and_substages(db, tmp_path):
     codes = [r["code"] for r in db.list_bbch()]
     assert codes.index(89) < codes.index(891) < codes.index(899) < codes.index(91)
     names = db.bbch_names()
-    assert names[9].startswith("Cañas: ") and "Laterales: " in names[9]
+    assert names[9] == "Laterales: orejas de ratón · Cañas: los brotes rompen la superficie del suelo"
+    assert names[97].startswith("Cañas: ") and "Laterales: " in names[97]
+    assert names[8] == "Brotes laterales: puntas verdes" and names[14] == "Cuarta hoja desplegada"
+    assert names[67] == "La mayoría de las flores sin pétalos" and "sin pétalos" in names[61]
     assert names[31].startswith("Cañas anuales: 10 %") and names[7].startswith("Brotes laterales")
     assert ph.bbch_label(891, names) == "BBCH 89-1: 10 % de los frutos cosechados"
-    assert 15 in codes                                     # estados anteriores se conservan
+    assert {1, 3, 19, 87} <= set(codes) and 35 not in codes   # anteriores conservados / quitado
     assert codes.index(51) < codes.index(53) < codes.index(55) and 553 not in codes
 
     # Una base con la escala anterior se actualiza sin pisar lo editado por el usuario.
@@ -1156,11 +1159,12 @@ def test_bbch_scale_canes_laterals_and_substages(db, tmp_path):
     db.upsert_bbch(61, "Mi nombre", "editado", "", source="user")
     db.execute("DELETE FROM bbch_stages WHERE code=893")
     db.upsert_bbch(553, "Los tallos florales se estiran (capullos juntos)", "", "", source="base")
+    db.upsert_bbch(35, "Brotes al 50 %", "", "", source="base")                 # quitado de la escala
     db.add_reference(553, "x", b"\0" * 8, 2, None, None)          # versión con «55-3»
     assert db.refresh_bbch_scale() > 0
     names = db.bbch_names()
     assert names[65].startswith("Final de la floración") and names[61] == "Mi nombre" and 893 in names
-    assert 553 not in names and names[53].startswith("Los tallos florales se estiran (capullos juntos)")
+    assert 35 not in names and 553 not in names and names[53].startswith("Los tallos florales se estiran (capullos juntos)")
     assert 553 not in db.reference_counts() and db.reference_counts()[53] == 1
     db.execute("DELETE FROM ai_references")
 

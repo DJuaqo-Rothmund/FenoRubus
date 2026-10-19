@@ -268,8 +268,9 @@ def bbch_dialog(title: str, db, callback, extra: list | None = None, current: in
         Clock.schedule_once(lambda *_: scroll.scroll_to(head, padding=dp(4), animate=False), 0)
 
     def body(r) -> str:
-        label = escape_markup(r["label"]).replace(" · Laterales: ", "\n[b]Laterales:[/b] ")
-        for k in ("Cañas: ", "Cañas anuales: ", "Brotes laterales: "):
+        label = (escape_markup(r["label"]).replace(" · Laterales: ", "\n[b]Laterales:[/b] ")
+                 .replace(" · Cañas: ", "\n[b]Cañas:[/b] "))
+        for k in ("Cañas: ", "Cañas anuales: ", "Brotes laterales: ", "Laterales: "):
             if label.startswith(k):
                 return f"[b]{k.strip()}[/b] " + label[len(k):]
         return label
