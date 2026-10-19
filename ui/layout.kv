@@ -1565,17 +1565,19 @@
                     text: "SEMANA DE INICIO DEL MUESTREO"
                 Body:
                     id: season_text
+                Body:
+                    id: first_week_text
                 GhostButton:
                     id: start_btn
                     icon: "calendar-start"
-                    text: "Primera semana de muestreo"
+                    text: "Fijar la primera semana"
                     on_release: root.pick_start()
                 GhostButton:
                     icon: "calendar-refresh"
-                    text: "Restablecer: semana del 1 de abril"
+                    text: "Automática: la primera semana con datos"
                     on_release: root.reset_start()
                 Muted:
-                    text: "La temporada va del 1 de abril al 31 de marzo (p. ej. «Temporada 2026-2027»); para ver otra, toque la semana en Muestreo. Elija la fecha de la primera semana de muestreo; las siguientes se generan cada 7 días. Cada semana se identifica por su número en el año (p. ej. «Semana 37, año 2026»)."
+                    text: "La temporada va del 1 de abril al 31 de marzo (p. ej. «Temporada 2026-2027»); para ver otra, toque la semana en Muestreo. Las flechas recorren todas las semanas de 2020 a 2050. La matriz y los informes parten en la primera semana con datos, o en la que fije aquí; fijarla no cambia ningún registro ni fecha."
             PaperCard:
                 SectionLabel:
                     text: "FOTOS EN EL TELÉFONO"

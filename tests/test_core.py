@@ -1724,3 +1724,29 @@ def test_photo_optimizer_keeps_paths(db, tmp_path):
     new = store_photo(big, str(tmp_path / "out"), "x")
     with Image.open(new) as im:
         assert max(im.size) <= 1600
+
+
+def test_weeks_browse_freely_and_first_week_setting(db):
+    """Flechas sin tope (2020-2050), cruce de temporada y primera semana automática o fijada
+    sin cambiar ningún registro."""
+    db.set_season_start(2026, dt.date(2026, 9, 7))            # base migrada: semana 1 = 7 sep
+    w = db.week_for_date(dt.date(2026, 6, 3))                 # antes de la semana de referencia
+    assert w["season"] == 2026 and w["week_number"] < 1 and w["start_date"] == "2026-06-01"
+    assert db.week_for_date(dt.date(2020, 1, 1))["season"] == 2019
+    assert db.week_for_date(dt.date(2050, 12, 31))["season"] == 2050
+    # Cruce de temporada: la semana del 30 de marzo de 2026 ya es de 2026; la anterior, de 2025.
+    assert db.week_for_date(dt.date(2026, 3, 30))["season"] == 2026
+    assert db.week_for_date(dt.date(2026, 3, 29))["season"] == 2025
+    v = db.list_varieties()[0]
+    weeks = [db.week_for_date(dt.date(2026, 9, 14) + dt.timedelta(days=7 * i)) for i in range(4)]
+    for w in weeks[1:3]:
+        o = db.get_or_create_observation(v["id"], w["id"])
+        db.update_observation(o["id"], bbch_code=61, bbch_label="x")
+    ids = [w["id"] for w in db.list_weeks(2026, include_skipped=False)]
+    assert ids == [weeks[1]["id"], weeks[2]["id"]]              # de la 1.ª a la última con datos
+    before = db.query("SELECT id, week_number, start_date FROM sampling_weeks ORDER BY id")
+    db.set_first_week(2026, dt.date.fromisoformat(weeks[0]["start_date"]))
+    assert [w["id"] for w in db.list_weeks(2026, include_skipped=False)][0] == weeks[0]["id"]
+    assert db.query("SELECT id, week_number, start_date FROM sampling_weeks ORDER BY id") == before
+    db.set_first_week(2026, None)
+    assert db.report_first_week(2026) == weeks[1]["week_number"]

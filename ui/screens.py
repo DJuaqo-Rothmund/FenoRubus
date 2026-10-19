@@ -1631,17 +1631,15 @@ class SamplingTab(MDBoxLayout):
         open_measures_menu()
 
     def shift_week(self, delta: int):
+        """Semana anterior / siguiente sin tope (2020-2050): al cruzar el 1 de abril pasa
+        sola a la temporada que corresponde."""
         a = app()
-        season = a.week["season"]
-        n = a.week["week_number"] + delta
-        if n < 1:
-            a.toast("Es la primera semana de muestreo de la temporada.")
+        start = _dt.date.fromisoformat(a.week["start_date"]) + _dt.timedelta(days=7 * delta)
+        if start + _dt.timedelta(days=6) < ph.FIRST_BROWSE or start > ph.LAST_BROWSE:
+            a.toast("Las semanas van de 2020 a 2050.")
             return
-        start = ph.week_start(a.db.season_start(season), n)
-        if ph.season_of(start) != season:   # la semana 52/53 sigue en la 1, hasta marzo
-            a.toast(f"Es la última semana de la {ph.season_title(season)}.")
-            return
-        a.week = a.db.ensure_week(season, n)
+        a.week = a.db.week_for_date(start)
+        a.season = a.week["season"]
         self.refresh()
 
     def go_current(self):
@@ -3695,10 +3693,9 @@ class SettingsTab(MDScreen):
                 text="Permitir alarmas exactas", theme_text_color="Custom",
                 text_color=c(theme.WARN), line_color=c(theme.WARN),
                 on_release=lambda *_: request_exact_alarm_permission()))
-        start = a.db.season_start(a.season)
         self.ids.season_text.text = (f"{ph.season_title(a.season)} · semana en curso: "
                                      f"{ph.week_title(a.week)} ({a.week['label']})")
-        self.ids.start_btn.text = f"Primera semana de muestreo: {ph.format_date_es(start)}"
+        self.ids.first_week_text.text = self._first_week_text(a)
         n = sum(a.db.reference_counts().values())
         # Sin instanciar el clasificador (evita cargar numpy solo por abrir Ajustes).
         ext = a.__dict__.get("classifier")
@@ -3852,41 +3849,45 @@ class SettingsTab(MDScreen):
         picker.bind(on_save=lambda inst, t: self._save(hour=t.hour, minute=t.minute))
         picker.open()
 
+    @staticmethod
+    def _first_week_text(a) -> str:
+        fixed = a.db.first_week_date(a.season)
+        if fixed:
+            return f"Primera semana de muestreo: {ph.format_date_es(fixed)} (fijada)"
+        n = a.db.first_week_with_data(a.season)
+        if n is None:
+            return "Primera semana de muestreo: automática (aún sin datos)"
+        start = ph.week_start(a.db.season_start(a.season), n)
+        return f"Primera semana de muestreo: automática ({ph.week_title(start.isoformat())})"
+
     def pick_start(self):
+        """Fija desde qué semana parten matriz e informes (no cambia ningún registro)."""
         a = app()
-        start = a.db.season_start(a.season)
+        start = a.db.first_week_date(a.season) or _dt.date.fromisoformat(a.week["start_date"])
         from kivymd.uix.pickers import MDDatePicker  # import diferido (pesado)
         picker = MDDatePicker(year=start.year, month=start.month, day=start.day,
                               primary_color=c(theme.LEAF), selector_color=c(theme.LEAF),
                               text_button_color=c(theme.LEAF_DARK))
-        picker.bind(on_save=lambda inst, value, _range: self._confirm_start(value))
+        picker.bind(on_save=lambda inst, value, _range: self._set_first_week(value))
         picker.open()
 
     def reset_start(self):
-        self._confirm_start(ph.default_season_start(app().season))
+        a = app()
+        a.db.set_first_week(a.season, None)
+        self.refresh()
+        a.toast("Primera semana de muestreo: automática (la primera con datos)")
 
-    def _confirm_start(self, value: _dt.date):
+    def _set_first_week(self, value: _dt.date):
         a = app()
         season = ph.season_of(value)
-        if value == a.db.season_start(season):
-            a.toast("Esa ya es la semana de inicio.")
+        if season != a.season:
+            a.toast(f"Esa fecha es de la {ph.season_title(season)}; elija una de la "
+                    f"{ph.season_title(a.season)}.")
             return
-        n = a.db.count_observations(season)
-
-        def apply():
-            a.db.set_season_start(season, value)
-            a.season = season
-            a.week = a.db.current_week()
-            self.refresh()
-            a.toast(f"Primera semana de muestreo: {ph.format_date_es(value)}")
-
-        if n:
-            confirm("Cambiar la semana de inicio",
-                    f"Hay {n} registro(s) en la temporada. Conservarán su orden (1.ª, 2.ª, 3.ª "
-                    f"semana de muestreo…), pero sus fechas y semanas del año se recalcularán desde el "
-                    f"{ph.format_date_es(value)}.", [("Cambiar", apply)])
-        else:
-            apply()
+        week = a.db.week_for_date(value, season)
+        a.db.set_first_week(season, _dt.date.fromisoformat(week["start_date"]))
+        self.refresh()
+        a.toast(f"Matriz e informes parten en la {ph.week_title(week)}")
 
     def show_audit(self):
         rows = [(f"{r['action']} · {r['entity']}" + (f" #{r['entity_id']}" if r["entity_id"] else ""),

@@ -1008,8 +1008,8 @@ class Database:
 
     # ---------------------------------------------------------------- weeks
     def ensure_week(self, season: int, number: int) -> dict:
-        if number < 1:
-            number = 1
+        """Semana n.º `number` de la temporada (se crea si no existe). Puede ser 0 o negativa:
+        semanas anteriores a la semana de referencia (las flechas recorren 2020-2050)."""
         row = self.query_one(
             "SELECT * FROM sampling_weeks WHERE season=? AND week_number=?", (season, number))
         if row:
@@ -1037,16 +1037,40 @@ class Database:
             sql += " AND COALESCE(skipped, 0) = 0"
         weeks = self.query(sql + " ORDER BY week_number", (season,))
         if trim_empty if trim_empty is not None else not include_skipped:
-            first = self.first_week_with_data(season)
-            if first is not None:
-                weeks = [w for w in weeks if w["week_number"] >= first]
+            last = self._data_week_bound(season, "MAX")
+            if last is not None:
+                first = self.report_first_week(season)
+                weeks = [w for w in weeks if first <= w["week_number"] <= last] or weeks
         return weeks
+
+    # Primera semana de muestreo: por defecto, la primera con datos; en Ajustes se puede fijar
+    # otra. Solo decide desde dónde muestran la matriz y los informes: no cambia ninguna fecha.
+    def first_week_date(self, season: int) -> _dt.date | None:
+        raw = self.get_setting(f"first_week:{season}")
+        return _dt.date.fromisoformat(raw) if raw else None
+
+    def set_first_week(self, season: int, start: _dt.date | None) -> None:
+        if start is None:
+            self.execute("DELETE FROM settings WHERE key=?", (f"first_week:{season}",))
+        else:
+            self.set_setting(f"first_week:{season}", start.isoformat())
+        self.log("update", "first_week", season, start.isoformat() if start else "automática")
+
+    def report_first_week(self, season: int) -> int | None:
+        """N.º de la semana desde la que parten matriz e informes."""
+        fixed = self.first_week_date(season)
+        if fixed is not None:
+            return ph.week_number_for(fixed, self.season_start(season))
+        return self.first_week_with_data(season)
 
     def first_week_with_data(self, season: int) -> int | None:
         """N.º de la primera semana con algún registro (estado, foto, nota, medición o
         foto adjunta); None si la temporada está vacía."""
+        return self._data_week_bound(season, "MIN")
+
+    def _data_week_bound(self, season: int, fn: str) -> int | None:
         row = self.query_one(
-            "SELECT MIN(w.week_number) AS n FROM sampling_weeks w WHERE w.season=? AND ("
+            f"SELECT {fn}(w.week_number) AS n FROM sampling_weeks w WHERE w.season=? AND ("
             " EXISTS (SELECT 1 FROM observations o WHERE o.week_id=w.id AND (o.bbch_code IS NOT NULL"
             "   OR COALESCE(o.notes, '') <> '' OR EXISTS (SELECT 1 FROM photos p WHERE p.observation_id=o.id)))"
             " OR EXISTS (SELECT 1 FROM measure_entries e WHERE e.week_id=w.id)"
@@ -1085,14 +1109,15 @@ class Database:
     def week_for_date(self, date: _dt.date, season: int | None = None) -> dict:
         season = season if season is not None else ph.season_of(date)
         n = ph.week_number_for(date, self.season_start(season))
-        return self.ensure_week(season, max(1, n))
+        return self.ensure_week(season, n)
 
     def current_week(self, today: _dt.date | None = None) -> dict:
         today = today or _dt.date.today()
         season = self.current_season(today)
         week = self.week_for_date(today, season)
-        # Garantiza que existan todas las semanas previas (navegación continua).
-        self.ensure_weeks(season, week["week_number"])
+        # Garantiza que existan las semanas previas desde la de referencia.
+        if week["week_number"] >= 1:
+            self.ensure_weeks(season, week["week_number"])
         return week
 
     # ----------------------------------------------------------- observations

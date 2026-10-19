@@ -406,6 +406,10 @@ def week_start(season_start: _dt.date, number: int) -> _dt.date:
     return season_start + _dt.timedelta(days=7 * (number - 1))
 
 
+FIRST_BROWSE = _dt.date(2020, 1, 1)   # las flechas de semana recorren 2020 … 2050
+LAST_BROWSE = _dt.date(2050, 12, 31)
+
+
 def week_number_for(date: _dt.date, season_start: _dt.date) -> int:
     """Semana de muestreo que contiene `date` (1-based; <1 si es anterior a la semana 1)."""
     delta = (date - season_start).days
