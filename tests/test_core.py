@@ -1750,3 +1750,81 @@ def test_weeks_browse_freely_and_first_week_setting(db):
     assert db.query("SELECT id, week_number, start_date FROM sampling_weeks ORDER BY id") == before
     db.set_first_week(2026, None)
     assert db.report_first_week(2026) == weeks[1]["week_number"]
+
+
+def _two_devices(tmp_path):
+    a = Database(str(tmp_path / "cel" / "AM.sqlite3"), code="AM")
+    b = Database(str(tmp_path / "pc" / "AM.sqlite3"), code="AM")
+    return a, b, str(tmp_path / "cel"), str(tmp_path / "pc")
+
+
+def _send(src, dst, src_dir, dst_dir):
+    import sync
+    bundle = sync.loads(sync.dumps(sync.export_changes(src, src_dir)))
+    stats = sync.apply_changes(dst, bundle, dst_dir, week_for_date=dst.week_for_date)
+    sync.mark_exported(src, bundle)
+    return stats
+
+
+def test_sync_first_contact_unifies_and_copies(tmp_path):
+    """Celular con datos -> PC nuevo: las variedades por defecto se unifican por nombre,
+    llegan observaciones, fotos (ruta relativa) y la semana de referencia."""
+    a, b, da, dbdir = _two_devices(tmp_path)
+    a.set_season_start(2026, dt.date(2026, 9, 7))
+    v = a.list_varieties()[0]
+    nv = a.add_variety("Variedad Sync", code="VS")
+    w = a.week_for_date(dt.date(2026, 10, 12))
+    o = a.get_or_create_observation(nv, w["id"])
+    a.update_observation(o["id"], bbch_code=61, bbch_label="x", notes="flor")
+    photo = os.path.join(da, "photos", "T2026", "S06", "f.jpg")
+    os.makedirs(os.path.dirname(photo))
+    open(photo, "wb").write(b"jpg")
+    a.add_photo(o["id"], "detail", photo)
+    b.current_week(dt.date(2026, 10, 19))                    # el PC ya creó sus semanas
+    stats = _send(a, b, da, dbdir)
+    assert stats["applied"] > 0
+    names = [x["name"] for x in b.list_varieties()]
+    assert names.count(v["name"]) == 1 and "Variedad Sync" in names     # sin duplicados
+    bv = next(x for x in b.list_varieties() if x["name"] == "Variedad Sync")
+    bw = b.query_one("SELECT * FROM sampling_weeks WHERE start_date='2026-10-12'")
+    bo = b.get_observation(bv["id"], bw["id"])
+    assert bo["bbch_code"] == 61 and bo["notes"] == "flor"
+    bp = b.query_one("SELECT * FROM photos WHERE observation_id=?", (bo["id"],))
+    assert bp["path"] == os.path.join(dbdir, "photos", "T2026", "S06", "f.jpg")
+    assert stats["missing_files"] == [bp["path"]]               # la foto se baja aparte
+    assert b.season_start(2026) == dt.date(2026, 9, 7)
+    assert _send(a, b, da, dbdir)["applied"] == 0               # nada pendiente
+
+
+def test_sync_both_ways_newest_wins_and_deletes(tmp_path):
+    a, b, da, dbdir = _two_devices(tmp_path)
+    va = a.add_variety("Tulameen")
+    w = a.week_for_date(dt.date(2026, 10, 12))
+    o = a.get_or_create_observation(va, w["id"])
+    a.update_observation(o["id"], bbch_code=55, bbch_label="x")
+    _send(a, b, da, dbdir)
+    _send(b, a, dbdir, da)                                       # b manda lo suyo (por defecto)
+    vb = next(x for x in b.list_varieties() if x["name"] == "Tulameen")
+    wb = b.query_one("SELECT * FROM sampling_weeks WHERE start_date='2026-10-12'")
+    ob = b.get_observation(vb["id"], wb["id"])
+    import time
+    a.update_observation(o["id"], notes="celular")
+    time.sleep(.01)
+    b.update_observation(ob["id"], notes="pc, después")          # el cambio más nuevo
+    _send(a, b, da, dbdir)                                       # el viejo no pisa al nuevo
+    _send(b, a, dbdir, da)
+    assert a.get_observation(va, w["id"])["notes"] == "pc, después"
+    assert b.get_observation(vb["id"], wb["id"])["notes"] == "pc, después"
+    # Una observación creada en los dos equipos para la misma variedad y semana: una sola.
+    w2 = a.week_for_date(dt.date(2026, 10, 19))
+    a.update_observation(a.get_or_create_observation(va, w2["id"])["id"], bbch_code=57, bbch_label="x")
+    wb2 = b.week_for_date(dt.date(2026, 10, 19))
+    b.get_or_create_observation(vb["id"], wb2["id"])
+    _send(a, b, da, dbdir)
+    _send(b, a, dbdir, da)
+    assert b.get_observation(vb["id"], wb2["id"])["bbch_code"] == 57
+    assert a.query_one("SELECT COUNT(*) AS n FROM observations WHERE week_id=?", (w2["id"],))["n"] == 1
+    # Borrar en el PC borra en el celular.
+    b.execute("DELETE FROM observations WHERE id=?", (ob["id"],))
+    _send(b, a, dbdir, da)
+    assert a.get_observation(va, w["id"]) is None

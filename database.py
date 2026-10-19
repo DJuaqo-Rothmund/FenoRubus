@@ -280,6 +280,10 @@ class Database:
         self.conn.execute("PRAGMA temp_store = MEMORY")
         self.init_schema()
         self._migrate_seasons_apr()
+        with self._lock:
+            import sync
+            sync.install(self.conn)        # uid común + registro de cambios (celular ↔ PC)
+            self.conn.commit()
         if seed:
             self.seed_defaults()
         if shared is None and seed:
