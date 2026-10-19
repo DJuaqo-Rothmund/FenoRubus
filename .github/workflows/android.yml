@@ -140,8 +140,14 @@ jobs:
               f.write(f"CLIENT_ID = {os.environ.get('GOOGLE_DESKTOP_CLIENT_ID', '')!r}\n")
               f.write(f"CLIENT_SECRET = {os.environ.get('GOOGLE_DESKTOP_CLIENT_SECRET', '')!r}\n")
           PY
+      # Kivy, al importarse durante el análisis, sube el registro a TRACE y PyInstaller se
+      # ahoga escribiendo millones de líneas: Kivy usa el registro de Python sin tocarlo.
       - name: Empaquetar (PyInstaller)
-        run: pyinstaller --noconfirm --clean tools/windows/phenorubus.spec
+        env:
+          KIVY_LOG_MODE: PYTHON
+          KIVY_NO_CONSOLELOG: "1"
+          KIVY_NO_ARGS: "1"
+        run: pyinstaller --noconfirm --clean --log-level WARN tools/windows/phenorubus.spec
       - name: Prueba de arranque (importa todo sin ventana)
         shell: bash
         run: |

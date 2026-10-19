@@ -1,11 +1,15 @@
 # PyInstaller: PhenoRubus para Windows (carpeta con PhenoRubus.exe; el instalador la empaqueta).
 #   pyinstaller tools/windows/phenorubus.spec
+import logging
 import os
+
+os.environ.setdefault("KIVY_LOG_MODE", "PYTHON")    # que Kivy no suba el registro a TRACE
 
 from kivy_deps import angle, glew, sdl2
 from kivymd import hooks_path as kivymd_hooks_path
 from PyInstaller.utils.hooks import collect_submodules
 
+logging.getLogger().setLevel(logging.WARNING)
 ROOT = os.path.abspath(os.path.join(SPECPATH, "..", ".."))
 
 datas = [(os.path.join(ROOT, d), d) for d in ("ui", "assets", "templates")]
