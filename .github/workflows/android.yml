@@ -147,7 +147,13 @@ jobs:
           KIVY_LOG_MODE: PYTHON
           KIVY_NO_CONSOLELOG: "1"
           KIVY_NO_ARGS: "1"
-        run: pyinstaller --noconfirm --clean --log-level WARN tools/windows/phenorubus.spec
+        timeout-minutes: 25
+        # Si el análisis se traba, a los 12 min se imprime dónde está cada hilo y se corta.
+        run: >
+          python -X faulthandler -c "import faulthandler, sys;
+          faulthandler.dump_traceback_later(720, exit=True);
+          from PyInstaller.__main__ import run;
+          run(['--noconfirm', '--clean', '--log-level', 'INFO', 'tools/windows/phenorubus.spec'])"
       - name: Prueba de arranque (importa todo sin ventana)
         shell: bash
         run: |
