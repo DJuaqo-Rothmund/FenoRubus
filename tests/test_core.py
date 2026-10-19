@@ -1828,3 +1828,99 @@ def test_sync_both_ways_newest_wins_and_deletes(tmp_path):
     b.execute("DELETE FROM observations WHERE id=?", (ob["id"],))
     _send(b, a, dbdir, da)
     assert a.get_observation(va, w["id"]) is None
+
+
+class FakeDrive:
+    """API REST de Drive mínima en memoria (carpetas, listar, subir, reemplazar, bajar)."""
+
+    def __init__(self):
+        import itertools
+        self.files, self.ids = {}, itertools.count(1)
+
+    def _multipart(self, body):
+        import json
+        parts = body.split(b"\r\n--")
+        meta = json.loads(parts[0].split(b"\r\n\r\n", 1)[1])
+        content = parts[1].split(b"\r\n\r\n", 1)[1]
+        return meta, content
+
+    def __call__(self, method, url, headers, body):
+        import json
+        import re
+        import urllib.parse
+        q = urllib.parse.parse_qs(urllib.parse.urlsplit(url).query)
+        if method == "GET" and "alt=media" in url:
+            fid = url.split("/files/")[1].split("?")[0]
+            return 200, self.files[fid]["data"]
+        if method == "GET":
+            query = q["q"][0]
+            parent = re.search(r"'([^']+)' in parents", query)
+            name = re.search(r"name='([^']+)'", query)
+            hits = [{"id": k, "name": f["name"]} for k, f in sorted(self.files.items())
+                    if (not parent or parent.group(1) in f["parents"])
+                    and (not name or f["name"] == name.group(1))
+                    and ("mimeType=" not in query or f["folder"])]
+            return 200, json.dumps({"files": sorted(hits, key=lambda h: h["name"])}).encode()
+        if "uploadType=multipart" in url:
+            meta, content = self._multipart(body)
+            if method == "PATCH":
+                fid = url.split("/files/")[1].split("?")[0]
+                self.files[fid]["data"] = content
+                return 200, json.dumps({"id": fid}).encode()
+            fid = f"f{next(self.ids)}"
+            self.files[fid] = {"name": meta["name"], "parents": meta.get("parents", []),
+                               "data": content, "folder": False}
+            return 200, json.dumps({"id": fid}).encode()
+        meta = json.loads(body)                                   # carpeta nueva
+        fid = f"d{next(self.ids)}"
+        self.files[fid] = {"name": meta["name"], "parents": meta.get("parents", []),
+                           "data": b"", "folder": True}
+        return 200, json.dumps({"id": fid}).encode()
+
+
+def _device(tmp_path, name, fake):
+    from drive_backup import DriveBackup
+    from sync_drive import DriveSync
+    from workspaces import Workspaces
+    data = str(tmp_path / name)
+    ws = Workspaces(data)
+    dbs = {}
+
+    def open_db(w):
+        if w["code"] not in dbs:
+            dbs[w["code"]] = ws.open(w)
+        return dbs[w["code"]]
+
+    class Auth:
+        def get_token(self, interactive):
+            return "t"
+    drive = DriveBackup(ws.shared, authorizer=Auth(), transport=fake, metered=lambda: False)
+    return DriveSync(drive, ws, open_db, data), ws, open_db, data
+
+
+def test_drive_sync_phone_and_pc(tmp_path):
+    fake = FakeDrive()
+    cel, cws, copen, cdir = _device(tmp_path, "cel", fake)
+    pc, pws, popen, pdir = _device(tmp_path, "pc", fake)
+    # El celular tiene un predio propio y un registro en El Amanecer.
+    cws.create("predio", "predio", "San José", "SJ")
+    am = copen(cws.by_code("AM"))
+    vid = am.add_variety("Glen Lyon")
+    w = am.week_for_date(dt.date(2026, 10, 12))
+    am.update_observation(am.get_or_create_observation(vid, w["id"])["id"], bbch_code=63, bbch_label="x")
+    r1 = cel.run()
+    assert r1["sent"] > 0
+    r2 = pc.run()
+    assert r2["created"] == 1 and pws.by_code("SJ") is not None      # el predio nuevo llega
+    pam = popen(pws.by_code("AM"))
+    pv = next(v for v in pam.list_varieties() if v["name"] == "Glen Lyon")
+    pw = pam.query_one("SELECT * FROM sampling_weeks WHERE start_date='2026-10-12'")
+    assert pam.get_observation(pv["id"], pw["id"])["bbch_code"] == 63
+    # El PC cambia algo y vuelve al celular; sin cambios no se suben paquetes vacíos.
+    pam.update_observation(pam.get_observation(pv["id"], pw["id"])["id"], notes="desde el PC")
+    pc.run()
+    cel.run()
+    assert am.get_observation(vid, w["id"])["notes"] == "desde el PC"
+    before = len(fake.files)
+    assert cel.run()["sent"] == 0 and pc.run()["applied"] == 0
+    assert len(fake.files) == before

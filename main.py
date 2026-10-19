@@ -14,6 +14,7 @@ import os
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
+import datetime as _dt
 from functools import cached_property
 
 os.environ.setdefault("KIVY_LOG_MODE", "PYTHON")
@@ -149,6 +150,48 @@ class FenoRubusApp(MDApp):
     def drive(self):
         from drive_backup import DriveBackup  # respaldo de fotos en Google Drive
         return DriveBackup(self.db)
+
+    @cached_property
+    def sync(self):
+        from sync_drive import DriveSync   # celular <-> PC por Google Drive
+        return DriveSync(self.drive, self.workspaces, self.open_db, get_data_dir())
+
+    def run_sync(self, manual: bool = False) -> None:
+        """Recibe los cambios del otro equipo y envía los de aquí (en segundo plano)."""
+        if not (self.db.get_setting("drive_enabled", False) and self.drive.available):
+            if manual:
+                self.toast("Conecte Google Drive (Ajustes) para sincronizar con su PC.")
+            return
+        if getattr(self, "_syncing", False):
+            return
+        self._syncing = True
+
+        def work():
+            from drive_backup import explain
+            from sync_drive import summary
+            res = None
+            try:
+                res = self.sync.run()
+                msg = summary(res)
+            except Exception as exc:  # noqa: BLE001 (sin red, sin permiso…: se reintenta luego)
+                msg = f"No se pudo sincronizar: {explain(str(exc))}"
+            finally:
+                self._syncing = False
+            stamp = _dt.datetime.now().strftime("%d/%m %H:%M")
+            self.workspaces.shared.set_setting("sync_last", f"{stamp} · {msg}")
+            Clock.schedule_once(lambda *_: self._after_sync(res, msg, manual))
+        self.workers.submit(work)
+
+    def _after_sync(self, res, msg, manual):
+        if manual:
+            self.toast(msg)
+        if res and (res["applied"] or res["created"]) and self.home is not None:
+            self.refresh_home()       # lo que llegó del otro equipo se ve ya
+        if self.sm.has_screen("settings"):
+            for w in self.sm.get_screen("settings").walk():
+                if type(w).__name__ == "SettingsTab":
+                    w.refresh_sync()
+                    break
 
     def _screen(self, cls, name):
         if not self.sm.has_screen(name):
@@ -409,6 +452,9 @@ class FenoRubusApp(MDApp):
         # y respalda la base en Drive una vez al día (las fotos ya se suben solas).
         if self.db.get_setting("drive_enabled", False):
             Clock.schedule_once(lambda *_: self.workers.submit(self._drive_daily), 6)
+        # Sincronización con el PC: al abrir y luego cada 10 minutos.
+        Clock.schedule_once(lambda *_: self.run_sync(), 10)
+        Clock.schedule_interval(lambda *_: self.run_sync(), 600)
 
     def _rename_photos(self):
         try:
@@ -441,6 +487,7 @@ class FenoRubusApp(MDApp):
         self.week = self.db.current_week() if self.week is None else self.week
         if "drive" in self.__dict__:
             self.drive.flush_async()
+            self.run_sync()
         if self.home is not None:
             self.refresh_home()
 

@@ -3704,6 +3704,7 @@ class SettingsTab(MDScreen):
                                  "Todo el análisis se ejecuta en el teléfono, sin conexión.")
         self.ids.data_text.text = f"PhenoRubus versión {app_version()} · datos locales: {a.db.path}"
         self.refresh_drive()
+        self.refresh_sync()
 
     # ------------------------------------------------ respaldo en Google Drive
     def refresh_drive(self, st=None):
@@ -3809,6 +3810,13 @@ class SettingsTab(MDScreen):
         a = app()
         a.drive.retry_errors()
         a.toast("Sincronizando con Google Drive…")
+        a.run_sync(manual=True)
+
+    def refresh_sync(self):
+        last = app().workspaces.shared.get_setting("sync_last")
+        self.ids.sync_text.text = (f"Última sincronización con el PC: {last}" if last else
+                                   "Los registros y fotos se comparten con la app del PC que use "
+                                   "esta misma cuenta de Google (al abrir y cada 10 minutos).")
 
     def drive_existing(self):
         a = app()

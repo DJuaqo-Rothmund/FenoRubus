@@ -659,6 +659,19 @@ class DriveBackup:
             return json.loads(data or b"{}")
         raise NeedsConsent("Google rechazó el acceso")
 
+    def _download(self, file_id: str) -> bytes:
+        """Contenido de un archivo creado por la app (paquetes de sincronización, fotos)."""
+        url = f"{API}/{file_id}?alt=media"
+        for attempt in range(2):
+            status, data = self.transport("GET", url, {"Authorization": f"Bearer {self._get_token()}"}, None)
+            if status == 401 and attempt == 0:
+                self._token = None
+                continue
+            if status >= 400:
+                raise DriveError(f"Drive {status}: {data[:200].decode('utf-8', 'replace')}", status)
+            return data
+        raise NeedsConsent("Google rechazó el acceso")
+
     def _folder(self, name: str, parent: str | None) -> str:
         cache = self.db.get_setting("drive_folders") or {}
         key = f"{parent or 'root'}/{name}"
