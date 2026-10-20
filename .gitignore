@@ -8,3 +8,4 @@ bin/
 .venv/
 version.txt
 google_client.py
+web/py.zip

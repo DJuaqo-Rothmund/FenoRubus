@@ -148,3 +148,5 @@ table.hm td.c.na { color: #c4c9c0; font-weight: 400; background: #f6f7f3; }
 .mimg .del { border: 0; border-top: 1px solid var(--line); background: #fff; color: var(--muted); padding: 6px; cursor: pointer; font-size: 12px; }
 .mgrid th .hcol { display: flex; align-items: center; }
 .mgrid th .hcol input { flex: 1; }
+.reports .btns { display: flex; gap: 8px; }
+#relogin { background: var(--berry); border-color: var(--berry); }

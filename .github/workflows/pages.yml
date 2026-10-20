@@ -5,7 +5,8 @@ name: Web (GitHub Pages)
 on:
   push:
     branches: ["main", "master", "claude/**"]
-    paths: ["web/**", "phenology.py", "tools/make_web_data.py", ".github/workflows/pages.yml"]
+    paths: ["web/**", "*.py", "templates/**", "assets/ui/**", "tools/make_web_data.py", "tools/web/**",
+            ".github/workflows/pages.yml"]
   workflow_dispatch:
 
 permissions:

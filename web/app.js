@@ -3,6 +3,7 @@
 import * as C from "./core.js";
 import { CLIENT_ID } from "./config.js";
 import { makeReports } from "./reports.js";
+import { warm as warmPdf, makePdf } from "./pdf.js";
 
 const SCOPE = "https://www.googleapis.com/auth/drive.file";
 const API = "https://www.googleapis.com/drive/v3/files";
@@ -16,7 +17,7 @@ const $ = (id) => document.getElementById(id);
 const S = {
   token: null, tokenClient: null, bbch: null, device: null,
   root: null, sync: null, workspaces: [], ws: null, wsFolder: null,
-  state: C.emptyState(), week: C.iso(C.mondayOf(C.todayUTC())),
+  state: C.emptyState(), bundles: [], week: C.iso(C.mondayOf(C.todayUTC())),
   folders: new Map(), photoUrls: new Map(), photoIds: new Map(), photoErr: new Map(), current: null,
   tab: "sampling", mSeason: null, mMonth: null, maps: new Map(), mapSel: null, mapEq: 0,
 };
@@ -28,16 +29,45 @@ function device() {
   return d;
 }
 
+// Sesión recordada: el permiso de Google dura 1 hora y se guarda en este navegador; al
+// vencer basta un clic («Continuar como …», sin elegir cuenta ni volver a aceptar permisos).
+const store = {
+  get(k) { try { return localStorage.getItem(k); } catch { return null; } },
+  set(k, v) { try { v === null ? localStorage.removeItem(k) : localStorage.setItem(k, v); } catch { /* sin almacenamiento */ } },
+};
+function savedToken() {
+  try { const o = JSON.parse(store.get("pr_token") || "null"); return o && o.exp > Date.now() ? o.t : null; } catch { return null; }
+}
+
 function signIn(prompt = "") {
   return new Promise((resolve, reject) => {
     if (window.__PR_TOKEN__) { S.token = window.__PR_TOKEN__; return resolve(S.token); }   // pruebas
     if (!CLIENT_ID) return reject(new Error("Falta configurar el ID de cliente de Google (web/config.js)."));
     if (!window.google?.accounts?.oauth2) return reject(new Error("No se pudo cargar el inicio de sesión de Google."));
     S.tokenClient ||= google.accounts.oauth2.initTokenClient({ client_id: CLIENT_ID, scope: SCOPE, callback: () => {} });
-    S.tokenClient.callback = (r) => r.error ? reject(new Error(r.error_description || r.error)) : resolve(S.token = r.access_token);
+    S.tokenClient.callback = (r) => {
+      if (r.error) return reject(new Error(r.error_description || r.error));
+      S.token = r.access_token;
+      store.set("pr_token", JSON.stringify({ t: r.access_token, exp: Date.now() + (Number(r.expires_in || 3600) - 120) * 1000 }));
+      $("relogin").hidden = true;
+      resolve(S.token);
+    };
     S.tokenClient.error_callback = (e) => reject(new Error(e.message || e.type || "inicio de sesión cancelado"));
-    S.tokenClient.requestAccessToken({ prompt });
+    const hint = store.get("pr_email");
+    S.tokenClient.requestAccessToken({ prompt, ...(hint ? { login_hint: hint } : {}) });
   });
+}
+
+async function rememberUser() {
+  try {
+    const r = await api("GET", "https://www.googleapis.com/drive/v3/about?fields=user(emailAddress)");
+    if (r.user?.emailAddress) store.set("pr_email", r.user.emailAddress);
+  } catch { /* no es indispensable */ }
+}
+
+function loginLabel() {
+  const hint = store.get("pr_email");
+  $("signin").textContent = hint ? `Continuar como ${hint}` : "Iniciar sesión con Google";
 }
 
 async function api(method, url, body, ctype, raw = false) {
@@ -45,7 +75,11 @@ async function api(method, url, body, ctype, raw = false) {
     const headers = { Authorization: `Bearer ${S.token}` };
     if (ctype) headers["Content-Type"] = ctype;
     const r = await fetch(url, { method, headers, body });
-    if (r.status === 401 && attempt === 0) { await signIn(""); continue; }
+    if (r.status === 401) {                 // venció la sesión: un clic en «Reconectar»
+      store.set("pr_token", null);
+      if (!window.__PR_TOKEN__) $("relogin").hidden = false;
+      throw new Error("La sesión de Google venció: pulse «Reconectar».");
+    }
     if (!r.ok) throw new Error(`Drive ${r.status}: ${(await r.text()).slice(0, 160)}`);
     return raw ? r : r.json();
   }
@@ -138,6 +172,8 @@ async function loadWorkspace(code) {
   S.ws = S.workspaces.find((w) => w.code === code) || S.workspaces[0];
   localStorage.setItem("pr_ws", S.ws.code);
   S.state = C.emptyState();
+  S.bundles = [];
+  for (const p of pending()) S.bundles.push([p.name, p.bundle]);
   S.photoIds.clear();
   S.wsFolder = await folder(S.ws.code, S.sync);
   await pull();
@@ -157,6 +193,7 @@ async function pull() {
       cachePut(key, bundle);
     }
     n += C.applyBundle(S.state, f.name, bundle);
+    S.bundles.push([f.name, bundle]);
   }
   await pushPending();
   status(`Sincronizado ${new Date().toLocaleTimeString("es", { hour: "2-digit", minute: "2-digit" })}`);
@@ -170,6 +207,7 @@ async function send(changes) {
   const name = `${C.stamp()}-${S.device}.json`;
   const bundle = C.bundle(S.device, S.ws.code, changes);
   C.applyBundle(S.state, name, bundle);            // se ve al instante
+  S.bundles.push([name, bundle]);
   setPending([...pending(), { name, bundle }]);
   await pushPending();
 }
@@ -857,10 +895,35 @@ async function runReport(kind) {
   }
 }
 
+async function photoBlob(path) {
+  const u = await photoUrl(path);
+  return u ? (await fetch(u)).blob() : null;
+}
+
+async function runPdf(kind) {
+  const season = Number($("rseason").value);
+  const arg = { weekly: $("rweek").value, month: $("rmonth").value, variety: $("rvar").value }[kind] || "";
+  const btns = document.querySelectorAll("[data-pdf]");
+  btns.forEach((b) => (b.disabled = true));
+  try {
+    const { name, blob } = await makePdf({ ws: S.ws, bundles: S.bundles, photoBlob,
+      progress: (t) => { $("rmsg").textContent = t; } }, kind, arg, season);
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob); a.download = name;
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(a.href), 60000);
+    $("rmsg").textContent = `PDF listo: ${name} (${Math.max(1, Math.round(blob.size / 1024))} KB, en Descargas).`;
+  } catch (e) {
+    console.error(e);
+    $("rmsg").textContent = `No se pudo generar el PDF: ${String(e.message || e).split("\n").filter(Boolean).pop()}`;
+  } finally { btns.forEach((b) => (b.disabled = false)); }
+}
+
 async function start() {
   $("login").hidden = true;
   $("app").hidden = false;
   ["sync", "logout", "ws"].forEach((id) => ($(id).hidden = false));
+  rememberUser();
   status("Cargando…");
   await loadWorkspaces();
   const sel = $("ws");
@@ -882,11 +945,12 @@ async function boot() {
   S.bbch = await (await fetch("bbch.json")).json();
   $("signin").onclick = async () => {
     $("login-msg").textContent = "";
-    try { await signIn("consent"); await start(); } catch (e) { $("login-msg").textContent = e.message; $("login").hidden = false; $("app").hidden = true; }
+    try { await signIn(""); await start(); } catch (e) { $("login-msg").textContent = e.message; $("login").hidden = false; $("app").hidden = true; }
   };
+  $("relogin").onclick = () => signIn("").then(() => pull()).then(render).catch((e) => status(e.message));
   $("logout").onclick = () => {
     if (S.token && window.google?.accounts?.oauth2) google.accounts.oauth2.revoke(S.token, () => {});
-    S.token = null; location.reload();
+    S.token = null; store.set("pr_token", null); store.set("pr_email", null); location.reload();
   };
   $("sync").onclick = () => pull().then(render).catch((e) => status(e.message));
   $("ws").onchange = (e) => loadWorkspace(e.target.value).then(render).catch((er) => status(er.message));
@@ -894,6 +958,7 @@ async function boot() {
     S.tab = b.dataset.tab;
     document.querySelectorAll(".tabs button").forEach((x) => x.classList.toggle("on", x === b));
     for (const t of ["sampling", "matrix", "reports"]) $(`tab-${t}`).hidden = t !== S.tab;
+    if (S.tab === "reports") warmPdf().catch(() => {});     // el generador de PDF se precarga
     render();
   }));
   $("season").onchange = (e) => { goSeason(Number(e.target.value)); render(); };
@@ -901,6 +966,7 @@ async function boot() {
   $("rseason").onchange = (e) => { S.rSeason = Number(e.target.value); renderReports(); };
   $("rweek").onchange = (e) => { e.target.dataset.touched = "1"; };
   document.querySelectorAll("[data-rep]").forEach((b) => (b.onclick = () => runReport(b.dataset.rep)));
+  document.querySelectorAll("[data-pdf]").forEach((b) => (b.onclick = () => runPdf(b.dataset.pdf)));
   $("prev").onclick = () => shift(-7);
   $("next").onclick = () => shift(7);
   $("today").onclick = () => { S.week = C.iso(C.mondayOf(C.todayUTC())); render(); };
@@ -914,7 +980,16 @@ async function boot() {
     try { await addPhotos(S.current, files, $("dkind").value); renderPhotos(S.current); render(); }
     catch (er) { $("dmsg").textContent = `No se pudieron subir: ${er.message}`; }
   };
-  if (window.__PR_TOKEN__) { await signIn(); await start(); }
+  loginLabel();
+  if (window.__PR_TOKEN__) { await signIn(); await start(); return; }
+  const saved = savedToken();
+  if (saved) {                              // sesión aún vigente: entra directo
+    S.token = saved;
+    try { await start(); } catch (e) {
+      $("login-msg").textContent = e.message; $("login").hidden = false; $("app").hidden = true;
+      ["sync", "logout", "ws"].forEach((id) => ($(id).hidden = true));
+    }
+  }
 }
 
 boot().catch((e) => { $("login-msg").textContent = e.message; });

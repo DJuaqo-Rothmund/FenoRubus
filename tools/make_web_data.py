@@ -6,6 +6,7 @@ Datos de la versión web, generados desde la app para que nunca difieran:
 * web/bbch.json   escala BBCH, estadios principales y colores (phenology.py)
 * web/report.css  estilo de los informes (templates/base.html)
 * web/maps/*.json planos de sector de los predios (assets/maps)
+* web/py.zip      código de informes de la app (PDF idénticos, con Pyodide en el navegador)
 
     python tools/make_web_data.py
 """
@@ -46,6 +47,24 @@ def main():
         if name.endswith(".json"):
             shutil.copy(os.path.join(ROOT, "assets", "maps", name), os.path.join(maps, name))
     print("report.css y", len(os.listdir(maps)), "plano(s)")
+    py_zip()
+
+
+PY_MODULES = ["phenology", "database", "sync", "reporter", "pdf_report", "pdfdoc", "platform_utils",
+              "trial_stats", "measures_export", "workspaces", "geo"]
+
+
+def py_zip():
+    import zipfile
+    out = os.path.join(ROOT, "web", "py.zip")
+    with zipfile.ZipFile(out, "w", zipfile.ZIP_DEFLATED) as z:
+        for m in PY_MODULES:
+            z.write(os.path.join(ROOT, f"{m}.py"), f"{m}.py")
+        z.write(os.path.join(ROOT, "tools", "web", "webreport.py"), "webreport.py")
+        for name in sorted(os.listdir(os.path.join(ROOT, "templates"))):
+            z.write(os.path.join(ROOT, "templates", name), f"templates/{name}")
+        z.write(os.path.join(ROOT, "assets", "ui", "logo_line_report.png"), "assets/ui/logo_line_report.png")
+    print(out, os.path.getsize(out) // 1024, "KB")
 
 
 if __name__ == "__main__":

@@ -17,6 +17,7 @@
     <div class="spacer"></div>
     <span id="status" class="status"></span>
     <button id="sync" class="ghost" hidden title="Sincronizar con Drive">⟳<span class="txt"> Sincronizar</span></button>
+    <button id="relogin" class="ghost" hidden title="La sesión de Google venció">Reconectar</button>
     <button id="logout" class="ghost" hidden>Salir</button>
   </header>
 
@@ -78,26 +79,26 @@
     <div id="tab-reports" hidden>
       <section class="card reports">
         <div class="row-h"><div class="label">INFORMES</div><select id="rseason" class="pill"></select></div>
-        <p class="muted small">Se abren en una pestaña nueva; con «Imprimir / Guardar PDF» quedan como PDF.</p>
+        <p class="muted small">«PDF» descarga el mismo informe que genera la app. «Ver» lo abre en una pestaña nueva.</p>
         <div class="rep">
           <div><b>Semanal</b><div class="muted small">Fotos, estado BBCH y notas de cada variedad en una semana.</div></div>
-          <select id="rweek" class="pill"></select><button class="primary" data-rep="weekly">Generar</button>
+          <select id="rweek" class="pill"></select><span class="btns"><button class="ghost" data-rep="weekly" title="Ver en una pestaña nueva">Ver</button><button class="primary" data-pdf="weekly">PDF</button></span>
         </div>
         <div class="rep">
           <div><b>Matriz global</b><div class="muted small">Toda la temporada: matriz, gráfico, precocidad, hitos y galería.</div></div>
-          <span></span><button class="primary" data-rep="matrix">Generar</button>
+          <span></span><span class="btns"><button class="ghost" data-rep="matrix" title="Ver en una pestaña nueva">Ver</button><button class="primary" data-pdf="matrix">PDF</button></span>
         </div>
         <div class="rep">
           <div><b>Mensual</b><div class="muted small">Lo mismo, solo con las semanas del mes.</div></div>
-          <select id="rmonth" class="pill"></select><button class="primary" data-rep="month">Generar</button>
+          <select id="rmonth" class="pill"></select><span class="btns"><button class="ghost" data-rep="month" title="Ver en una pestaña nueva">Ver</button><button class="primary" data-pdf="month">PDF</button></span>
         </div>
         <div class="rep">
           <div><b>Ficha por variedad / sector</b><div class="muted small">Evolución semana a semana con fotos.</div></div>
-          <select id="rvar" class="pill"></select><button class="primary" data-rep="variety">Generar</button>
+          <select id="rvar" class="pill"></select><span class="btns"><button class="ghost" data-rep="variety" title="Ver en una pestaña nueva">Ver</button><button class="primary" data-pdf="variety">PDF</button></span>
         </div>
         <div class="rep" id="rtrt" hidden>
           <div><b>Tratamientos</b><div class="muted small">Avance BBCH y planillas por tratamiento: medias, ANOVA y letras LSD.</div></div>
-          <span></span><button class="primary" data-rep="treatments">Generar</button>
+          <span></span><span class="btns"><button class="ghost" data-rep="treatments" title="Ver en una pestaña nueva">Ver</button><button class="primary" data-pdf="treatments">PDF</button></span>
         </div>
         <p id="rmsg" class="muted small"></p>
       </section>
