@@ -171,13 +171,23 @@ class FenoRubusApp(MDApp):
         self._syncing = True
 
         def work():
-            from drive_backup import explain
+            from drive_backup import Offline, explain
             from sync_drive import summary
             res = None
             try:
-                res = self.sync.run()
-                msg = summary(res)
-            except Exception as exc:  # noqa: BLE001 (sin red, sin permiso…: se reintenta luego)
+                # Sin red por un momento (al abrir o volver a la app el Wi-Fi/datos aún no
+                # está listo: «No address associated with hostname»): se reintenta enseguida.
+                for wait in (4, 12, 30, None):
+                    try:
+                        res = self.sync.run(manual=manual)
+                        msg = summary(res)
+                        break
+                    except Offline as exc:
+                        if wait is None:
+                            msg = f"No se pudo sincronizar: {explain(str(exc))} · se reintenta en 10 min"
+                            break
+                        time.sleep(wait)
+            except Exception as exc:  # noqa: BLE001 (sin permiso…: se reintenta luego)
                 msg = f"No se pudo sincronizar: {explain(str(exc))}"
             finally:
                 self._syncing = False
@@ -189,6 +199,8 @@ class FenoRubusApp(MDApp):
     def _after_sync(self, res, msg, manual):
         if manual:
             self.toast(msg)
+        if res and res.get("downloaded") and res.get("pending_photos"):
+            Clock.schedule_once(lambda *_: self.run_sync(), 20)   # quedan fotos: sigue pronto
         if res and (res["applied"] or res["created"] or res["downloaded"]) and self.home is not None:
             self.refresh_home()       # lo que llegó del otro equipo se ve ya
         if self.sm.has_screen("settings"):

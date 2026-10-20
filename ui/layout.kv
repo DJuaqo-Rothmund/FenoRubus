@@ -602,7 +602,7 @@
             id: bar
             title: "Muestreo semanal"
             left_action_items: [["home-outline", lambda x: app.open_start(), "Inicio"]]
-            right_action_items: [[theme.AI_BAR, lambda x: app.open_ai_lab(), "Entrenador IA"], [theme.DRIVE_UP, lambda x: root.drive_quick(), "Subir a Google Drive"], ["cog-outline", lambda x: app.open_settings(), "Ajustes"]]
+            right_action_items: [[theme.AI_BAR, lambda x: app.open_ai_lab(), "Entrenador IA"], [theme.DRIVE_UP, lambda x: root.drive_quick(), "Google Drive: respaldo y sincronización"], ["cog-outline", lambda x: app.open_settings(), "Ajustes"]]
         WorkspaceBanner:
             id: ws_banner
             on_release: app.open_workspaces(app.workspace["profile"] if app.workspace else None)

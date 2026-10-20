@@ -1855,10 +1855,11 @@ class FakeDrive:
         if method == "GET":
             query = q["q"][0]
             parent = re.search(r"'([^']+)' in parents", query)
-            name = re.search(r"name='([^']+)'", query)
+            names = re.findall(r"name='([^']+)'", query)      # una o varias («… or …»)
+            self.queries = getattr(self, "queries", 0) + 1
             hits = [{"id": k, "name": f["name"]} for k, f in sorted(self.files.items())
                     if (not parent or parent.group(1) in f["parents"])
-                    and (not name or f["name"] == name.group(1))
+                    and (not names or f["name"] in names)
                     and ("mimeType=" not in query or f["folder"])]
             return 200, json.dumps({"files": sorted(hits, key=lambda h: h["name"])}).encode()
         if "uploadType=multipart" in url:
@@ -1953,6 +1954,45 @@ def test_drive_sync_downloads_photos_when_available(tmp_path):
         {"status": "done", "drive_id": "fx"}                    # no se vuelve a subir
     from sync_drive import summary
     assert "foto" in summary({"applied": 1, "sent": 0, "downloaded": 1})
+
+
+def test_drive_sync_many_photos_batched_and_parallel(tmp_path):
+    """Muchas fotos: se buscan de a 40 por consulta, se bajan en paralelo y la sincronización
+    manual las baja todas (la automática, hasta MAX_DOWNLOADS)."""
+    import sync_drive
+    fake = FakeDrive()
+    cel, cws, copen, cdir = _device(tmp_path, "cel", fake)
+    pc, pws, popen, pdir = _device(tmp_path, "pc", fake)
+    am = copen(cws.by_code("AM"))
+    vid = am.add_variety("Glen Lyon")
+    names = []
+    for k in range(90):                     # 90 semanas con una foto cada una
+        w = am.week_for_date(dt.date(2024, 4, 1) + dt.timedelta(days=7 * k))
+        oid = am.get_or_create_observation(vid, w["id"])["id"]
+        name = f"foto{k:03d}.jpg"
+        path = os.path.join(cdir, "photos", name)
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        open(path, "wb").write(b"J" + bytes([k]))
+        am.add_photo(oid, "detail", path)
+        fake.files[f"p{k}"] = {"name": name, "parents": ["semana"], "data": b"J" + bytes([k]), "folder": False}
+        names.append(name)
+    for _ in range(12):                     # muchos paquetes pequeños (como los de la web)
+        am.update_observation(am.get_or_create_observation(vid, w["id"])["id"], notes=f"n{_}")
+        cel.run()
+    fake.files["px"] = {"name": "otra.jpg", "parents": ["semana"], "data": b"", "folder": False}
+    fake.queries = 0
+    monkey_limit = sync_drive.MAX_DOWNLOADS
+    sync_drive.MAX_DOWNLOADS = 50
+    try:
+        r = pc.run()
+    finally:
+        sync_drive.MAX_DOWNLOADS = monkey_limit
+    assert r["received"] >= 12 and r["downloaded"] == 50 and r["pending_photos"] == 40
+    assert fake.queries < 15                # 3 consultas de fotos, no 90
+    r = pc.run(manual=True)                 # «Sincronizar»: el resto de una vez
+    assert r["downloaded"] == 40 and r["pending_photos"] == 0
+    for k, name in enumerate(names):
+        assert open(os.path.join(pdir, "photos", name), "rb").read() == b"J" + bytes([k])
 
 
 def test_desktop_google_login_with_browser_and_refresh(db):

@@ -125,6 +125,25 @@ class SegButton(PillButton):
     pass
 
 
+def open_menu2(caller, items: list[tuple[str, str, callable]], width: float = dp(320)):
+    """Menú desplegable con título y una línea de detalle por opción."""
+    from kivy.core.window import Window
+    menu = None
+
+    def make(cb):
+        def _run(*_):
+            menu.dismiss()
+            cb()
+        return _run
+
+    menu = MDDropdownMenu(
+        caller=caller, width=min(width, Window.width - dp(16)), max_height=dp(400),
+        items=[{"viewclass": "TwoLineListItem", "text": t, "secondary_text": sub, "height": dp(72),
+                "on_release": make(cb)} for t, sub, cb in items])
+    menu.open()
+    return menu
+
+
 def open_menu(caller, items: list[tuple[str, callable]], width_mult: int = 5):
     menu = None
 
@@ -638,16 +657,41 @@ class HomeScreen(MDScreen):
             a.toast("Elija su cuenta de Google para respaldar en Drive")
             drive.connect(lambda ok, msg: Clock.schedule_once(lambda *_: (a.toast(msg), self.update_drive_icon())))
             return
-        if getattr(self, "_spin_ev", None):
-            a.toast("Subiendo a Google Drive…")
-            return
         st = drive.status()
+        backup = ("todo respaldado" if not st["pending"] and not st["errors"] else
+                  f"{st['pending']} por subir" + (f" · {st['errors']} con error" if st["errors"] else ""))
+        last = (a.workspaces.shared.get_setting("sync_last") or "").split(" · ")[0]
+        open_menu2(self._action([theme.DRIVE_UP, theme.DRIVE_OK, theme.DRIVE_OFF] + theme.DRIVE_SPIN)
+                   or self.ids.bar, [
+            ("Subir respaldo", f"Fotos a Drive · {backup}", self.drive_backup_now),
+            ("Sincronizar", f"PC, web y teléfonos · {last}" if last else "PC, web y otros teléfonos",
+             self.drive_sync_now),
+            ("Ajustes de Drive", "Cuenta y solo Wi-Fi", a.open_settings),
+        ])
+
+    def drive_backup_now(self):
+        a = app()
+        if getattr(self, "_spin_ev", None):
+            a.toast("Trabajando con Google Drive…")
+            return
+        st = a.drive.status()
         if not st["pending"] and not st["errors"]:
             a.toast("Todo está respaldado en Google Drive ✓")
-        drive.retry_errors()   # reintenta errores y sube lo pendiente (en segundo plano)
+        a.drive.retry_errors()   # reintenta errores y sube lo pendiente (en segundo plano)
         self._start_spin()
 
-    def _start_spin(self):
+    def drive_sync_now(self):
+        """Recibe lo hecho en el PC, la web u otro teléfono y envía lo de aquí (y baja todas
+        las fotos pendientes)."""
+        a = app()
+        if getattr(a, "_syncing", False):
+            a.toast("Ya se está sincronizando…")
+            return
+        a.toast("Sincronizando con sus otros dispositivos…")
+        a.run_sync(manual=True)
+        self._start_spin(report=False)
+
+    def _start_spin(self, report: bool = True):
         import time as _t
         btn = self._action([theme.DRIVE_UP, theme.DRIVE_OK, theme.DRIVE_OFF] + theme.DRIVE_SPIN)
         if btn is None:
@@ -658,13 +702,15 @@ class HomeScreen(MDScreen):
             state["k"] = (state["k"] + 1) % len(theme.DRIVE_SPIN)
             btn.icon = theme.DRIVE_SPIN[state["k"]]
             drive = app().drive
-            if _t.monotonic() - state["t0"] > 1.2 and not drive.running:
+            if _t.monotonic() - state["t0"] > 1.2 and not drive.running \
+                    and not getattr(app(), "_syncing", False):
                 self._spin_ev.cancel()
                 self._spin_ev = None
                 st = drive.status()
                 btn.icon = theme.DRIVE_UP if st["pending"] or st["errors"] else theme.DRIVE_OK
-                app().toast("Todo respaldado en Google Drive ✓" if btn.icon == theme.DRIVE_OK else
-                            st.get("message") or "Quedan archivos por subir")
+                if report:     # la sincronización avisa su propio resumen
+                    app().toast("Todo respaldado en Google Drive ✓" if btn.icon == theme.DRIVE_OK else
+                                st.get("message") or "Quedan archivos por subir")
 
         self._spin_ev = Clock.schedule_interval(tick, .1)
 
@@ -3815,9 +3861,10 @@ class SettingsTab(MDScreen):
 
     def refresh_sync(self):
         last = app().workspaces.shared.get_setting("sync_last")
-        self.ids.sync_text.text = (f"Última sincronización con el PC: {last}" if last else
-                                   "Los registros y fotos se comparten con la app del PC que use "
-                                   "esta misma cuenta de Google (al abrir y cada 10 minutos).")
+        self.ids.sync_text.text = (f"Última sincronización (celular, PC y web): {last}" if last else
+                                   "Los registros y fotos se comparten con el PC, la web y otros "
+                                   "teléfonos con esta misma cuenta de Google (al abrir y cada 10 "
+                                   "minutos; también desde el ícono de Drive del inicio).")
 
     def drive_existing(self):
         a = app()
