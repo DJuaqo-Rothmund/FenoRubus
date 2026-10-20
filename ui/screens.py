@@ -160,9 +160,18 @@ class DriveDial(FloatLayout):
         from kivy.animation import Animation
         from kivy.core.window import Window
         Window.add_widget(self)
+        Window.bind(on_keyboard=self._back)
         Animation(opacity=1, d=.15).start(self)
 
+    def _back(self, _w, key, *_):
+        if key == 27:                       # botón Atrás del celular: solo cierra las burbujas
+            self.dismiss()
+            return True
+        return False
+
     def dismiss(self, *_):
+        from kivy.core.window import Window
+        Window.unbind(on_keyboard=self._back)
         if self.parent:
             self.parent.remove_widget(self)
 
