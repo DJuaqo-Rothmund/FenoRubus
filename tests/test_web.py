@@ -81,3 +81,39 @@ def test_web_reads_app_bundle_and_app_applies_web_changes(tmp_path):
     assert p["path"].endswith(os.path.join("photos", "T2026", "web", "20261102-AM-GlwD.jpg")) and p["is_primary"] == 1
     assert stats["missing_files"] == [p["path"]]                  # el celular la baja de Drive
     db.close()
+
+
+def test_web_stats_match_trial_stats(tmp_path):
+    import random
+    import trial_stats as st
+    rnd = random.Random(7)
+    cases = []
+    for k in range(25):
+        nt, nr = rnd.randint(2, 6), rnd.randint(2, 4)
+        shift = rnd.choice([0, 0.5, 3, 8])
+        vals = [(t, r, round(50 + t * shift + rnd.gauss(0, 2), 2)) for t in range(1, nt + 1) for r in range(1, nr + 1)
+                if not (k % 4 == 0 and rnd.random() < .2)]               # a veces faltan parcelas
+        cases.append(vals)
+    cases.append([(1, 1, 5), (1, 2, 5), (2, 1, 5), (2, 2, 5)])          # sin varianza
+    cases.append([(1, 1, 5)])                                          # un solo tratamiento
+    vals = [[1, 2, 3.5], [7], [], [2, None, 4]]
+    res = _node("stats", {"cases": cases, "vals": vals}, tmp_path)
+    for case, js in zip(cases, res["res"]):
+        py = st.anova({(t, r): v for t, r, v in case})
+        if py is None:
+            assert js is None
+            continue
+        assert js["design"] == py["design"] and tuple(js["df"]) == py["df"]
+        assert (js["f"] == "inf") == (py["f"] == float("inf"))
+        if js["f"] != "inf":
+            assert js["f"] == pytest.approx(py["f"], rel=1e-9, abs=1e-12)
+        assert js["p"] == pytest.approx(py["p"], rel=1e-7, abs=1e-12)
+        assert (js["lsd"] is None) == (py["lsd"] is None)
+        if py["lsd"] is not None:
+            assert js["lsd"] == pytest.approx(py["lsd"], rel=1e-6)
+        assert {int(k): v for k, v in js["letters"].items()} == py["letters"]
+    for v, (m, se) in zip(vals, res["ms"]):
+        pm, pse = st.mean_se(v)
+        assert (m is None) == (pm is None) and (pm is None or m == pytest.approx(pm))
+        assert (se is None) == (pse is None) and (pse is None or se == pytest.approx(pse))
+    assert res["tcrit"] == pytest.approx([st.t_crit(d) for d in (2, 6, 20)], rel=1e-9)

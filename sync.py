@@ -55,7 +55,7 @@ ORDER = ["varieties", "sampling_weeks", "treatments", "measures", "observations"
          "variety_attachments", "measure_entries", "variety_metrics", "custom_fields"]
 PATH_COLUMNS = {"photos": "path", "variety_attachments": "path", "measure_entries": "path"}
 # Ajustes del ensayo que también viajan (semana de referencia, primera semana fijada…).
-SETTING_PREFIXES = ("season_start:", "first_week:", "treatment_")
+SETTING_PREFIXES = ("season_start:", "first_week:", "treatment_", "trial_")
 
 _NOW = "strftime('%Y-%m-%dT%H:%M:%f', 'now')"
 

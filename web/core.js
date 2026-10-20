@@ -284,3 +284,69 @@ export function sectorColor(equipo, sector, faded = false) {   // = ui.sector_ma
   return ["#" + rgb.map((x) => Math.round(x * 255).toString(16).padStart(2, "0")).join(""), lum < 0.55 && !faded];
 }
 export function equipoDark(equipo) { return (EQUIPO_RAMP[Number(equipo)] || ["#999", "#333"])[1]; }
+
+// ------------------------------------------------------------------ mediciones
+export function asNumber(v) {             // = measures_export.as_number: «23,5» -> 23.5
+  if (typeof v === "number") return v;
+  const t = String(v ?? "").trim();
+  if (!/^[+-]?(\d+([.,]\d*)?|[.,]\d+)$/.test(t)) return null;
+  return Number(t.replace(",", "."));
+}
+export function slugify(text) {           // = platform_utils.slugify
+  const t = (text || "").normalize("NFKD").replace(/[̀-ͯ]/g, "").replace(/[^\x00-\x7f]/g, "");
+  return t.replace(/[^a-zA-Z0-9]+/g, "-").replace(/^-+|-+$/g, "").toLowerCase() || "informe";
+}
+const parseJson = (v, d) => { if (v && typeof v === "object") return v; try { return JSON.parse(v || ""); } catch { return d; } };
+export function measures(state) {
+  return rows(state, "measures").map((m) => ({ ...m, columns: parseJson(m.columns, []) }))
+    .sort((a, b) => (a.sort_order || 0) - (b.sort_order || 0) || (a.created_at || "").localeCompare(b.created_at || ""));
+}
+export function entriesFor(state, measureUid, weekStart = null) {
+  return rows(state, "measure_entries").filter((e) => e.measure_id === measureUid && (!weekStart || e.week_id === weekStart))
+    .map((e) => ({ ...e, data: parseJson(e.data, {}) }))
+    .sort((a, b) => (a.week_id || "").localeCompare(b.week_id || "") || (a.created_at || "").localeCompare(b.created_at || ""));
+}
+export function entryFilled(e) {
+  return !!e.path || Object.values(e.data || {}).some((v) => String(v ?? "").trim() !== "");
+}
+// Cambios: alta/edición de un registro de medición, y edición de la medición (columnas).
+export function entryChange(e) {
+  const ts = nowTs();
+  const data = { measure_id: e.measure_id, week_id: e.week_id, variety_id: e.variety_id || null, path: e.path || null,
+    caption: (e.caption || "").trim(), data: JSON.stringify(e.data || {}), created_at: e.created_at || ts };
+  return { entity: "measure_entries", uid: e.uid || newUid(), ts, deleted: 0, data };
+}
+export function entryDelete(uid) { return { entity: "measure_entries", uid, ts: nowTs(), deleted: 1 }; }
+export function measureChange(m, fields) {
+  const ts = nowTs();
+  const base = m ? { name: m.name, kind: m.kind, columns: m.columns, sort_order: m.sort_order || 0, created_at: m.created_at || ts }
+    : { name: "", kind: "table", columns: ["Columna 1", "Columna 2", "Columna 3"], sort_order: 0, created_at: ts };
+  const data = { ...base, ...fields };
+  data.columns = JSON.stringify(data.columns || []);
+  return { entity: "measures", uid: (m && m.uid) || newUid(), ts, deleted: 0, data };
+}
+export function weekChange(state, weekStart) {   // la semana, si aún no existe en los paquetes
+  if (weekStarts(state).has(weekStart)) return [];
+  return [{ entity: "sampling_weeks", uid: weekStart, ts: nowTs(), deleted: 0,
+    data: { season: seasonOf(parseDate(weekStart)), week_number: 0, start_date: weekStart, label: weekLabel(weekStart), skipped: 0 } }];
+}
+
+// ------------------------------------------------------------------ tratamientos
+export function treatments(state) {
+  const vs = varieties(state).filter((v) => v.treatment);
+  const meta = new Map(rows(state, "treatments").map((t) => [Number(t.num), t]));
+  const nums = [...new Set(vs.map((v) => Number(v.treatment)))].sort((a, b) => a - b);
+  return nums.map((num) => {
+    const t = meta.get(num) || { num, name: "" };
+    const name = (t.name || "").trim();
+    return { num, name, description: t.description || "", cultivar: t.cultivar || "",
+      label: name ? `T${num} · ${name}` : `T${num}`,
+      parcels: vs.filter((v) => Number(v.treatment) === num).sort((a, b) => (a.rep || 0) - (b.rep || 0)) };
+  });
+}
+export function numEs(v, digits = 1) {    // = ReportGenerator._num: «23,5», «7»
+  if (v === null || v === undefined || v === "") return "—";
+  const f = Number(v);
+  if (Number.isNaN(f)) return String(v);
+  return Number.isInteger(f) ? String(f) : f.toFixed(digits).replace(".", ",");
+}

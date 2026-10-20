@@ -2,10 +2,17 @@
 // como la web y crea cambios con la lógica de la web.
 import { readFileSync, writeFileSync } from "node:fs";
 import * as C from "../web/core.js";
+import * as ST from "../web/stats.js";
 
 const [, , mode, input, output] = process.argv;
 const data = JSON.parse(readFileSync(input, "utf-8"));
-if (mode === "helpers") {
+if (mode === "stats") {
+  const res = data.cases.map((c) => {
+    const a = ST.anova(new Map(c.map(([t, r, v]) => [`${t}|${r}`, v])));
+    return a && { f: Number.isFinite(a.f) ? a.f : "inf", p: a.p, df: a.df, lsd: a.lsd, cv: a.cv, letters: a.letters, design: a.design };
+  });
+  writeFileSync(output, JSON.stringify({ res, ms: data.vals.map(ST.meanSe), tcrit: [2, 6, 20].map((d) => ST.tCrit(d)) }));
+} else if (mode === "helpers") {
   const out = data.dates.map((d) => {
     const dt = C.parseDate(d);
     return { date: d, season: C.seasonOf(dt), iso: C.isoWeek(dt), monday: C.iso(C.mondayOf(dt)),

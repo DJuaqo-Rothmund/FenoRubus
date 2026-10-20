@@ -122,3 +122,29 @@ table.hm td.c.na { color: #c4c9c0; font-weight: 400; background: #f6f7f3; }
 #mapinfo .unit { display: flex; justify-content: space-between; gap: 10px; padding: 8px 12px; border: 1px solid var(--line); border-radius: 12px; background: #fff; cursor: pointer; }
 .reports .rep { display: grid; grid-template-columns: 1fr minmax(0, 220px) auto; gap: 10px; align-items: center; padding: 12px 0; border-top: 1px solid var(--line); }
 @media (max-width: 560px) { .reports .rep { grid-template-columns: 1fr auto; } .reports .rep > div { grid-column: 1 / -1; } }
+
+/* mediciones */
+.mrow .thumb { font-size: 22px; }
+.mrow.add { justify-content: center; color: var(--berry); font-weight: 600; grid-template-columns: 1fr; text-align: center; }
+#measure { width: min(920px, 96vw); }
+.grow { flex: 1; min-width: 0; }
+.title-in { width: 100%; font: 600 20px system-ui, sans-serif; border: 0; border-bottom: 1px dashed var(--line); padding: 2px 0; background: transparent; color: var(--ink); }
+.field input { font-weight: 400; font-size: 15px; color: var(--ink); border: 1px solid var(--line); border-radius: 12px; padding: 8px 10px; width: 100%; }
+.mgrid { width: 100%; border-collapse: collapse; font-size: 14px; }
+.mgrid th, .mgrid td { border: 1px solid var(--line); padding: 0; }
+.mgrid th { background: var(--leaf-soft); }
+.mgrid input, .mgrid select { width: 100%; min-width: 80px; border: 0; padding: 8px; font: inherit; background: transparent; }
+.mgrid th input { font-weight: 700; color: var(--leaf-dark); }
+.mgrid td.n { color: var(--muted); text-align: center; width: 32px; padding: 0 6px; }
+.mgrid td.x, .mgrid th.x { width: 34px; text-align: center; }
+.mgrid button.del { border: 0; background: none; color: var(--muted); cursor: pointer; font-size: 15px; padding: 6px; }
+.mgrid button.del:hover { color: var(--berry); }
+.mtools { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 10px; }
+.mimgs { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 10px; }
+.mimg { border: 1px solid var(--line); border-radius: 14px; overflow: hidden; display: grid; }
+.mimg .ph { aspect-ratio: 4/3; background: var(--leaf-soft) center/cover; cursor: zoom-in; position: relative; }
+.mimg .ph em { position: absolute; inset: 0; display: grid; place-items: center; font-style: normal; font-size: 12px; color: var(--muted); }
+.mimg input, .mimg select { border: 0; border-top: 1px solid var(--line); padding: 7px 9px; font: inherit; font-size: 13px; background: #fff; }
+.mimg .del { border: 0; border-top: 1px solid var(--line); background: #fff; color: var(--muted); padding: 6px; cursor: pointer; font-size: 12px; }
+.mgrid th .hcol { display: flex; align-items: center; }
+.mgrid th .hcol input { flex: 1; }

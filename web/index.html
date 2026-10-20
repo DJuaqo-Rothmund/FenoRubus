@@ -57,6 +57,8 @@
     </section>
     <div class="label" id="listlabel">VARIEDADES · TOQUE PARA REGISTRAR</div>
     <section id="rows" class="rows"></section>
+    <div class="label">MEDICIONES DE LA SEMANA</div>
+    <section id="mlist" class="rows"></section>
     </div>
 
     <div id="tab-matrix" hidden>
@@ -93,6 +95,10 @@
           <div><b>Ficha por variedad / sector</b><div class="muted small">Evolución semana a semana con fotos.</div></div>
           <select id="rvar" class="pill"></select><button class="primary" data-rep="variety">Generar</button>
         </div>
+        <div class="rep" id="rtrt" hidden>
+          <div><b>Tratamientos</b><div class="muted small">Avance BBCH y planillas por tratamiento: medias, ANOVA y letras LSD.</div></div>
+          <span></span><button class="primary" data-rep="treatments">Generar</button>
+        </div>
         <p id="rmsg" class="muted small"></p>
       </section>
     </div>
@@ -126,6 +132,42 @@
       <div class="actions">
         <button value="cancel" class="ghost">Cancelar</button>
         <button id="dsave" value="default" class="primary">Guardar</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog id="measure">
+    <form method="dialog" class="detail">
+      <div class="dhead">
+        <div class="grow">
+          <div id="mkind" class="place"></div>
+          <input id="mname" class="title-in" aria-label="Nombre de la medición">
+          <div id="mweek" class="muted small"></div>
+        </div>
+        <button value="cancel" class="round" aria-label="Cerrar">✕</button>
+      </div>
+      <div id="mbody"></div>
+      <p id="mmsg" class="muted small"></p>
+      <div class="actions">
+        <button value="cancel" class="ghost">Cancelar</button>
+        <button id="msave" value="default" class="primary">Guardar</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog id="newmeasure">
+    <form method="dialog" class="detail">
+      <div class="dhead"><h2>Nueva medición</h2><button value="cancel" class="round" aria-label="Cerrar">✕</button></div>
+      <label class="field">Nombre
+        <input id="nname" placeholder="Ej.: Largo de laterales, Conteo de frutos">
+      </label>
+      <label class="field">Tipo
+        <select id="nkind"><option value="table">Planilla de datos</option><option value="images">Registro de imágenes</option></select>
+      </label>
+      <p id="nmsg" class="warn small"></p>
+      <div class="actions">
+        <button value="cancel" class="ghost">Cancelar</button>
+        <button id="ncreate" value="default" class="primary">Crear</button>
       </div>
     </form>
   </dialog>

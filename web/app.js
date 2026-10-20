@@ -335,6 +335,7 @@ function renderSampling() {
   }
   $("pbar").style.width = vs.length ? `${(100 * done) / vs.length}%` : "0";
   $("ptext").textContent = `${done}/${vs.length} completas`;
+  renderMeasures();
 }
 
 function fillBbch(sel, code) {
@@ -425,6 +426,270 @@ function shift(days) {
   if (d.getUTCFullYear() < 2020 || d.getUTCFullYear() > 2050) return;
   S.week = C.iso(d);
   render();
+}
+
+// ================================================================== mediciones
+const KIND_NAME = { table: "Planilla de datos", images: "Registro de imágenes" };
+
+function renderMeasures() {
+  const box = $("mlist");
+  box.innerHTML = "";
+  for (const m of C.measures(S.state)) {
+    const n = C.entriesFor(S.state, m.uid, S.week).filter(C.entryFilled).length;
+    const el = document.createElement("button");
+    el.className = "card row mrow";
+    el.innerHTML = `<div class="thumb">${m.kind === "images" ? "📷" : "📋"}</div>
+      <div><div class="place"></div><div class="name"></div><div class="sub"></div></div>
+      <div class="badges"><span class="badge ${n ? "bbch" : "none"}">${n ? n + (m.kind === "images" ? " FOTO" : " FILA") + (n > 1 ? "S" : "") : "SIN DATOS"}</span></div>`;
+    el.querySelector(".place").textContent = KIND_NAME[m.kind] || m.kind;
+    el.querySelector(".name").textContent = m.name;
+    el.querySelector(".sub").textContent = m.kind === "table" ? m.columns.join(" · ") : "Fotos con descripción";
+    el.onclick = () => openMeasure(m.uid);
+    box.appendChild(el);
+  }
+  const add = document.createElement("button");
+  add.className = "card row mrow add";
+  add.textContent = "＋ Nueva medición";
+  add.onclick = () => { $("nname").value = ""; $("nmsg").textContent = ""; $("newmeasure").showModal(); };
+  box.appendChild(add);
+}
+
+function varietySelect(value) {
+  const sel = document.createElement("select");
+  sel.innerHTML = `<option value="">— Sin variedad —</option>`;
+  for (const v of C.varieties(S.state)) {
+    const o = document.createElement("option");
+    o.value = v.uid; o.textContent = C.unitMain(v) + (C.unitPlace(v) ? ` · ${C.unitPlace(v)}` : "");
+    sel.appendChild(o);
+  }
+  sel.value = value || "";
+  return sel;
+}
+
+async function createMeasure(ev) {
+  ev.preventDefault();
+  const name = $("nname").value.trim(), kind = $("nkind").value;
+  if (!name) { $("nmsg").textContent = "Póngale un nombre a la medición."; return; }
+  const order = Math.max(0, ...C.measures(S.state).map((m) => Number(m.sort_order) || 0)) + 1;
+  const ch = C.measureChange(null, { name, kind, sort_order: order, columns: kind === "table" ? ["Columna 1", "Columna 2", "Columna 3"] : [] });
+  try {
+    await send([ch]);
+    $("newmeasure").close();
+    render();
+    openMeasure(ch.uid);
+  } catch (e) { $("nmsg").textContent = `No se pudo crear: ${e.message}`; }
+}
+
+function openMeasure(uid) {
+  const m = C.measures(S.state).find((x) => x.uid === uid);
+  if (!m) return;
+  const entries = C.entriesFor(S.state, m.uid, S.week);
+  S.meas = { m, cols: m.columns.map((c) => ({ orig: c, name: c })),
+    rows: entries.map((e) => ({ e, variety_id: e.variety_id || "", data: { ...e.data }, caption: e.caption || "", gone: false })) };
+  if (m.kind === "table" && !S.meas.rows.length) S.meas.rows.push({ e: null, variety_id: "", data: {}, caption: "", gone: false });
+  $("mkind").textContent = KIND_NAME[m.kind] || m.kind;
+  $("mname").value = m.name;
+  $("mweek").textContent = `${C.weekTitle(S.week)} · ${C.weekLabel(S.week)}`;
+  $("mmsg").textContent = "";
+  renderMeasureBody();
+  if (!$("measure").open) $("measure").showModal();
+}
+
+function renderMeasureBody() {
+  const M = S.meas, box = $("mbody");
+  box.innerHTML = "";
+  if (M.m.kind === "table") {
+    const t = document.createElement("table");
+    t.className = "mgrid";
+    const hr = document.createElement("tr");
+    hr.innerHTML = `<th>#</th><th>Variedad / sector</th>`;
+    M.cols.forEach((c, i) => {
+      const th = document.createElement("th");
+      const hc = document.createElement("div");
+      hc.className = "hcol"; th.appendChild(hc);
+      const inp = document.createElement("input");
+      inp.value = c.name; inp.title = "Nombre de la columna";
+      inp.oninput = () => { c.name = inp.value; };
+      hc.appendChild(inp);
+      if (M.cols.length > 1) {
+        const del = document.createElement("button");
+        del.type = "button"; del.className = "del"; del.textContent = "✕"; del.title = "Eliminar la columna (y sus datos en todas las semanas)";
+        del.onclick = () => { if (confirm(`¿Eliminar la columna «${c.name}» y sus datos en todas las semanas?`)) { M.cols.splice(i, 1); renderMeasureBody(); } };
+        hc.appendChild(del);
+      }
+      hr.appendChild(th);
+    });
+    hr.insertAdjacentHTML("beforeend", `<th class="x"></th>`);
+    const thead = document.createElement("thead"); thead.appendChild(hr); t.appendChild(thead);
+    const tb = document.createElement("tbody");
+    M.rows.filter((r) => !r.gone).forEach((r, i) => {
+      const tr = document.createElement("tr");
+      tr.innerHTML = `<td class="n">${i + 1}</td>`;
+      const tdv = document.createElement("td");
+      const sel = varietySelect(r.variety_id);
+      sel.onchange = () => { r.variety_id = sel.value; };
+      tdv.appendChild(sel); tr.appendChild(tdv);
+      for (const c of M.cols) {
+        const td = document.createElement("td");
+        const inp = document.createElement("input");
+        inp.value = r.data[c.orig] ?? ""; inp.inputMode = "decimal";
+        inp.oninput = () => { r.data[c.orig] = inp.value; };
+        td.appendChild(inp); tr.appendChild(td);
+      }
+      const tdx = document.createElement("td");
+      tdx.className = "x";
+      const del = document.createElement("button");
+      del.type = "button"; del.className = "del"; del.textContent = "🗑"; del.title = "Eliminar la fila";
+      del.onclick = () => { r.gone = true; renderMeasureBody(); };
+      tdx.appendChild(del); tr.appendChild(tdx);
+      tb.appendChild(tr);
+    });
+    t.appendChild(tb);
+    const wrap = document.createElement("div"); wrap.className = "heatwrap"; wrap.appendChild(t);
+    box.appendChild(wrap);
+    const tools = document.createElement("div");
+    tools.className = "mtools";
+    tools.innerHTML = `<button type="button" class="ghost" id="maddrow">＋ Fila</button><button type="button" class="ghost" id="maddcol">＋ Columna</button>`;
+    box.appendChild(tools);
+    $("maddrow").onclick = () => {
+      const last = M.rows.filter((r) => !r.gone).pop();
+      M.rows.push({ e: null, variety_id: last ? last.variety_id : "", data: {}, caption: "", gone: false });
+      renderMeasureBody();
+    };
+    $("maddcol").onclick = () => {
+      let n = M.cols.length + 1;
+      while (M.cols.some((c) => c.name === `Columna ${n}`)) n++;
+      M.cols.push({ orig: `Columna ${n}`, name: `Columna ${n}`, added: true });
+      renderMeasureBody();
+    };
+  } else {
+    const head = document.createElement("div");
+    head.className = "photohead";
+    head.innerHTML = `<span class="muted small">Fotos de esta semana: agregue una descripción y, si corresponde, la variedad.</span><span class="spacer"></span>
+      <label class="ghost upload">＋ Subir fotos<input id="mfiles" type="file" accept="image/*" multiple hidden></label>`;
+    box.appendChild(head);
+    const grid = document.createElement("div");
+    grid.className = "mimgs";
+    const live = M.rows.filter((r) => !r.gone);
+    if (!live.length) grid.innerHTML = `<p class="muted small">Sin fotos esta semana.</p>`;
+    for (const r of live) {
+      const card = document.createElement("div");
+      card.className = "mimg";
+      card.innerHTML = `<div class="ph"><em>Buscando…</em></div>`;
+      const cap = document.createElement("input");
+      cap.placeholder = "Descripción"; cap.value = r.caption;
+      cap.oninput = () => { r.caption = cap.value; };
+      const sel = varietySelect(r.variety_id);
+      sel.onchange = () => { r.variety_id = sel.value; };
+      const del = document.createElement("button");
+      del.type = "button"; del.className = "del"; del.textContent = "Quitar del registro";
+      del.onclick = () => { r.gone = true; renderMeasureBody(); };
+      card.append(cap, sel, del);
+      grid.appendChild(card);
+      const ph = card.querySelector(".ph");
+      photoUrl(r.e.path).then((u) => {
+        if (!u) { ph.querySelector("em").textContent = S.photoErr.get(base(r.e.path)) === "missing" ? "No está en Drive" : "Error al bajar"; return; }
+        ph.innerHTML = ""; ph.style.backgroundImage = `url(${u})`;
+        ph.onclick = () => { $("vimg").src = u; $("viewer").showModal(); };
+      }).catch(() => {});
+    }
+    box.appendChild(grid);
+    $("mfiles").onchange = async (e) => {
+      const files = [...e.target.files];
+      e.target.value = "";
+      if (!files.length) return;
+      try { await addMeasureImages(files); renderMeasureBody(); render(); }
+      catch (er) { $("mmsg").textContent = `No se pudieron subir: ${er.message}`; }
+    };
+  }
+}
+
+async function addMeasureImages(files) {
+  const M = S.meas;
+  const season = C.seasonOf(C.parseDate(S.week));
+  const stem = `${S.week.replaceAll("-", "")}-${S.ws.code ? S.ws.code + "-" : ""}${C.slugify(M.m.name).slice(0, 40) || "medicion"}`;
+  const taken = new Set([...C.rows(S.state, "measure_entries"), ...C.rows(S.state, "photos")].map((r) => base(r.path)).filter(Boolean));
+  let dir = await weekFolderId();
+  dir = await folder(M.m.name.replace(/\//g, "-").trim() || "Otras", dir, true);
+  const changes = C.weekChange(S.state, S.week);
+  let seq = 1;
+  for (const f of files) {
+    let name;
+    do { name = `${stem}${seq > 1 ? "-" + seq : ""}.jpg`; seq++; } while (taken.has(name));
+    taken.add(name);
+    $("mmsg").textContent = `Subiendo ${name}…`;
+    const blob = await resize(f);
+    const id = await upload(dir, name, blob, "image/jpeg");
+    S.photoIds.set(name, id);
+    S.photoUrls.set(name, URL.createObjectURL(blob));
+    const ch = C.entryChange({ measure_id: M.m.uid, week_id: S.week, path: `photos/T${season}/mediciones/${name}`, data: {} });
+    changes.push(ch);
+    M.rows.push({ e: { uid: ch.uid, path: ch.data.path, created_at: ch.data.created_at, data: {} }, variety_id: "", data: {}, caption: "", gone: false });
+  }
+  await send(changes);
+  $("mmsg").textContent = `${files.length} foto(s) subida(s). Agregue la descripción y pulse Guardar.`;
+}
+
+function measureChanges() {
+  const M = S.meas, m = M.m;
+  const name = $("mname").value.trim();
+  if (!name) throw new Error("Póngale un nombre a la medición.");
+  const changes = [];
+  const cols = M.cols.map((c) => ({ ...c, name: c.name.trim() }));
+  if (m.kind === "table") {
+    if (cols.some((c) => !c.name)) throw new Error("Hay una columna sin nombre.");
+    if (new Set(cols.map((c) => c.name)).size !== cols.length) throw new Error("Hay dos columnas con el mismo nombre.");
+  }
+  const newCols = cols.map((c) => c.name);
+  if (name !== m.name || JSON.stringify(newCols) !== JSON.stringify(m.columns)) changes.push(C.measureChange(m, { name, columns: newCols }));
+  // Columnas renombradas o eliminadas: los datos se mueven en todas las semanas (= rename/delete_measure_column).
+  const keep = new Map(cols.filter((c) => !c.added).map((c) => [c.orig, c.name]));
+  const added = new Set(M.cols.filter((c) => c.added).map((c) => c.orig));
+  const clean = (d) => Object.fromEntries(Object.entries(d || {}).map(([k, v]) => [k, String(v ?? "").trim()]).filter(([, v]) => v !== ""));
+  const remap = (data) => {
+    const out = {};
+    for (const [k, v] of Object.entries(data || {})) {
+      if (keep.has(k)) out[keep.get(k)] = v;
+      else if (!m.columns.includes(k) && !added.has(k)) out[k] = v;   // claves ajenas a la planilla: se respetan
+    }
+    for (const c of cols) if (c.added && data && data[c.orig] !== undefined) out[c.name] = data[c.orig];
+    return out;
+  };
+  const colsChanged = m.kind === "table" && m.columns.some((c) => keep.get(c) !== c);
+  if (colsChanged) {
+    for (const e of C.entriesFor(S.state, m.uid)) {
+      if (e.week_id === S.week) continue;
+      const data = remap(e.data);
+      if (JSON.stringify(data) !== JSON.stringify(e.data)) changes.push(C.entryChange({ ...e, data }));
+    }
+  }
+  let touched = false;
+  for (const r of M.rows) {
+    if (r.gone) { if (r.e) { changes.push(C.entryDelete(r.e.uid)); } continue; }
+    const data = m.kind === "table" ? remap(clean(r.data)) : (r.e?.data || {});
+    const entry = { ...(r.e || {}), measure_id: m.uid, week_id: S.week, variety_id: r.variety_id || null, caption: r.caption, data };
+    if (!r.e) { if (C.entryFilled(entry)) { changes.push(C.entryChange(entry)); touched = true; } continue; }
+    const same = (r.e.variety_id || "") === (r.variety_id || "") && (r.e.caption || "") === r.caption.trim()
+      && JSON.stringify(m.kind === "table" ? clean(r.e.data) : r.e.data || {}) === JSON.stringify(data);
+    if (!same) { changes.push(C.entryChange(entry)); touched = true; }
+  }
+  if (touched) changes.unshift(...C.weekChange(S.state, S.week));
+  return changes;
+}
+
+async function saveMeasure(ev) {
+  ev.preventDefault();
+  let changes;
+  try { changes = measureChanges(); } catch (e) { $("mmsg").textContent = e.message; return; }
+  if (!changes.length) { $("measure").close(); return; }
+  $("msave").disabled = true;
+  try {
+    await send(changes);
+    $("measure").close();
+    render();
+  } catch (e) {
+    $("mmsg").textContent = `No se pudo guardar: ${e.message}`;
+  } finally { $("msave").disabled = false; }
 }
 
 // ================================================================== matriz y plano
@@ -565,6 +830,7 @@ function renderReports() {
   fill($("rweek"), [...weeks].reverse().map((w) => [w, `${C.weekTitle(w)} · ${C.weekLabel(w)}`]));
   if (weeks.includes(S.week) && !$("rweek").dataset.touched) $("rweek").value = S.week;
   fill($("rmonth"), [...new Set(weeks.map((w) => w.slice(0, 7)))].map((m) => [m, `${C.MESES[Number(m.slice(5)) - 1]} ${m.slice(0, 4)}`]));
+  $("rtrt").hidden = !C.treatments(S.state).length;
   fill($("rvar"), C.varieties(S.state).map((v) => [v.uid, C.unitMain(v) + (C.unitPlace(v) ? ` · ${C.unitPlace(v)}` : "")]));
 }
 
@@ -583,7 +849,7 @@ async function runReport(kind) {
         `Reporte mensual · ${C.MESES[Number(m.slice(5)) - 1]} ${m.slice(0, 4)}`, true);
     } else if (kind === "variety") {
       await rep.variety(C.varieties(S.state).find((v) => v.uid === $("rvar").value), season);
-    }
+    } else if (kind === "treatments") await rep.treatments(season);
     $("rmsg").textContent = "Informe listo (pestaña nueva).";
   } catch (e) {
     $("rmsg").textContent = e.message;
@@ -639,6 +905,8 @@ async function boot() {
   $("next").onclick = () => shift(7);
   $("today").onclick = () => { S.week = C.iso(C.mondayOf(C.todayUTC())); render(); };
   $("dsave").onclick = saveDetail;
+  $("msave").onclick = saveMeasure;
+  $("ncreate").onclick = createMeasure;
   $("dfiles").onchange = async (e) => {
     const files = [...e.target.files];
     e.target.value = "";

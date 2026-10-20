@@ -1,6 +1,7 @@
 // PhenoRubus Web · informes (mismo diseño que los de la app: templates/*.html + report.css).
 // Cada informe se abre en una pestaña nueva con «Imprimir / Guardar PDF».
 import * as C from "./core.js";
+import * as ST from "./stats.js";
 
 const esc = (t) => String(t ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 const wkShort = (w) => `S${C.isoWeek(C.parseDate(w))[0]}`;
@@ -56,6 +57,11 @@ ${content}
 
   // ------------------------------------------------------------ gráfico semana × BBCH
   function chart(heat, weeks, onlyUid = null) {
+    const rowsSel = onlyUid ? heat.filter((r) => r.variety.uid === onlyUid) : heat;
+    return chartSeries(rowsSel.map((r) => ({ name: C.unitMain(r.variety), pts: r.pts.map(([i, c]) => [i, C.bbchValue(c)]) })), weeks);
+  }
+
+  function chartSeries(series, weeks) {
     const W = 900, H = 320, L = 44, R = 130, T = 14, B = 34;
     const x = (i) => L + (weeks.length < 2 ? 0 : (i * (W - L - R)) / (weeks.length - 1));
     const y = (v) => T + (H - T - B) * (1 - v / 99);
@@ -64,16 +70,15 @@ ${content}
     const step = Math.max(1, Math.ceil(weeks.length / 12));
     weeks.forEach((w, i) => { if (i % step === 0) g += `<text class="tick" x="${x(i)}" y="${H - 12}" text-anchor="middle">${wkShort(w)}</text>`; });
     const colors = ["#2a78d6", "#eb6834", "#1baf7a", "#eda100", "#9c3350", "#5b6b3a", "#3e4a56", "#7a5ab8"];
-    const rowsSel = onlyUid ? heat.filter((r) => r.variety.uid === onlyUid) : heat;
     const labels = [];
-    rowsSel.forEach((r, k) => {
+    series.forEach((r, k) => {
       if (!r.pts.length) return;
       const col = colors[k % colors.length];
-      const d = r.pts.map(([i, c], j) => `${j ? "L" : "M"}${x(i).toFixed(1)},${y(C.bbchValue(c)).toFixed(1)}`).join("");
+      const d = r.pts.map(([i, v], j) => `${j ? "L" : "M"}${x(i).toFixed(1)},${y(v).toFixed(1)}`).join("");
       g += `<path d="${d}" fill="none" stroke="${col}" stroke-width="2.2" stroke-linejoin="round"/>`;
-      for (const [i, c] of r.pts) g += `<circle cx="${x(i)}" cy="${y(C.bbchValue(c))}" r="3.2" fill="${col}"><title>${esc(C.unitMain(r.variety))} · ${wkShort(weeks[i])} · BBCH ${C.codeStr(c)}</title></circle>`;
-      const [li, lc] = r.pts[r.pts.length - 1];
-      labels.push({ x: x(li) + 6, y: y(C.bbchValue(lc)) + 4, col, t: esc(C.unitMain(r.variety)).slice(0, 20) });
+      for (const [i, v] of r.pts) g += `<circle cx="${x(i)}" cy="${y(v)}" r="3.2" fill="${col}"><title>${esc(r.name)} · ${wkShort(weeks[i])} · BBCH ${C.numEs(v)}</title></circle>`;
+      const [li, lv] = r.pts[r.pts.length - 1];
+      labels.push({ x: x(li) + 6, y: y(lv) + 4, col, t: esc(r.name).slice(0, 20) });
     });
     labels.sort((a, b) => a.y - b.y);                // sin encimarse: se separan hacia abajo
     for (let i = 1; i < labels.length; i++) labels[i].y = Math.max(labels[i].y, labels[i - 1].y + 13);
@@ -117,9 +122,154 @@ ${content}
         <div>${chip(c.code)}</div>${c.obs?.notes ? `<div class="notes">${esc(c.obs.notes)}</div>` : ""}</article>`;
     }
     html += "</div>";
+    html += await measuresBlock(week);
     const photos = need.length;
     await open(`Reporte semanal · ${C.weekTitle(week)}`, `${C.weekLabel(week)} · ${C.weekRange(week)} · ${C.seasonTitle(C.seasonOf(C.parseDate(week)))}`,
       [`${done}/${cards.length} con estado BBCH`, `${photos} fotos`], html);
+  }
+
+  async function measuresBlock(week) {
+    const vs = new Map(C.rows(ctx.state, "varieties").map((v) => [v.uid, v]));
+    let html = "";
+    for (const m of C.measures(ctx.state)) {
+      const es = C.entriesFor(ctx.state, m.uid, week).filter(C.entryFilled);
+      if (!es.length) continue;
+      html += `<h3 class="measure">${esc(m.name)}</h3>`;
+      if (m.kind === "table") {
+        html += `<div class="scroll-x"><table><thead><tr><th>#</th><th>Variedad / sector</th>${m.columns.map((c) => `<th>${esc(c)}</th>`).join("")}</tr></thead><tbody>`;
+        es.forEach((e, i) => { const v = vs.get(e.variety_id); html += `<tr><td class="muted">${i + 1}</td><td>${v ? vname(v) : "—"}</td>${m.columns.map((c) => `<td>${esc(e.data[c] ?? "")}</td>`).join("")}</tr>`; });
+        html += "</tbody></table></div>";
+      } else {
+        const u = await urls(es.map((e) => e.path).filter(Boolean));
+        html += `<div class="attach">${es.map((e) => { const v = vs.get(e.variety_id);
+          return `<figure>${u.get(e.path) ? `<img src="${u.get(e.path)}" alt="">` : `<div class="nophoto">sin foto</div>`}<figcaption>${esc(e.caption || "")}${v ? `<span class="muted">${esc(C.unitMain(v))}</span>` : ""}</figcaption></figure>`; }).join("")}</div>`;
+      }
+    }
+    return html ? `<h2>Mediciones de la semana</h2>${html}` : "";
+  }
+
+  // ------------------------------------------------------------ 4. tratamientos (= reporter.treatments)
+  async function treatments(season) {
+    const trts = C.treatments(ctx.state);
+    if (trts.length < 1) throw new Error("Este ensayo no tiene tratamientos ni parcelas (se definen en la app: Ajustes › Parcelas).");
+    const parcels = trts.flatMap((t) => t.parcels);
+    const where = new Map(parcels.map((p) => [p.uid, [Number(p.treatment), Number(p.rep)]]));
+    let weeks = C.seasonWeeks(ctx.state, season);
+    const bbchAt = (p, w) => { const o = C.observationFor(ctx.state, p.uid, w); return o && o.bbch_code != null ? C.bbchValue(o.bbch_code) : null; };
+    const tables = C.measures(ctx.state).filter((m) => m.kind === "table");
+    const mEntries = tables.map((m) => ({ m, es: C.entriesFor(ctx.state, m.uid).filter((e) => where.has(e.variety_id) && C.seasonOf(C.parseDate(e.week_id)) === season) }));
+    const used = weeks.filter((w) => parcels.some((p) => bbchAt(p, w) !== null) || mEntries.some(({ es }) => es.some((e) => e.week_id === w)));
+    if (used.length) weeks = weeks.filter((w) => w >= used[0] && w <= used[used.length - 1]);
+    if (!weeks.length) throw new Error("No hay semanas con registros de las parcelas en esa temporada.");
+    const fmtP = (a) => !a ? "—" : (a.p < 0.001 ? "< 0,001" : C.numEs(a.p, 3)) + ` ${a.stars}`;
+    const rowsT = trts.map((t) => ({ t, cells: [], pts: [] }));
+    const tests = [];
+    weeks.forEach((w, i) => {
+      const data = new Map();
+      for (const p of parcels) { const v = bbchAt(p, w); if (v !== null) data.set(`${p.treatment}|${p.rep}`, v); }
+      const a = ST.anova(data);
+      for (const r of rowsT) {
+        const vals = r.t.parcels.map((p) => data.get(`${r.t.num}|${p.rep}`)).filter((v) => v !== undefined);
+        const [m] = ST.meanSe(vals);
+        r.cells.push({ mean: m, n: vals.length, of: r.t.parcels.length, letter: (a?.letters || {})[r.t.num] || "" });
+        if (m !== null) r.pts.push([i, Math.round(m * 100) / 100]);
+      }
+      if (a) tests.push({ w, f: Number.isFinite(a.f) && a.f < 1000 ? C.numEs(a.f, 2) : "> 999", p: fmtP(a), df: `${a.df[0]}; ${a.df[1]}`,
+        cv: a.cv !== null ? C.numEs(a.cv) + " %" : "—", lsd: a.lsd !== null ? C.numEs(a.lsd, 2) : "—" });
+    });
+    let html = `<h2>Tratamientos</h2><div class="scroll-x"><table><thead><tr><th>Tratamiento</th><th>Variedad</th><th>Descripción</th><th>Parcelas</th></tr></thead><tbody>`;
+    for (const t of trts) html += `<tr><td><strong>${esc(t.label)}</strong></td><td>${esc(t.cultivar || "—")}</td><td>${esc(t.description || "—")}</td><td class="mono small">${t.parcels.map((p) => esc(p.name)).join(", ")}</td></tr>`;
+    html += `</tbody></table></div><h2>Estado BBCH medio por tratamiento</h2><p class="lead">Promedio de las repeticiones en cada semana. Letras distintas = diferencias significativas (LSD de Fisher, p &lt; 0,05), solo en las semanas en que el ANOVA es significativo.</p>
+      <div class="scroll-x"><table class="heat"><thead><tr><th class="name">Tratamiento</th>${weeks.map((w) => `<th class="w">${wkShort(w)}</th>`).join("")}</tr></thead><tbody>`;
+    for (const r of rowsT) {
+      html += `<tr><td class="name">${esc(r.t.label)}</td>`;
+      for (const c of r.cells) {
+        if (c.mean === null) { html += `<td class="c na">·</td>`; continue; }
+        const [bg, fg] = C.seqColor(Math.round(c.mean));
+        html += `<td class="c" style="background:${bg};color:${fg}" title="${c.n}/${c.of} repeticiones">${C.numEs(c.mean)}${c.letter ? ` <sup>${c.letter}</sup>` : ""}</td>`;
+      }
+      html += "</tr>";
+    }
+    html += `</tbody></table></div><h2>Evolución BBCH por tratamiento</h2>${chartSeries(rowsT.map((r) => ({ name: r.t.label, pts: r.pts })), weeks)}
+      <p class="muted small">Cada línea: promedio de las repeticiones del tratamiento.</p>
+      <h2>ANOVA por semana</h2><p class="lead">Bloques completos al azar (repetición = bloque); si faltan parcelas, ANOVA de un factor. ns = sin diferencias; * p &lt; 0,05; ** p &lt; 0,01; *** p &lt; 0,001.</p>
+      <div class="scroll-x"><table><thead><tr><th>Semana</th><th>F</th><th>gl</th><th>p</th><th>CV</th><th>LSD 5 %</th></tr></thead><tbody>`;
+    for (const a of tests) html += `<tr><td>${esc(C.weekTitle(a.w))}</td><td>${a.f}</td><td>${a.df}</td><td><strong>${a.p}</strong></td><td>${a.cv}</td><td>${a.lsd}</td></tr>`;
+    if (!tests.length) html += `<tr><td colspan="6" class="muted">Se necesitan al menos dos tratamientos con repeticiones registradas en una misma semana.</td></tr>`;
+    html += "</tbody></table></div>";
+    // Precocidad
+    const wm = weeks.map((_, i) => { const ms = rowsT.map((r) => r.cells[i].mean).filter((m) => m !== null); return ms.length >= 2 ? ms.reduce((a, b) => a + b, 0) / ms.length : null; });
+    for (const r of rowsT) {
+      const ds = wm.map((m, i) => (m !== null && r.cells[i].mean !== null ? r.cells[i].mean - m : null)).filter((d) => d !== null);
+      r.delta = ds.length ? Math.round((ds.reduce((a, b) => a + b, 0) / ds.length) * 10) / 10 + 0 : null;
+      const last = [...r.cells].reverse().find((c) => c.mean !== null);
+      r.last = last ? C.numEs(last.mean) : "—";
+    }
+    const ranking = rowsT.filter((r) => r.delta !== null).sort((a, b) => b.delta - a.delta);
+    const maxAbs = Math.max(1, ...ranking.map((r) => Math.abs(r.delta)));
+    html += `<h2>Precocidad relativa</h2><p class="lead">Diferencia media, en unidades BBCH, entre cada tratamiento y el promedio de todos los tratamientos en las mismas semanas.</p>
+      <div class="scroll-x"><table><thead><tr><th>#</th><th>Tratamiento</th><th>Δ BBCH vs. promedio</th><th>Último BBCH medio</th></tr></thead><tbody>`;
+    ranking.forEach((r, i) => {
+      const pct = (Math.abs(r.delta) / maxAbs) * 50;
+      const fill = r.delta >= 0 ? `left:50%;width:${pct}%;background:var(--pos)` : `right:50%;width:${pct}%;background:var(--neg)`;
+      html += `<tr><td class="muted">${i + 1}</td><td><strong>${esc(r.t.label)}</strong></td><td><div class="delta"><div class="track"><span class="mid"></span><span class="fill" style="${fill}"></span></div><span class="val">${r.delta >= 0 ? "+" : ""}${r.delta.toFixed(1)}</span></div></td><td>${r.last}</td></tr>`;
+    });
+    if (!ranking.length) html += `<tr><td colspan="4" class="muted">Sin datos suficientes.</td></tr>`;
+    html += "</tbody></table></div>";
+    // Hitos
+    const ms = [];
+    for (const [code, name] of C.MILESTONES) {
+      const target = C.bbchValue(code), hit = new Map();
+      for (const p of parcels) {
+        const wk = weeks.find((w) => { const v = bbchAt(p, w); return v !== null && v >= target; });
+        if (wk) hit.set(`${p.treatment}|${p.rep}`, C.isoWeek(C.parseDate(wk))[0]);
+      }
+      if (!hit.size) continue;
+      const a = ST.anova(hit);
+      ms.push({ code, name, p: fmtP(a), cells: trts.map((t) => {
+        const vals = t.parcels.map((p) => hit.get(`${t.num}|${p.rep}`)).filter((v) => v !== undefined);
+        const [m] = ST.meanSe(vals);
+        return { text: m === null ? "—" : `S${C.numEs(m)}` + (a && Object.keys(a.letters).length ? ` ${a.letters[t.num] || ""}` : ""), n: `${vals.length}/${t.parcels.length}` };
+      }) });
+    }
+    if (ms.length) {
+      html += `<h2>Hitos fenológicos</h2><p class="lead">Semana del año (promedio de las repeticiones) en que cada tratamiento alcanzó el estado; entre paréntesis, cuántas repeticiones lo alcanzaron.</p>
+        <div class="scroll-x"><table><thead><tr><th>Hito</th>${trts.map((t) => `<th>${esc(t.label)}</th>`).join("")}<th>p</th></tr></thead><tbody>`;
+      for (const m of ms) html += `<tr><td><strong>${esc(m.name)}</strong> <span class="mono small">≥${C.codeStr(m.code)}</span></td>${m.cells.map((c) => `<td>${c.text} <span class="muted small">(${c.n})</span></td>`).join("")}<td>${m.p}</td></tr>`;
+      html += "</tbody></table></div>";
+    }
+    // Mediciones numéricas
+    for (const { m, es } of mEntries) {
+      const cols = [];
+      for (const e of es) for (const [k, v] of Object.entries(e.data)) if (!cols.includes(k) && C.asNumber(v) !== null) cols.push(k);
+      if (!cols.length) continue;
+      let block = "";
+      for (const w of weeks) {
+        const ew = es.filter((e) => e.week_id === w);
+        if (!ew.length) continue;
+        const trows = Object.fromEntries(trts.map((t) => [t.num, []])), pRow = [];
+        for (const col of cols) {
+          const per = new Map();
+          for (const e of ew) { const v = C.asNumber(e.data[col]); if (v !== null) { const k = where.get(e.variety_id).join("|"); per.set(k, [...(per.get(k) || []), v]); } }
+          const data = new Map([...per].map(([k, v]) => [k, v.reduce((a, b) => a + b, 0) / v.length]));
+          const a = ST.anova(data);
+          pRow.push(fmtP(a));
+          for (const t of trts) {
+            const [mm, se] = ST.meanSe([...data].filter(([k]) => Number(k.split("|")[0]) === t.num).map(([, v]) => v));
+            trows[t.num].push(mm === null ? "—" : C.numEs(mm, 2) + (se !== null ? ` ± ${C.numEs(se, 2)}` : "") + (a && Object.keys(a.letters).length ? ` ${a.letters[t.num] || ""}` : ""));
+          }
+        }
+        block += `<h3 style="margin:14px 0 6px">${esc(C.weekTitle(w))}</h3><div class="scroll-x"><table><thead><tr><th>Tratamiento</th>${cols.map((c) => `<th>${esc(c)}</th>`).join("")}</tr></thead><tbody>
+          ${trts.map((t) => `<tr><td><strong>${esc(t.label)}</strong></td>${trows[t.num].map((v) => `<td>${v}</td>`).join("")}</tr>`).join("")}
+          <tr><td class="muted">p (ANOVA)</td>${pRow.map((p) => `<td class="muted">${p}</td>`).join("")}</tr></tbody></table></div>`;
+      }
+      if (block) html += `<h2>${esc(m.name)}</h2><p class="lead">Promedio ± error estándar de las repeticiones (las submuestras de una parcela se promedian primero).</p>${block}`;
+    }
+    const heat = C.matrix(ctx.state, weeks).filter((r) => where.has(r.variety.uid));
+    html += `<h2>Detalle por parcela</h2><p class="lead">Código BBCH registrado en cada parcela (T = tratamiento, R = repetición).</p>${heatTable(heat, weeks)}`;
+    const nr = Math.max(...trts.map((t) => t.parcels.length));
+    await open("Comparación de tratamientos", `${trts.length} tratamientos × ${nr} repeticiones · ${C.seasonTitle(season)} · Semanas ${wkShort(weeks[0]).slice(1)}–${wkShort(weeks[weeks.length - 1]).slice(1)}`,
+      [`${trts.length} tratamientos`, `${nr} repeticiones`, `${weeks.length} semanas`], html);
   }
 
   // ------------------------------------------------------------ 2. matriz / período
@@ -187,5 +337,5 @@ ${content}
       [`${items.length} semanas con registro`, `${need.length} fotos`], html);
   }
 
-  return { weekly, matrix, variety, heatTable, chip };
+  return { weekly, matrix, variety, treatments, heatTable, chip };
 }
