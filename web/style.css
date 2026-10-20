@@ -150,3 +150,7 @@ table.hm td.c.na { color: #c4c9c0; font-weight: 400; background: #f6f7f3; }
 .mgrid th .hcol input { flex: 1; }
 .reports .btns { display: flex; gap: 8px; }
 #relogin { background: var(--berry); border-color: var(--berry); }
+.profiles { display: flex; gap: 8px; margin-bottom: 10px; }
+.profiles button { flex: 1; border: 2px solid var(--leaf-soft); border-radius: 14px; padding: 10px; background: #fff;
+  font-weight: 700; color: var(--leaf-dark); cursor: pointer; }
+.profiles button.on { border-color: var(--leaf-dark); background: var(--leaf-dark); color: #fff; }

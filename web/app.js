@@ -182,6 +182,8 @@ async function loadWorkspaces() {
 async function openCached(code) {
   S.ws = S.workspaces.find((w) => w.code === code) || S.workspaces[0];
   store.set("pr_ws", S.ws.code);
+  store.set(`pr_ws_${profileOf(S.ws)}`, S.ws.code);
+  fillWorkspaces();
   S.state = C.emptyState();
   S.bundles = [];
   S.photoIds.clear();
@@ -1015,16 +1017,46 @@ async function start() {
   render();
 }
 
+// I+D y Predio separados (como el menú de la app): botones arriba y la lista solo del perfil.
+const PROFILE_TABS = [["id", "I+D · Ensayos"], ["predio", "Predios"], ["", "Otros"]];
+const profileOf = (w) => (PROFILES[w.profile] ? w.profile : "");
+
 function fillWorkspaces() {
+  const profs = PROFILE_TABS.filter(([p]) => S.workspaces.some((w) => profileOf(w) === p));
+  const saved = S.workspaces.find((w) => w.code === store.get("pr_ws"));
+  const cur = S.ws ? profileOf(S.ws) : saved ? profileOf(saved) : store.get("pr_prof");
+  const prof = profs.some(([p]) => p === cur) ? cur : profs[0]?.[0] ?? "";
+  store.set("pr_prof", prof);
+  const seg = $("profiles");
+  seg.innerHTML = "";
+  seg.hidden = profs.length < 2;
+  for (const [p, label] of profs) {
+    const b = document.createElement("button");
+    b.textContent = `${label} (${S.workspaces.filter((w) => profileOf(w) === p).length})`;
+    b.className = p === prof ? "on" : "";
+    b.onclick = () => { if (p !== prof) switchProfile(p); };
+    seg.appendChild(b);
+  }
+  const mine = S.workspaces.filter((w) => profileOf(w) === prof);
   const sel = $("ws");
-  const keep = S.ws?.code || store.get("pr_ws");
+  const keep = S.ws?.code || store.get(`pr_ws_${prof}`) || store.get("pr_ws");
   sel.innerHTML = "";
-  for (const w of S.workspaces) {
+  for (const w of mine) {
     const o = document.createElement("option");
-    o.value = w.code; o.textContent = `${PROFILES[w.profile] ? PROFILES[w.profile] + " · " : ""}${w.name} (${w.code})`;
+    o.value = w.code; o.textContent = `${w.name} (${w.code})`;
     sel.appendChild(o);
   }
-  sel.value = S.workspaces.some((w) => w.code === keep) ? keep : S.workspaces[0]?.code;
+  sel.value = mine.some((w) => w.code === keep) ? keep : mine[0]?.code;
+}
+
+function openWs(code) {
+  return (S.sync ? loadWorkspace(code) : openCached(code)).then(render).catch((er) => status(er.message));
+}
+
+function switchProfile(p) {                // al último ensayo/predio usado en ese perfil
+  const mine = S.workspaces.filter((w) => profileOf(w) === p);
+  const last = store.get(`pr_ws_${p}`);
+  openWs((mine.find((w) => w.code === last) || mine[0]).code);
 }
 
 async function boot() {
@@ -1042,8 +1074,7 @@ async function boot() {
     idb.then((db) => { db?.close(); indexedDB.deleteDatabase("phenorubus"); }).finally(() => location.reload());   // en un PC compartido no quedan datos
   };
   $("sync").onclick = () => pull().then(render).catch((e) => status(e.message));
-  $("ws").onchange = (e) => (S.sync ? loadWorkspace(e.target.value) : openCached(e.target.value))
-    .then(render).catch((er) => status(er.message));
+  $("ws").onchange = (e) => openWs(e.target.value);
   document.querySelectorAll(".tabs button").forEach((b) => (b.onclick = () => {
     S.tab = b.dataset.tab;
     document.querySelectorAll(".tabs button").forEach((x) => x.classList.toggle("on", x === b));
