@@ -51,6 +51,15 @@
             size: self.size
             radius: self.radius
 
+# Opción de menú desplegable con ícono de color, título y detalle (menú de Drive).
+<IconMenuItem@TwoLineIconListItem>:
+    icon: ""
+    icon_color: c(theme.LEAF_DARK)
+    IconLeftWidget:
+        icon: root.icon
+        theme_text_color: "Custom"
+        text_color: root.icon_color
+
 <PickRow>:
     orientation: "horizontal"
     size_hint_y: None

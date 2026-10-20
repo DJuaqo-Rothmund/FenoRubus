@@ -125,8 +125,8 @@ class SegButton(PillButton):
     pass
 
 
-def open_menu2(caller, items: list[tuple[str, str, callable]], width: float = dp(320)):
-    """Menú desplegable con título y una línea de detalle por opción."""
+def open_menu2(caller, items: list[tuple[str, str, str, str, callable]], width: float = dp(344)):
+    """Menú desplegable: (ícono, color, título, detalle, acción) por opción."""
     from kivy.core.window import Window
     menu = None
 
@@ -138,8 +138,9 @@ def open_menu2(caller, items: list[tuple[str, str, callable]], width: float = dp
 
     menu = MDDropdownMenu(
         caller=caller, width=min(width, Window.width - dp(16)), max_height=dp(400),
-        items=[{"viewclass": "TwoLineListItem", "text": t, "secondary_text": sub, "height": dp(72),
-                "on_release": make(cb)} for t, sub, cb in items])
+        items=[{"viewclass": "IconMenuItem", "icon": ic, "icon_color": c(col), "text": t,
+                "secondary_text": sub, "height": dp(72), "on_release": make(cb)}
+               for ic, col, t, sub, cb in items])
     menu.open()
     return menu
 
@@ -663,10 +664,11 @@ class HomeScreen(MDScreen):
         last = (a.workspaces.shared.get_setting("sync_last") or "").split(" · ")[0]
         open_menu2(self._action([theme.DRIVE_UP, theme.DRIVE_OK, theme.DRIVE_OFF] + theme.DRIVE_SPIN)
                    or self.ids.bar, [
-            ("Subir respaldo", f"Fotos a Drive · {backup}", self.drive_backup_now),
-            ("Sincronizar", f"PC, web y teléfonos · {last}" if last else "PC, web y otros teléfonos",
-             self.drive_sync_now),
-            ("Ajustes de Drive", "Cuenta y solo Wi-Fi", a.open_settings),
+            ("cloud-upload-outline" if st["pending"] or st["errors"] else "cloud-check-outline",
+             theme.BERRY, "Subir respaldo", f"Fotos a Drive · {backup}", self.drive_backup_now),
+            ("sync", theme.LEAF, "Sincronizar",
+             f"PC y web · {last}" if last else "Con PC, web y otros teléfonos", self.drive_sync_now),
+            ("cog-outline", theme.MUTED, "Ajustes de Drive", "Cuenta y solo Wi-Fi", a.open_settings),
         ])
 
     def drive_backup_now(self):
