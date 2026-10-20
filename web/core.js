@@ -349,6 +349,37 @@ export function weekChange(state, weekStart) {   // la semana, si aún no existe
     data: { season: seasonOf(parseDate(weekStart)), week_number: 0, start_date: weekStart, label: weekLabel(weekStart), skipped: 0 } }];
 }
 
+// ------------------------------------------------------------------ semanas
+export function weekRow(state, weekStart) {
+  return rows(state, "sampling_weeks").find((w) => (w.start_date || w.uid) === weekStart) || null;
+}
+// «No muestreada» (= Database.set_week_skipped): fuera de los informes, sin borrar datos.
+export function weekSkipChanges(state, weekStart, skipped) {
+  const w = weekRow(state, weekStart);
+  if (!w) return weekChange(state, weekStart).map((c) => ({ ...c, data: { ...c.data, skipped: skipped ? 1 : 0 } }));
+  const { uid, ...data } = w;
+  return [{ entity: "sampling_weeks", uid, ts: nowTs(), deleted: 0, data: { ...data, skipped: skipped ? 1 : 0 } }];
+}
+// Vaciar la semana: registros (BBCH/notas), sus fotos y los datos de mediciones de esa semana.
+export function weekClearChanges(state, weekStart) {
+  const ts = nowTs();
+  const obs = rows(state, "observations").filter((o) => o.week_id === weekStart);
+  const ids = new Set(obs.map((o) => o.uid));
+  const photos = rows(state, "photos").filter((p) => ids.has(p.observation_id));
+  const entries = rows(state, "measure_entries").filter((e) => e.week_id === weekStart);
+  const del = (entity) => (r) => ({ entity, uid: r.uid, ts, deleted: 1 });
+  return { observations: obs.filter((o) => hasData(state, o)).length, photos: photos.length, entries: entries.length,
+    changes: [...photos.map(del("photos")), ...entries.map(del("measure_entries")), ...obs.map(del("observations"))] };
+}
+// Basurero de una medición (= delete_measure_dialog): lo de una semana o la medición completa.
+export function measureDeleteChanges(state, measureUid, weekStart = null) {
+  const ts = nowTs();
+  const changes = rows(state, "measure_entries").filter((e) => e.measure_id === measureUid && (!weekStart || e.week_id === weekStart))
+    .map((e) => ({ entity: "measure_entries", uid: e.uid, ts, deleted: 1 }));
+  if (!weekStart) changes.push({ entity: "measures", uid: measureUid, ts, deleted: 1 });
+  return changes;
+}
+
 // ------------------------------------------------------------------ tratamientos
 export function treatments(state) {
   const vs = varieties(state).filter((v) => v.treatment);

@@ -404,8 +404,33 @@ function render() {
   renderSampling();
 }
 
+async function setSkipped(on) {
+  try {
+    await send(C.weekSkipChanges(S.state, S.week, on));
+    status(on ? `${C.weekTitle(S.week)} marcada como no muestreada: no aparecerá en los informes`
+      : `${C.weekTitle(S.week)} vuelve a incluirse en los informes`);
+    render();
+  } catch (e) { status(`No se pudo guardar: ${e.message}`); $("skipweek").checked = !on; }
+}
+
+async function clearWeek() {
+  const r = C.weekClearChanges(S.state, S.week);
+  if (!r.changes.length) { status(`${C.weekTitle(S.week)} no tiene registros.`); return; }
+  const parts = [r.observations && `${r.observations} registro(s) BBCH/notas`, r.photos && `${r.photos} foto(s)`,
+    r.entries && `${r.entries} dato(s) de mediciones`].filter(Boolean).join(", ");
+  if (!confirm(`¿Vaciar ${C.weekTitle(S.week)} (${C.weekLabel(S.week)})?\n\nSe borrarán ${parts || "los registros vacíos"}.\n` +
+    "También se borran en el celular al sincronizar. Los archivos de fotos quedan en Drive.\n\nEsto no se puede deshacer.")) return;
+  try { await send(r.changes); status(`${C.weekTitle(S.week)} vaciada.`); render(); }
+  catch (e) { status(`No se pudo vaciar: ${e.message}`); }
+}
+
 function renderSampling() {
   renderWeek();
+  const wk = C.weekRow(S.state, S.week);
+  const skipped = !!wk?.skipped;
+  $("skipweek").checked = skipped;
+  if (skipped) $("kicker").textContent += " · NO MUESTREADA";
+  $("rows").classList.toggle("faded", skipped);
   const vs = C.varieties(S.state);
   const box = $("rows");
   box.innerHTML = "";
@@ -436,7 +461,7 @@ function renderSampling() {
     }).catch(() => {});
   }
   $("pbar").style.width = vs.length ? `${(100 * done) / vs.length}%` : "0";
-  $("ptext").textContent = `${done}/${vs.length} completas`;
+  $("ptext").textContent = skipped ? "omitida" : `${done}/${vs.length} completas`;
   renderMeasures();
 }
 
@@ -655,6 +680,7 @@ function openMeasure(uid) {
   $("mweek").textContent = `${C.weekTitle(S.week)} · ${C.weekLabel(S.week)}`;
   $("mmsg").textContent = "";
   renderMeasureBody();
+  $("mdelweek").hidden = !entries.length;
   if (!$("measure").open) $("measure").showModal();
 }
 
@@ -837,6 +863,20 @@ function measureChanges() {
   }
   if (touched) changes.unshift(...C.weekChange(S.state, S.week));
   return changes;
+}
+
+async function deleteMeasure(all) {
+  const m = S.meas.m;
+  const nWeek = C.entriesFor(S.state, m.uid, S.week).length, nAll = C.entriesFor(S.state, m.uid).length;
+  const text = all ? `¿Eliminar la medición «${m.name}» y sus ${nAll} registro(s) de todas las semanas?`
+    : `¿Borrar los ${nWeek} registro(s) de «${m.name}» de ${C.weekTitle(S.week)}? La medición sigue para las demás semanas.`;
+  if (!confirm(text + "\n\nTambién se borra en el celular al sincronizar. Las fotos quedan en Drive.")) return;
+  try {
+    await send(C.measureDeleteChanges(S.state, m.uid, all ? null : S.week));
+    $("measure").close();
+    status(all ? `Medición «${m.name}» eliminada` : `«${m.name}»: ${nWeek} registro(s) de esta semana eliminados`);
+    render();
+  } catch (e) { $("mmsg").textContent = `No se pudo eliminar: ${e.message}`; }
 }
 
 async function saveMeasure(ev) {
@@ -1154,6 +1194,10 @@ async function boot() {
   $("today").onclick = () => { S.week = C.iso(C.mondayOf(C.todayUTC())); render(); };
   $("dsave").onclick = saveDetail;
   $("msave").onclick = saveMeasure;
+  $("mdelweek").onclick = () => deleteMeasure(false);
+  $("mdelall").onclick = () => deleteMeasure(true);
+  $("skipweek").onchange = (e) => setSkipped(e.target.checked);
+  $("clearweek").onclick = clearWeek;
   $("ncreate").onclick = createMeasure;
   $("dseldel").onclick = () => deletePhotos([...S.photoSel]);
   $("dselnone").onclick = () => { S.photoSel.clear(); renderPhotos(S.current); };

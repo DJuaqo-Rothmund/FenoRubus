@@ -56,6 +56,12 @@
         <span id="ptext" class="muted small"></span>
         <button id="today" class="link">Ir a la semana actual</button>
       </div>
+      <div class="weektools">
+        <label class="skip" title="Se excluye de los informes de período, por variedad y matriz (los datos no se borran)">
+          <input type="checkbox" id="skipweek"> No muestreada</label>
+        <span class="spacer"></span>
+        <button id="clearweek" class="ghost danger-ghost" title="Borra los registros, fotos y mediciones de esta semana">🗑 Vaciar semana</button>
+      </div>
     </section>
     <div class="label" id="listlabel">VARIEDADES · TOQUE PARA REGISTRAR</div>
     <section id="rows" class="rows"></section>
@@ -165,6 +171,9 @@
       <div id="mbody"></div>
       <p id="mmsg" class="muted small"></p>
       <div class="actions">
+        <button type="button" id="mdelweek" class="ghost danger-ghost">Borrar lo de esta semana</button>
+        <button type="button" id="mdelall" class="ghost danger-ghost">Eliminar medición</button>
+        <span class="spacer"></span>
         <button value="cancel" class="ghost">Cancelar</button>
         <button id="msave" value="default" class="primary">Guardar</button>
       </div>

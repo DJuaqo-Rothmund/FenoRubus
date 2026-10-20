@@ -179,3 +179,11 @@ table.hm td.c.na { color: #c4c9c0; font-weight: 400; background: #f6f7f3; }
 .selbar { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; background: var(--berry-soft); border-radius: 12px;
   padding: 8px 10px; font-weight: 600; color: var(--berry-dark); }
 .danger { background: var(--berry); color: #fff; border: 0; border-radius: 999px; padding: 6px 14px; font-weight: 600; cursor: pointer; }
+.weektools { grid-column: 1 / -1; display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+  border-top: 1px solid var(--line); padding-top: 10px; }
+.skip { display: flex; align-items: center; gap: 6px; font-weight: 600; font-size: 14px; color: var(--leaf-dark); cursor: pointer; }
+.skip input { width: 18px; height: 18px; accent-color: var(--berry); }
+.danger-ghost { color: var(--berry); border-color: var(--berry-soft); font-weight: 600; }
+.danger-ghost:hover { background: var(--berry-soft); }
+.rows.faded { opacity: .45; }
+#measure .actions { flex-wrap: wrap; }
