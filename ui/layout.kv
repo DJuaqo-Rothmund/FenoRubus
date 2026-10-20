@@ -51,14 +51,71 @@
             size: self.size
             radius: self.radius
 
-# Opción de menú desplegable con ícono de color, título y detalle (menú de Drive).
-<IconMenuItem@TwoLineIconListItem>:
-    icon: ""
-    icon_color: c(theme.LEAF_DARK)
-    IconLeftWidget:
+# Acceso rápido a Drive: velo, burbujas translúcidas y etiquetas de estado.
+<DriveDial>:
+    canvas.before:
+        Color:
+            rgba: 0.08, 0.16, 0.12, .16
+        Rectangle:
+            pos: self.pos
+            size: self.size
+
+<DialBubble>:
+    size_hint: None, None
+    size: dp(56), dp(56)
+    canvas.before:
+        Color:
+            rgba: 0, 0, 0, .12
+        Ellipse:
+            pos: self.x, self.y - dp(3)
+            size: self.size
+        Color:
+            rgba: (1, 1, 1, .70) if self.state == "down" else (1, 1, 1, .86)
+        Ellipse:
+            pos: self.pos
+            size: self.size
+        Color:
+            rgba: 1, 1, 1, .95
+        Line:
+            ellipse: self.x, self.y, self.width, self.height
+            width: dp(1.2)
+    MDIcon:
         icon: root.icon
         theme_text_color: "Custom"
-        text_color: root.icon_color
+        text_color: root.color
+        font_size: dp(28)
+        halign: "center"
+        pos_hint: {"center_x": .5, "center_y": .5}
+    Label:
+        text: root.badge
+        opacity: 1 if root.badge else 0
+        font_size: dp(10)
+        bold: True
+        color: 1, 1, 1, 1
+        size_hint: None, None
+        size: max(dp(20), self.texture_size[0] + dp(8)), dp(20)
+        pos: root.right - self.width + dp(4), root.top - dp(16)
+        canvas.before:
+            Color:
+                rgba: c(theme.BERRY) if root.badge else (0, 0, 0, 0)
+            RoundedRectangle:
+                pos: self.pos
+                size: self.size
+                radius: [dp(10)]
+
+<DialPill>:
+    size_hint: None, None
+    size: self.texture_size[0] + dp(24), dp(30)
+    font_size: dp(12.5)
+    bold: True
+    color: c(theme.WARN) if self.warn else c(theme.LEAF_DARK)
+    canvas.before:
+        Color:
+            rgba: (1, 1, 1, .70) if self.state == "down" else (1, 1, 1, .86)
+        RoundedRectangle:
+            pos: self.pos
+            size: self.size
+            radius: [dp(15)]
 
 <PickRow>:
     orientation: "horizontal"

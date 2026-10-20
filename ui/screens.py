@@ -125,41 +125,72 @@ class SegButton(PillButton):
     pass
 
 
-def open_menu2(caller, items: list[tuple[str, str, str, str, callable]], width: float = dp(344)):
-    """Menú desplegable: (ícono, color, título, detalle, acción) por opción."""
-    from kivy.core.window import Window
-    menu = None
-
-    def make(cb):
-        def _run(*_):
-            menu.dismiss()
-            cb()
-        return _run
-
-    menu = MDDropdownMenu(
-        caller=caller, width=min(width, Window.width - dp(16)), max_height=dp(400),
-        items=[{"viewclass": "IconMenuItem", "icon": ic, "icon_color": c(col), "text": t,
-                "secondary_text": sub, "height": dp(72), "on_release": make(cb)}
-               for ic, col, t, sub, cb in items])
-    menu.open()
-    return menu
+class DialBubble(ButtonBehavior, FloatLayout):
+    """Botón redondo translúcido del acceso rápido a Drive (con globo de cantidad)."""
+    icon = StringProperty()
+    color = ColorProperty([0, 0, 0, 1])
+    badge = StringProperty("")
 
 
-def open_menu(caller, items: list[tuple[str, callable]], width_mult: int = 5):
-    menu = None
+class DialPill(ButtonBehavior, Label):
+    """Etiqueta de estado junto a cada burbuja (también se puede tocar)."""
+    warn = BooleanProperty(False)
 
-    def make(cb):
-        def _run(*_):
-            menu.dismiss()
-            cb()
-        return _run
 
-    menu = MDDropdownMenu(
-        caller=caller, width_mult=width_mult, max_height=dp(340),
-        items=[{"viewclass": "OneLineListItem", "text": t, "height": dp(48),
-                "on_release": make(cb)} for t, cb in items])
-    menu.open()
-    return menu
+class DriveDial(FloatLayout):
+    """Burbujas en cascada bajo el ícono de Drive: respaldo (cuánto falta) y sincronizar
+    (cuándo fue la última vez). Un toque fuera las cierra."""
+
+    def __init__(self, anchor, items, **kw):
+        super().__init__(**kw)
+        self.opacity = 0
+        x, y = anchor                       # centro inferior del ícono, en la ventana
+        for i, (icon, color, badge, text, warn, action) in enumerate(items):
+            top = y - dp(10) - i * dp(70)
+            b = DialBubble(icon=icon, color=c(color), badge=badge,
+                           pos=(x - dp(28), top - dp(56)))
+            p = DialPill(text=text, warn=warn)
+            p.bind(texture_size=lambda w, ts, b=b: setattr(
+                w, "pos", (b.x - dp(10) - w.width, b.center_y - w.height / 2)))
+            for w in (b, p):
+                w.bind(on_release=lambda *_, f=action: self.run(f))
+                self.add_widget(w)
+
+    def open(self):
+        from kivy.animation import Animation
+        from kivy.core.window import Window
+        Window.add_widget(self)
+        Animation(opacity=1, d=.15).start(self)
+
+    def dismiss(self, *_):
+        if self.parent:
+            self.parent.remove_widget(self)
+
+    def run(self, action):
+        self.dismiss()
+        action()
+
+    def on_touch_down(self, touch):
+        if not super().on_touch_down(touch):
+            self.dismiss()                  # toque fuera de las burbujas: cerrar
+        return True
+
+
+def when_text(stamp: str) -> str:
+    """«20/10 15:16» -> «hoy 15:16», «ayer 15:16» o igual."""
+    import datetime as _d
+    try:
+        day, hm = stamp.split(" ")
+        d, m = (int(x) for x in day.split("/"))
+        today = _d.date.today()
+        ref = _d.date(today.year, m, d)
+        if ref == today:
+            return f"hoy {hm}"
+        if ref == today - _d.timedelta(days=1):
+            return f"ayer {hm}"
+    except Exception:  # noqa: BLE001
+        pass
+    return stamp
 
 
 class PickRow(GlassButton):
@@ -659,17 +690,25 @@ class HomeScreen(MDScreen):
             drive.connect(lambda ok, msg: Clock.schedule_once(lambda *_: (a.toast(msg), self.update_drive_icon())))
             return
         st = drive.status()
-        backup = ("todo respaldado" if not st["pending"] and not st["errors"] else
-                  f"{st['pending']} por subir" + (f" · {st['errors']} con error" if st["errors"] else ""))
-        last = (a.workspaces.shared.get_setting("sync_last") or "").split(" · ")[0]
-        open_menu2(self._action([theme.DRIVE_UP, theme.DRIVE_OK, theme.DRIVE_OFF] + theme.DRIVE_SPIN)
-                   or self.ids.bar, [
-            ("cloud-upload-outline" if st["pending"] or st["errors"] else "cloud-check-outline",
-             theme.BERRY, "Subir respaldo", f"Fotos a Drive · {backup}", self.drive_backup_now),
-            ("sync", theme.LEAF, "Sincronizar",
-             f"PC y web · {last}" if last else "Con PC, web y otros teléfonos", self.drive_sync_now),
-            ("cog-outline", theme.MUTED, "Ajustes de Drive", "Cuenta y solo Wi-Fi", a.open_settings),
-        ])
+        todo = st["pending"] + st["errors"]
+        backup = "Todo respaldado" if not todo else (f"{todo} foto por respaldar" if todo == 1
+                                                     else f"{todo} fotos por respaldar")
+        raw = a.workspaces.shared.get_setting("sync_last") or ""
+        stamp, _, msg = raw.partition(" · ")
+        failed = msg.startswith("No se pudo")
+        sync = ("Sin sincronizar aún" if not raw else
+                f"Falló {when_text(stamp)}" if failed else f"Sincronizado {when_text(stamp)}")
+        btn = self._action([theme.DRIVE_UP, theme.DRIVE_OK, theme.DRIVE_OFF] + theme.DRIVE_SPIN)
+        if btn is not None:
+            anchor = btn.to_window(btn.center_x, btn.y)
+        else:
+            from kivy.core.window import Window
+            anchor = (Window.width - dp(70), Window.height - dp(60))
+        DriveDial(anchor, [
+            ("cloud-upload-outline" if todo else "cloud-check-outline", theme.BERRY,
+             str(todo) if todo else "", backup, bool(st["errors"]), self.drive_backup_now),
+            ("sync", theme.LEAF, "", sync, failed, self.drive_sync_now),
+        ]).open()
 
     def drive_backup_now(self):
         a = app()
