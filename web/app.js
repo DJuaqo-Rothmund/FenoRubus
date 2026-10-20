@@ -4,6 +4,7 @@ import * as C from "./core.js";
 import { CLIENT_ID } from "./config.js";
 import { makeReports } from "./reports.js";
 import { warm as warmPdf, makePdf } from "./pdf.js";
+import { weekCompleted } from "./celebrate.js";
 
 const SCOPE = "https://www.googleapis.com/auth/drive.file";
 const API = "https://www.googleapis.com/drive/v3/files";
@@ -462,6 +463,13 @@ function renderSampling() {
   }
   $("pbar").style.width = vs.length ? `${(100 * done) / vs.length}%` : "0";
   $("ptext").textContent = skipped ? "omitida" : `${done}/${vs.length} completas`;
+  // Semana recién completada (pasó de incompleta a completa mientras se miraba): confeti,
+  // como en la app. Abrir una semana que ya estaba completa no lo repite.
+  const full = vs.length > 0 && done === vs.length && !skipped;
+  const key = `${S.ws.code}|${S.week}`;
+  S.weekDone ||= new Map();
+  if (full && S.weekDone.get(key) === false) setTimeout(() => weekCompleted(String(C.isoWeek(C.parseDate(S.week))[0])), 250);
+  S.weekDone.set(key, full);
   renderMeasures();
 }
 
