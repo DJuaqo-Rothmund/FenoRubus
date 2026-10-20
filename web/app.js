@@ -2,6 +2,7 @@
 // sincronización en Drive (los mismos de la app) y pantallas de muestreo semanal.
 import * as C from "./core.js";
 import { CLIENT_ID } from "./config.js";
+import { makeReports } from "./reports.js";
 
 const SCOPE = "https://www.googleapis.com/auth/drive.file";
 const API = "https://www.googleapis.com/drive/v3/files";
@@ -17,6 +18,7 @@ const S = {
   root: null, sync: null, workspaces: [], ws: null, wsFolder: null,
   state: C.emptyState(), week: C.iso(C.mondayOf(C.todayUTC())),
   folders: new Map(), photoUrls: new Map(), photoIds: new Map(), photoErr: new Map(), current: null,
+  tab: "sampling", mSeason: null, mMonth: null, maps: new Map(), mapSel: null, mapEq: 0,
 };
 
 // ================================================================== Google
@@ -268,15 +270,39 @@ function stageText(obs) {                 // nombre actual de la escala (no el g
   return stageLabel(obs.bbch_code) || (obs.bbch_label || "").replace(/^BBCH\s*[\d-]+\s*[:·-]\s*/i, "");
 }
 
+function seasonOptions(sel, current) {
+  sel.innerHTML = "";
+  for (const s of C.seasons(S.state)) {
+    const o = document.createElement("option");
+    o.value = s; o.textContent = C.seasonTitle(s);
+    sel.appendChild(o);
+  }
+  if (![...sel.options].some((o) => Number(o.value) === current)) {
+    const o = document.createElement("option"); o.value = current; o.textContent = C.seasonTitle(current); sel.appendChild(o);
+  }
+  sel.value = current;
+}
+
+function goSeason(season) {                 // la semana actual o la última con datos
+  if (season === C.seasonOf(C.todayUTC())) S.week = C.iso(C.mondayOf(C.todayUTC()));
+  else { const ws = C.seasonWeeks(S.state, season); S.week = ws.length ? ws[ws.length - 1] : C.iso(C.seasonFirstMonday(season)); }
+}
+
 function renderWeek() {
   const season = C.seasonOf(C.parseDate(S.week));
-  $("season").textContent = C.seasonTitle(season);
+  seasonOptions($("season"), season);
   $("kicker").textContent = C.weekTitle(S.week).toUpperCase();
   $("wtitle").textContent = C.weekLabel(S.week);
   $("wrange").textContent = C.weekRange(S.week);
 }
 
 function render() {
+  if (S.tab === "matrix") renderMatrix();
+  if (S.tab === "reports") renderReports();
+  renderSampling();
+}
+
+function renderSampling() {
   renderWeek();
   const vs = C.varieties(S.state);
   const box = $("rows");
@@ -401,6 +427,170 @@ function shift(days) {
   render();
 }
 
+// ================================================================== matriz y plano
+function renderMatrix() {
+  const season = S.mSeason ?? C.seasonOf(C.parseDate(S.week));
+  seasonOptions($("mseason"), season);
+  const all = C.seasonWeeks(S.state, season);
+  const months = [...new Set(all.map((w) => w.slice(0, 7)))];
+  if (S.mMonth && !months.includes(S.mMonth)) S.mMonth = null;
+  const mbox = $("mmonths");
+  mbox.innerHTML = "";
+  for (const m of [null, ...months]) {
+    const b = document.createElement("button");
+    b.textContent = m ? `${C.MESES[Number(m.slice(5)) - 1][0].toUpperCase()}${C.MESES[Number(m.slice(5)) - 1].slice(1)} ${m.slice(0, 4)}` : "Toda la temporada";
+    b.className = S.mMonth === m ? "on" : "";
+    b.onclick = () => { S.mMonth = m; renderMatrix(); };
+    mbox.appendChild(b);
+  }
+  const weeks = S.mMonth ? all.filter((w) => w.startsWith(S.mMonth)) : all;
+  const box = $("mheat");
+  if (!weeks.length) { box.innerHTML = `<p class="muted">Sin registros en la ${C.seasonTitle(season)}.</p>`; }
+  else {
+    const all = C.matrix(S.state, weeks);
+    const heat = all.filter((r) => r.pts.length);
+    const t = document.createElement("table");
+    t.className = "hm";
+    t.innerHTML = `<thead><tr><th></th>${weeks.map((w) => `<th title="${C.weekLabel(w)}">S${C.isoWeek(C.parseDate(w))[0]}</th>`).join("")}</tr></thead>`;
+    const tb = document.createElement("tbody");
+    for (const r of heat) {
+      const tr = document.createElement("tr");
+      const n = document.createElement("td");
+      n.className = "n"; n.textContent = C.unitMain(r.variety);
+      if (C.unitPlace(r.variety)) { const sm = document.createElement("small"); sm.textContent = C.unitPlace(r.variety); n.appendChild(sm); }
+      tr.appendChild(n);
+      r.cells.forEach((c) => {
+        const td = document.createElement("td");
+        td.className = "c" + (c.code === null ? " na" : "");
+        td.textContent = c.code === null ? "·" : C.codeStr(c.code);
+        if (c.code !== null) { const [bg, fg] = C.seqColor(c.code); td.style.background = bg; td.style.color = fg; td.title = stageLabel(c.code); }
+        td.onclick = () => { S.week = c.week; openDetail(r.variety); };
+        tr.appendChild(td);
+      });
+      tb.appendChild(tr);
+    }
+    t.appendChild(tb);
+    box.innerHTML = "";
+    const wrap = document.createElement("div"); wrap.className = "heatwrap"; wrap.appendChild(t);
+    box.appendChild(wrap);
+    if (all.length > heat.length) box.insertAdjacentHTML("beforeend", `<p class="muted small">${all.length - heat.length} sin registros en estas semanas (no se muestran).</p>`);
+  }
+  renderMap(season);
+}
+
+async function mapFor(code) {
+  if (!S.maps.has(code)) {
+    const r = await fetch(`maps/${code}.json`).catch(() => null);
+    S.maps.set(code, r && r.ok ? await r.json() : null);
+  }
+  return S.maps.get(code);
+}
+
+async function renderMap(season) {
+  const plan = S.ws.profile === "predio" ? await mapFor(S.ws.code) : null;
+  $("mapcard").hidden = !plan;
+  if (!plan) return;
+  const vs = C.varieties(S.state);
+  const weeks = new Set(C.seasonWeeks(S.state, season));
+  const obs = C.rows(S.state, "observations").filter((o) => weeks.has(o.week_id) && o.bbch_code != null);
+  const inSector = (s) => vs.filter((v) => Number(v.irrigation) === s.equipo && Number(v.sector) === s.sector);
+  const hasData = (s) => inSector(s).some((v) => obs.some((o) => o.variety_id === v.uid));
+  const chips = $("mapchips");
+  chips.innerHTML = "";
+  for (const eq of [0, ...new Set(plan.sectors.map((s) => s.equipo))].sort()) {
+    const b = document.createElement("button");
+    b.textContent = eq ? `Equipo ${eq}` : "Todo";
+    b.className = S.mapEq === eq ? "on" : "";
+    if (eq) b.style.borderColor = C.equipoDark(eq);
+    b.onclick = () => { S.mapEq = eq; renderMap(season); };
+    chips.appendChild(b);
+  }
+  const shown = plan.sectors.filter((s) => !S.mapEq || s.equipo === S.mapEq);
+  let [x0, y0, x1, y1] = [Infinity, Infinity, -Infinity, -Infinity];
+  for (const s of shown) for (const part of s.parts) for (let i = 0; i < part.length; i += 2) {
+    x0 = Math.min(x0, part[i]); x1 = Math.max(x1, part[i]); y0 = Math.min(y0, part[i + 1]); y1 = Math.max(y1, part[i + 1]);
+  }
+  const pad = Math.max(x1 - x0, y1 - y0) * 0.03;
+  const H = plan.h;
+  const vb = `${x0 - pad} ${H - y1 - pad} ${x1 - x0 + 2 * pad} ${y1 - y0 + 2 * pad}`;
+  let svg = `<svg viewBox="${vb}" xmlns="http://www.w3.org/2000/svg">`;
+  for (const s of plan.sectors) {
+    const [fill, light] = C.sectorColor(s.equipo, s.sector, !hasData(s));
+    let big = s.parts[0];
+    for (const part of s.parts) {
+      if (part.length > big.length) big = part;
+      const d = part.reduce((acc, v, i) => acc + (i % 2 ? `,${(H - v).toFixed(1)}` : `${i ? "L" : "M"}${v.toFixed(1)}`), "") + "Z";
+      svg += `<path d="${d}" fill="${fill}" data-id="${s.id}" class="${S.mapSel === s.id ? "sel" : ""}"><title>${s.nombre}</title></path>`;
+    }
+    let cx = 0, cy = 0;
+    for (let i = 0; i < big.length; i += 2) { cx += big[i]; cy += big[i + 1]; }
+    cx /= big.length / 2; cy /= big.length / 2;
+    const fs = Math.max(x1 - x0, y1 - y0) / 32;
+    svg += `<text x="${cx}" y="${H - cy}" text-anchor="middle" dominant-baseline="middle" font-size="${fs}" fill="${light ? "#fff" : "#1B2A23"}">${s.sector}</text>`;
+  }
+  $("map").innerHTML = svg + "</svg>";
+  $("map").querySelectorAll("path").forEach((p) => (p.onclick = () => { S.mapSel = p.dataset.id; renderMap(season); }));
+  const sel = plan.sectors.find((s) => s.id === S.mapSel);
+  const info = $("mapinfo");
+  info.innerHTML = "";
+  if (!sel) { info.innerHTML = `<p class="muted small">Toque un sector para ver sus variedades.</p>`; return; }
+  const head = document.createElement("div");
+  head.innerHTML = `<b>${sel.nombre}</b> <span class="muted small">· ${sel.ha ?? "?"} ha · ${sel.hileras ?? "?"} hileras · ${(sel.variedades || []).join(", ")}</span>`;
+  info.appendChild(head);
+  const units = inSector(sel);
+  if (!units.length) info.insertAdjacentHTML("beforeend", `<p class="muted small">Sin registros creados en este sector (créelos desde la app).</p>`);
+  for (const v of units) {
+    const mine = obs.filter((o) => o.variety_id === v.uid).sort((a, b) => a.week_id.localeCompare(b.week_id));
+    const last = mine[mine.length - 1];
+    const d = document.createElement("div");
+    d.className = "unit";
+    d.innerHTML = `<span><b></b><br><span class="muted small"></span></span><span class="badge bbch">BBCH ${last ? C.codeStr(last.bbch_code) : "—"}</span>`;
+    d.querySelector("b").textContent = C.unitMain(v);
+    d.querySelector(".muted").textContent = last ? `Último registro: ${C.weekTitle(last.week_id)}` : "Sin registros esta temporada";
+    d.onclick = () => { if (last) S.week = last.week_id; openDetail(v); };
+    info.appendChild(d);
+  }
+}
+
+// ================================================================== informes
+function renderReports() {
+  const season = S.rSeason ?? C.seasonOf(C.parseDate(S.week));
+  seasonOptions($("rseason"), season);
+  const weeks = C.seasonWeeks(S.state, season);
+  const fill = (sel, items) => {
+    const keep = sel.value; sel.innerHTML = "";
+    for (const [v, t] of items) { const o = document.createElement("option"); o.value = v; o.textContent = t; sel.appendChild(o); }
+    if ([...sel.options].some((o) => o.value === keep)) sel.value = keep;
+  };
+  fill($("rweek"), [...weeks].reverse().map((w) => [w, `${C.weekTitle(w)} · ${C.weekLabel(w)}`]));
+  if (weeks.includes(S.week) && !$("rweek").dataset.touched) $("rweek").value = S.week;
+  fill($("rmonth"), [...new Set(weeks.map((w) => w.slice(0, 7)))].map((m) => [m, `${C.MESES[Number(m.slice(5)) - 1]} ${m.slice(0, 4)}`]));
+  fill($("rvar"), C.varieties(S.state).map((v) => [v.uid, C.unitMain(v) + (C.unitPlace(v) ? ` · ${C.unitPlace(v)}` : "")]));
+}
+
+async function runReport(kind) {
+  const season = Number($("rseason").value);
+  const win = window.open("", "_blank");       // en el mismo clic: así no lo bloquea el navegador
+  if (win) win.document.write("<p style='font:16px system-ui;padding:24px'>Preparando informe…</p>");
+  const rep = makeReports({ state: S.state, ws: S.ws, bbch: S.bbch, photoUrl, win,
+    progress: (t) => { $("rmsg").textContent = t; } });
+  try {
+    if (kind === "weekly") await rep.weekly($("rweek").value);
+    else if (kind === "matrix") await rep.matrix(season, C.seasonWeeks(S.state, season), "Matriz comparativa inter-varietal");
+    else if (kind === "month") {
+      const m = $("rmonth").value;
+      await rep.matrix(season, C.seasonWeeks(S.state, season).filter((w) => w.startsWith(m)),
+        `Reporte mensual · ${C.MESES[Number(m.slice(5)) - 1]} ${m.slice(0, 4)}`, true);
+    } else if (kind === "variety") {
+      await rep.variety(C.varieties(S.state).find((v) => v.uid === $("rvar").value), season);
+    }
+    $("rmsg").textContent = "Informe listo (pestaña nueva).";
+  } catch (e) {
+    $("rmsg").textContent = e.message;
+    if (win) win.close();
+  }
+}
+
 async function start() {
   $("login").hidden = true;
   $("app").hidden = false;
@@ -434,6 +624,17 @@ async function boot() {
   };
   $("sync").onclick = () => pull().then(render).catch((e) => status(e.message));
   $("ws").onchange = (e) => loadWorkspace(e.target.value).then(render).catch((er) => status(er.message));
+  document.querySelectorAll(".tabs button").forEach((b) => (b.onclick = () => {
+    S.tab = b.dataset.tab;
+    document.querySelectorAll(".tabs button").forEach((x) => x.classList.toggle("on", x === b));
+    for (const t of ["sampling", "matrix", "reports"]) $(`tab-${t}`).hidden = t !== S.tab;
+    render();
+  }));
+  $("season").onchange = (e) => { goSeason(Number(e.target.value)); render(); };
+  $("mseason").onchange = (e) => { S.mSeason = Number(e.target.value); S.mMonth = null; renderMatrix(); };
+  $("rseason").onchange = (e) => { S.rSeason = Number(e.target.value); renderReports(); };
+  $("rweek").onchange = (e) => { e.target.dataset.touched = "1"; };
+  document.querySelectorAll("[data-rep]").forEach((b) => (b.onclick = () => runReport(b.dataset.rep)));
   $("prev").onclick = () => shift(-7);
   $("next").onclick = () => shift(7);
   $("today").onclick = () => { S.week = C.iso(C.mondayOf(C.todayUTC())); render(); };

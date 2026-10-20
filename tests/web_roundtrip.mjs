@@ -13,7 +13,9 @@ if (mode === "helpers") {
   });
   const names = data.varieties.map((v) => C.photoBasename(v, "2026-10-12", "detail", 2, "AM"));
   const units = data.varieties.map((v) => [C.unitMain(v), C.unitPlace(v)]);
-  writeFileSync(output, JSON.stringify({ dates: out, names, units, codes: [7, 65, 891].map(C.codeStr) }));
+  const seq = [null, 7, 31, 65, 891, 99].map(C.seqColor);
+  const sect = [[1, 1, false], [2, 5, false], [3, 10, true], [4, 3, false]].map(([e, s, f]) => C.sectorColor(e, s, f));
+  writeFileSync(output, JSON.stringify({ dates: out, names, units, codes: [7, 65, 891].map(C.codeStr), seq, sect }));
 } else {
   const st = C.emptyState();
   C.applyBundle(st, "p1.json", data);

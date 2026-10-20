@@ -95,3 +95,30 @@ dialog::backdrop { background: rgba(27, 42, 35, .45); }
   .row { grid-template-columns: 52px 1fr auto; }
   .thumb { width: 52px; height: 52px; }
 }
+
+.tabs { display: flex; gap: 6px; margin-bottom: 12px; }
+.tabs button { flex: 1; border: 0; border-radius: 999px; padding: 9px; background: #fff9; font-weight: 600; cursor: pointer; color: var(--leaf-dark); }
+.tabs button.on { background: var(--berry); color: #fff; }
+select.chip { border: 0; appearance: auto; cursor: pointer; }
+.row-h { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; justify-content: space-between; }
+.row-h .label { margin: 0; }
+.pill { border: 1px solid var(--line); border-radius: 999px; padding: 6px 12px; background: #fff; max-width: 100%; }
+.chips { display: flex; flex-wrap: wrap; gap: 6px; margin: 10px 0; }
+.chips button { border: 1px solid var(--line); background: #fff; border-radius: 999px; padding: 5px 12px; cursor: pointer; }
+.chips button.on { background: var(--berry); color: #fff; border-color: var(--berry); }
+.heatwrap { overflow: auto; max-height: 70vh; border: 1px solid var(--line); border-radius: 12px; background: #fff; }
+table.hm { border-collapse: separate; border-spacing: 2px; font-size: 13px; }
+table.hm th { font-size: 11px; color: var(--muted); position: sticky; top: 0; background: #fff; z-index: 1; padding: 4px; }
+table.hm td.n { position: sticky; left: 0; background: #fff; white-space: nowrap; padding: 4px 8px; font-weight: 600; z-index: 1; }
+table.hm td.n small { display: block; font-weight: 400; color: var(--muted); font-size: 11px; }
+table.hm td.c { min-width: 42px; text-align: center; border-radius: 6px; font: 600 12.5px ui-monospace, Menlo, Consolas, monospace; padding: 7px 2px; cursor: pointer; }
+table.hm td.c.na { color: #c4c9c0; font-weight: 400; background: #f6f7f3; }
+#map svg { width: 100%; height: auto; display: block; background: #fbfcf9; border-radius: 12px; }
+#map path { stroke: #fff; stroke-width: 2; cursor: pointer; vector-effect: non-scaling-stroke; }
+#map path.sel { stroke: #1B2A23; stroke-width: 3; }
+#map text { font-family: system-ui, sans-serif; font-weight: 700; pointer-events: none; }
+#mapinfo { margin-top: 10px; display: grid; gap: 8px; }
+#mapinfo .unit .badge { align-self: center; }
+#mapinfo .unit { display: flex; justify-content: space-between; gap: 10px; padding: 8px 12px; border: 1px solid var(--line); border-radius: 12px; background: #fff; cursor: pointer; }
+.reports .rep { display: grid; grid-template-columns: 1fr minmax(0, 220px) auto; gap: 10px; align-items: center; padding: 12px 0; border-top: 1px solid var(--line); }
+@media (max-width: 560px) { .reports .rep { grid-template-columns: 1fr auto; } .reports .rep > div { grid-column: 1 / -1; } }

@@ -34,10 +34,16 @@
   </main>
 
   <main id="app" hidden>
+    <nav class="tabs">
+      <button data-tab="sampling" class="on">Muestreo</button>
+      <button data-tab="matrix">Matriz</button>
+      <button data-tab="reports">Informes</button>
+    </nav>
+    <div id="tab-sampling">
     <section class="card weekbar">
       <button id="prev" class="round" aria-label="Semana anterior">‹</button>
       <div class="week">
-        <div id="season" class="chip"></div>
+        <select id="season" class="chip" aria-label="Temporada"></select>
         <div id="kicker" class="kicker"></div>
         <div id="wtitle" class="wtitle"></div>
         <div id="wrange" class="muted"></div>
@@ -51,6 +57,45 @@
     </section>
     <div class="label" id="listlabel">VARIEDADES · TOQUE PARA REGISTRAR</div>
     <section id="rows" class="rows"></section>
+    </div>
+
+    <div id="tab-matrix" hidden>
+      <section class="card">
+        <div class="row-h"><div class="label">MATRIZ GLOBAL</div><select id="mseason" class="pill"></select></div>
+        <div id="mmonths" class="chips"></div>
+        <div id="mheat"></div>
+        <p class="muted small">Toque una celda para abrir ese registro.</p>
+      </section>
+      <section class="card" id="mapcard" hidden>
+        <div class="row-h"><div class="label">PLANO DE SECTORES</div><div id="mapchips" class="chips"></div></div>
+        <div id="map"></div>
+        <div id="mapinfo"></div>
+      </section>
+    </div>
+
+    <div id="tab-reports" hidden>
+      <section class="card reports">
+        <div class="row-h"><div class="label">INFORMES</div><select id="rseason" class="pill"></select></div>
+        <p class="muted small">Se abren en una pestaña nueva; con «Imprimir / Guardar PDF» quedan como PDF.</p>
+        <div class="rep">
+          <div><b>Semanal</b><div class="muted small">Fotos, estado BBCH y notas de cada variedad en una semana.</div></div>
+          <select id="rweek" class="pill"></select><button class="primary" data-rep="weekly">Generar</button>
+        </div>
+        <div class="rep">
+          <div><b>Matriz global</b><div class="muted small">Toda la temporada: matriz, gráfico, precocidad, hitos y galería.</div></div>
+          <span></span><button class="primary" data-rep="matrix">Generar</button>
+        </div>
+        <div class="rep">
+          <div><b>Mensual</b><div class="muted small">Lo mismo, solo con las semanas del mes.</div></div>
+          <select id="rmonth" class="pill"></select><button class="primary" data-rep="month">Generar</button>
+        </div>
+        <div class="rep">
+          <div><b>Ficha por variedad / sector</b><div class="muted small">Evolución semana a semana con fotos.</div></div>
+          <select id="rvar" class="pill"></select><button class="primary" data-rep="variety">Generar</button>
+        </div>
+        <p id="rmsg" class="muted small"></p>
+      </section>
+    </div>
   </main>
 
   <dialog id="detail">

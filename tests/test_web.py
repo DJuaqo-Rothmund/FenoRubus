@@ -43,6 +43,19 @@ def test_web_helpers_match_python(tmp_path):
     assert res["names"] == [ph.photo_basename(v, "2026-10-12", "detail", 2, trial="AM") for v in vs]
     assert res["units"] == [[ph.unit_main(v), ph.unit_place(v)] for v in vs]
     assert res["codes"] == [ph.code_str(c) for c in (7, 65, 891)]
+    from reporter import seq_color
+    assert res["seq"] == [list(seq_color(c)) for c in (None, 7, 31, 65, 891, 99)]
+    import ast
+    src = open(os.path.join(ROOT, "ui", "sector_map.py"), encoding="utf-8").read()   # sin Kivy
+    mod = ast.parse(src)
+    ns = {}
+    keep = [n for n in mod.body if isinstance(n, (ast.Assign, ast.FunctionDef))
+            and getattr(n, "name", None) in (None, "_hex", "sector_color")
+            and (not isinstance(n, ast.Assign) or n.targets[0].id in ("EQUIPO_RAMP", "EMPTY", "N_SECTORS"))]
+    exec(compile(ast.Module(body=keep, type_ignores=[]), "sector_map", "exec"), ns)
+    for (e, sct, f), (col, light) in zip([(1, 1, False), (2, 5, False), (3, 10, True), (4, 3, False)], res["sect"]):
+        rgba, py_light = ns["sector_color"](e, sct, f)
+        assert col == "#" + "".join(f"{round(x * 255):02x}" for x in rgba[:3]) and light == py_light
 
 
 def test_web_reads_app_bundle_and_app_applies_web_changes(tmp_path):

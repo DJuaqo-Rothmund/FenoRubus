@@ -206,3 +206,81 @@ export function bundle(device, workspace, changes) {
 export function stamp() {                 // nombre del paquete (= sync_drive._stamp)
   return new Date().toISOString().replace(/[-:]/g, "").replace("Z", "").replace(".", "").slice(0, 18);
 }
+
+// ------------------------------------------------------------------ análisis (= reporter.py)
+export function bbchValue(code) {         // 891 -> 89,1
+  if (code === null || code === undefined) return null;
+  code = Number(code);
+  return code < 100 ? code : Math.floor(code / 10) + (code % 10) / 10;
+}
+const SEQ_LIGHT = [0xEE, 0xF0, 0xE2], SEQ_DARK = [0x2B, 0x36, 0x14];
+export function seqColor(code) {          // [fondo, texto] (= reporter.seq_color)
+  if (code === null || code === undefined) return ["transparent", "inherit"];
+  const t = Math.max(0, Math.min(1, bbchValue(code) / 99)) ** 0.85;
+  const rgb = SEQ_LIGHT.map((a, i) => Math.round(a + (SEQ_DARK[i] - a) * t));
+  const lum = (0.2126 * rgb[0] + 0.7152 * rgb[1] + 0.0722 * rgb[2]) / 255;
+  return ["#" + rgb.map((x) => x.toString(16).padStart(2, "0")).join(""), lum < 0.5 ? "#ffffff" : "#1f2413"];
+}
+export const MILESTONES = [[51, "Botón floral"], [61, "Inicio floración"], [65, "50 % de flores"],
+  [71, "Cuajado"], [81, "Inicio coloración"], [891, "Inicio cosecha"]];
+
+// Semanas con registros de una temporada (de la primera a la última con datos, sin las
+// marcadas «no muestreada»), como la matriz y los informes de la app.
+export function hasData(state, obs) {
+  return obs.bbch_code !== null && obs.bbch_code !== undefined || !!(obs.notes || "").trim()
+    || rows(state, "photos").some((p) => p.observation_id === obs.uid);
+}
+export function seasonWeeks(state, season) {
+  const skipped = new Set(rows(state, "sampling_weeks").filter((w) => w.skipped).map((w) => w.start_date || w.uid));
+  const withData = new Set(rows(state, "observations").filter((o) => hasData(state, o)).map((o) => o.week_id));
+  const starts = [...withData].filter((s) => seasonOf(parseDate(s)) === season && !skipped.has(s)).sort();
+  if (!starts.length) return [];
+  const out = [];
+  for (let d = parseDate(starts[0]); iso(d) <= starts[starts.length - 1]; d = addDays(d, 7)) {
+    if (!skipped.has(iso(d))) out.push(iso(d));
+  }
+  return out;
+}
+export function seasons(state) {
+  const s = new Set(rows(state, "observations").filter((o) => hasData(state, o)).map((o) => seasonOf(parseDate(o.week_id))));
+  s.add(seasonOf(todayUTC()));
+  return [...s].sort((a, b) => b - a);
+}
+
+// Matriz: filas por variedad con su código BBCH en cada semana + precocidad e hitos.
+export function matrix(state, weeks) {
+  const vs = varieties(state);
+  const obsBy = new Map(rows(state, "observations").map((o) => [`${o.variety_id}|${o.week_id}`, o]));
+  const heat = vs.map((v) => ({ variety: v,
+    cells: weeks.map((w) => { const o = obsBy.get(`${v.uid}|${w}`); return { week: w, code: o ? o.bbch_code ?? null : null, obs: o || null }; }) }));
+  const means = weeks.map((_, i) => {
+    const vals = heat.map((r) => r.cells[i].code).filter((c) => c !== null).map(bbchValue);
+    return vals.length >= 2 ? vals.reduce((a, b) => a + b, 0) / vals.length : null;
+  });
+  for (const r of heat) {
+    const pts = r.cells.map((c, i) => [i, c.code]).filter(([, c]) => c !== null);
+    const deltas = pts.filter(([i]) => means[i] !== null).map(([i, c]) => bbchValue(c) - means[i]);
+    r.delta = deltas.length ? Math.round((deltas.reduce((a, b) => a + b, 0) / deltas.length) * 10) / 10 + 0 : null;
+    r.last = pts.length ? pts[pts.length - 1][1] : null;
+    r.pts = pts;
+    r.hits = MILESTONES.map(([code]) => {
+      const hit = pts.find(([, c]) => bbchValue(c) >= bbchValue(code));
+      return hit ? weeks[hit[0]] : null;
+    });
+  }
+  return heat;
+}
+
+// ------------------------------------------------------------------ plano de sectores
+const EQUIPO_RAMP = { 1: ["#F2978B", "#7A1414"], 2: ["#F2D266", "#8A5A06"], 3: ["#93C0EC", "#163F78"], 4: ["#A3D88F", "#235A20"] };
+const EMPTY = "#E6E8E3";
+const hex = (c) => [1, 3, 5].map((i) => parseInt(c.slice(i, i + 2), 16) / 255);
+export function sectorColor(equipo, sector, faded = false) {   // = ui.sector_map.sector_color
+  const [lo, hi] = EQUIPO_RAMP[Number(equipo) || 0] || ["#DDDDDD", "#555555"];
+  const t = Math.min(1, Math.max(0, ((Number(sector) || 1) - 1) / 9));
+  let rgb = hex(lo).map((a, i) => a + (hex(hi)[i] - a) * t);
+  if (faded) rgb = rgb.map((x, i) => x * 0.14 + hex(EMPTY)[i] * 0.86);
+  const lum = 0.299 * rgb[0] + 0.587 * rgb[1] + 0.114 * rgb[2];
+  return ["#" + rgb.map((x) => Math.round(x * 255).toString(16).padStart(2, "0")).join(""), lum < 0.55 && !faded];
+}
+export function equipoDark(equipo) { return (EQUIPO_RAMP[Number(equipo)] || ["#999", "#333"])[1]; }
