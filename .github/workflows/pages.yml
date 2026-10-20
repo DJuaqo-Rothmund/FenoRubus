@@ -1,0 +1,38 @@
+name: Web (GitHub Pages)
+
+# PhenoRubus Web: página estática (web/) publicada gratis en GitHub Pages. La escala BBCH
+# se genera desde phenology.py en cada publicación, así nunca difiere de la app.
+on:
+  push:
+    branches: ["main", "master", "claude/**"]
+    paths: ["web/**", "phenology.py", "tools/make_web_data.py", ".github/workflows/pages.yml"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    runs-on: ubuntu-24.04
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Escala BBCH para la web
+        run: python tools/make_web_data.py
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: web
+      - id: deploy
+        uses: actions/deploy-pages@v4

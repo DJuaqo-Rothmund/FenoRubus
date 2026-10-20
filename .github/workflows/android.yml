@@ -3,7 +3,7 @@ name: Android APK
 on:
   push:
     branches: ["main", "master", "claude/**"]
-    paths-ignore: ["README.md"]
+    paths-ignore: ["README.md", "web/**", ".github/workflows/pages.yml"]
   workflow_dispatch:
 
 jobs:

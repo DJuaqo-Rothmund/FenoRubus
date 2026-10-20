@@ -1,0 +1,92 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>PhenoRubus Web</title>
+  <meta name="description" content="Registro fenológico de frambueso: muestreo semanal sincronizado con la app por Google Drive.">
+  <link rel="icon" href="icon.png">
+  <link rel="stylesheet" href="style.css">
+  <script src="https://accounts.google.com/gsi/client" async defer></script>
+</head>
+<body>
+  <header class="bar">
+    <img src="icon.png" alt="" class="logo">
+    <div class="brand">PhenoRubus <span>Web</span></div>
+    <select id="ws" aria-label="Ensayo o predio" hidden></select>
+    <div class="spacer"></div>
+    <span id="status" class="status"></span>
+    <button id="sync" class="ghost" hidden title="Sincronizar con Drive">⟳<span class="txt"> Sincronizar</span></button>
+    <button id="logout" class="ghost" hidden>Salir</button>
+  </header>
+
+  <main id="login" class="center">
+    <section class="card hero">
+      <img src="icon.png" alt="" width="96" height="96">
+      <h1>PhenoRubus Web</h1>
+      <p>Vea y complete el muestreo semanal desde el computador, sin instalar nada. Los
+        registros y fotos se comparten con la app del celular por su Google Drive.</p>
+      <button id="signin" class="primary">Iniciar sesión con Google</button>
+      <p class="muted small">Use la misma cuenta de Google que en el celular. La página solo ve
+        los archivos que crea PhenoRubus en su Drive (permiso «drive.file»).</p>
+      <p id="login-msg" class="warn small"></p>
+    </section>
+  </main>
+
+  <main id="app" hidden>
+    <section class="card weekbar">
+      <button id="prev" class="round" aria-label="Semana anterior">‹</button>
+      <div class="week">
+        <div id="season" class="chip"></div>
+        <div id="kicker" class="kicker"></div>
+        <div id="wtitle" class="wtitle"></div>
+        <div id="wrange" class="muted"></div>
+      </div>
+      <button id="next" class="round" aria-label="Semana siguiente">›</button>
+      <div class="weekfoot">
+        <div class="progress"><div id="pbar"></div></div>
+        <span id="ptext" class="muted small"></span>
+        <button id="today" class="link">Ir a la semana actual</button>
+      </div>
+    </section>
+    <div class="label" id="listlabel">VARIEDADES · TOQUE PARA REGISTRAR</div>
+    <section id="rows" class="rows"></section>
+  </main>
+
+  <dialog id="detail">
+    <form method="dialog" class="detail">
+      <div class="dhead">
+        <div>
+          <div id="dplace" class="place"></div>
+          <h2 id="dname"></h2>
+          <div id="dweek" class="muted small"></div>
+        </div>
+        <button value="cancel" class="round" aria-label="Cerrar">✕</button>
+      </div>
+      <label class="field">Estado BBCH
+        <select id="dbbch"></select>
+      </label>
+      <label class="field">Notas
+        <textarea id="dnotes" rows="3" placeholder="Observaciones de campo"></textarea>
+      </label>
+      <div class="field">
+        <div class="photohead">Fotos
+          <span class="spacer"></span>
+          <select id="dkind"><option value="detail">Detalle</option><option value="canopy">Canopia</option></select>
+          <label class="ghost upload">＋ Subir fotos<input id="dfiles" type="file" accept="image/*" multiple hidden></label>
+        </div>
+        <div id="dphotos" class="photos"></div>
+      </div>
+      <p id="dmsg" class="muted small"></p>
+      <div class="actions">
+        <button value="cancel" class="ghost">Cancelar</button>
+        <button id="dsave" value="default" class="primary">Guardar</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog id="viewer"><img id="vimg" alt=""><form method="dialog"><button class="round">✕</button></form></dialog>
+
+  <script type="module" src="app.js"></script>
+</body>
+</html>

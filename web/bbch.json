@@ -1,0 +1,313 @@
+{
+ "version": 4,
+ "stages": [
+  {
+   "code": 0,
+   "label": "Brotes laterales: dormancia",
+   "macro": 0,
+   "text": "00"
+  },
+  {
+   "code": 1,
+   "label": "Inicio hinchazón de yemas",
+   "macro": 0,
+   "text": "01"
+  },
+  {
+   "code": 3,
+   "label": "Yemas hinchadas",
+   "macro": 0,
+   "text": "03"
+  },
+  {
+   "code": 7,
+   "label": "Brotes laterales: inicio de la brotación",
+   "macro": 0,
+   "text": "07"
+  },
+  {
+   "code": 8,
+   "label": "Brotes laterales: puntas verdes",
+   "macro": 0,
+   "text": "08"
+  },
+  {
+   "code": 9,
+   "label": "Laterales: orejas de ratón · Cañas: los brotes rompen la superficie del suelo",
+   "macro": 0,
+   "text": "09"
+  },
+  {
+   "code": 10,
+   "label": "Primeras hojas extendidas",
+   "macro": 1,
+   "text": "10"
+  },
+  {
+   "code": 11,
+   "label": "Primera hoja desplegada",
+   "macro": 1,
+   "text": "11"
+  },
+  {
+   "code": 12,
+   "label": "Segunda hoja desplegada",
+   "macro": 1,
+   "text": "12"
+  },
+  {
+   "code": 13,
+   "label": "Tercera hoja desplegada",
+   "macro": 1,
+   "text": "13"
+  },
+  {
+   "code": 14,
+   "label": "Cuarta hoja desplegada",
+   "macro": 1,
+   "text": "14"
+  },
+  {
+   "code": 15,
+   "label": "Quinta hoja desplegada",
+   "macro": 1,
+   "text": "15"
+  },
+  {
+   "code": 16,
+   "label": "Seis o más hojas desplegadas",
+   "macro": 1,
+   "text": "16"
+  },
+  {
+   "code": 19,
+   "label": "Hojas completamente expandidas",
+   "macro": 1,
+   "text": "19"
+  },
+  {
+   "code": 31,
+   "label": "Cañas anuales: 10 % del crecimiento máximo alcanzado (25 cm)",
+   "macro": 3,
+   "text": "31"
+  },
+  {
+   "code": 33,
+   "label": "Cañas anuales: 30 % del crecimiento máximo alcanzado (75 cm)",
+   "macro": 3,
+   "text": "33"
+  },
+  {
+   "code": 36,
+   "label": "Cañas anuales: 60 % del crecimiento máximo alcanzado (150 cm)",
+   "macro": 3,
+   "text": "36"
+  },
+  {
+   "code": 39,
+   "label": "Cañas anuales: longitud máxima alcanzada",
+   "macro": 3,
+   "text": "39"
+  },
+  {
+   "code": 51,
+   "label": "Se hacen visibles los primeros capullos",
+   "macro": 5,
+   "text": "51"
+  },
+  {
+   "code": 53,
+   "label": "Los tallos florales se estiran (capullos juntos)",
+   "macro": 5,
+   "text": "53"
+  },
+  {
+   "code": 55,
+   "label": "Los tallos florales se estiran (capullos separados)",
+   "macro": 5,
+   "text": "55"
+  },
+  {
+   "code": 57,
+   "label": "Los capullos se inclinan, algunos de color rojizo",
+   "macro": 5,
+   "text": "57"
+  },
+  {
+   "code": 59,
+   "label": "Los pétalos (blancos) son visibles, la flor aún está cerrada (etapa muy corta)",
+   "macro": 5,
+   "text": "59"
+  },
+  {
+   "code": 60,
+   "label": "Primeras flores abiertas en casos aislados",
+   "macro": 6,
+   "text": "60"
+  },
+  {
+   "code": 61,
+   "label": "Inicio de la floración: 10 % de las flores abiertas o sin pétalos",
+   "macro": 6,
+   "text": "61"
+  },
+  {
+   "code": 63,
+   "label": "30 % de las flores abiertas o sin pétalos",
+   "macro": 6,
+   "text": "63"
+  },
+  {
+   "code": 65,
+   "label": "Final de la floración: 50 % de las flores abiertas o sin pétalos",
+   "macro": 6,
+   "text": "65"
+  },
+  {
+   "code": 67,
+   "label": "La mayoría de las flores sin pétalos",
+   "macro": 6,
+   "text": "67"
+  },
+  {
+   "code": 69,
+   "label": "Fin de la floración: la mayoría de las flores sin pétalos y fructifican",
+   "macro": 6,
+   "text": "69"
+  },
+  {
+   "code": 71,
+   "label": "10 % de frutos jóvenes visibles",
+   "macro": 7,
+   "text": "71"
+  },
+  {
+   "code": 73,
+   "label": "30 % de frutos jóvenes visibles",
+   "macro": 7,
+   "text": "73"
+  },
+  {
+   "code": 75,
+   "label": "50 % de frutos jóvenes visibles",
+   "macro": 7,
+   "text": "75"
+  },
+  {
+   "code": 77,
+   "label": "70 % de frutos jóvenes visibles",
+   "macro": 7,
+   "text": "77"
+  },
+  {
+   "code": 79,
+   "label": "Casi todos los frutos jóvenes visibles",
+   "macro": 7,
+   "text": "79"
+  },
+  {
+   "code": 81,
+   "label": "Inicio de la coloración de los primeros frutos",
+   "macro": 8,
+   "text": "81"
+  },
+  {
+   "code": 85,
+   "label": "Progresión de la coloración de los primeros frutos",
+   "macro": 8,
+   "text": "85"
+  },
+  {
+   "code": 87,
+   "label": "Madurez de cosecha",
+   "macro": 8,
+   "text": "87"
+  },
+  {
+   "code": 89,
+   "label": "Maduración completa: coloración típica de los primeros frutos alcanzada",
+   "macro": 8,
+   "text": "89"
+  },
+  {
+   "code": 891,
+   "label": "10 % de los frutos cosechados",
+   "macro": 8,
+   "text": "89-1"
+  },
+  {
+   "code": 893,
+   "label": "30 % de los frutos cosechados",
+   "macro": 8,
+   "text": "89-3"
+  },
+  {
+   "code": 895,
+   "label": "50 % de los frutos cosechados",
+   "macro": 8,
+   "text": "89-5"
+  },
+  {
+   "code": 897,
+   "label": "70 % de los frutos cosechados",
+   "macro": 8,
+   "text": "89-7"
+  },
+  {
+   "code": 899,
+   "label": "Casi todos los frutos cosechados",
+   "macro": 8,
+   "text": "89-9"
+  },
+  {
+   "code": 91,
+   "label": "Cañas anuales: crecimiento completo del brote, follaje aún verde",
+   "macro": 9,
+   "text": "91"
+  },
+  {
+   "code": 93,
+   "label": "Cañas anuales: coloración de las hojas",
+   "macro": 9,
+   "text": "93"
+  },
+  {
+   "code": 95,
+   "label": "Cañas anuales: caída de hojas",
+   "macro": 9,
+   "text": "95"
+  },
+  {
+   "code": 97,
+   "label": "Cañas: latencia de la vegetación · Laterales: muere el brote de dos años que sostenía las cañas",
+   "macro": 9,
+   "text": "97"
+  },
+  {
+   "code": 99,
+   "label": "Cosecha",
+   "macro": 9,
+   "text": "99"
+  }
+ ],
+ "macros": {
+  "0": "Brotación",
+  "1": "Desarrollo de las hojas",
+  "3": "Desarrollo del brote",
+  "5": "Desarrollo del botón floral",
+  "6": "Floración",
+  "7": "Desarrollo del fruto",
+  "8": "Maduración del fruto",
+  "9": "Inicio de la latencia"
+ },
+ "colors": {
+  "0": "#8B7355",
+  "1": "#9BAF6A",
+  "3": "#6E8B3D",
+  "5": "#C9B458",
+  "6": "#E8E4D8",
+  "7": "#7FA06B",
+  "8": "#B03A55",
+  "9": "#A07D4F"
+ }
+}
