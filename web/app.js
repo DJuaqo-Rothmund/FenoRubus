@@ -16,7 +16,7 @@ const S = {
   token: null, tokenClient: null, bbch: null, device: null,
   root: null, sync: null, workspaces: [], ws: null, wsFolder: null,
   state: C.emptyState(), week: C.iso(C.mondayOf(C.todayUTC())),
-  folders: new Map(), photoUrls: new Map(), photoIds: new Map(), current: null,
+  folders: new Map(), photoUrls: new Map(), photoIds: new Map(), photoErr: new Map(), current: null,
 };
 
 // ================================================================== Google
@@ -196,10 +196,16 @@ async function photoUrl(path) {
     id = found[0]?.id || null;
     S.photoIds.set(name, id);
   }
-  if (!id) return null;                            // el otro equipo aún no la sube
-  const url = URL.createObjectURL(await (await download(id)).blob());
-  S.photoUrls.set(name, url);
-  return url;
+  if (!id) { S.photoErr.set(name, "missing"); return null; }   // aún no está en Drive
+  try {
+    const url = URL.createObjectURL(await (await download(id)).blob());
+    S.photoUrls.set(name, url);
+    S.photoErr.delete(name);
+    return url;
+  } catch (e) {
+    S.photoErr.set(name, e.message);
+    return null;
+  }
 }
 
 async function firstUrl(photos) {         // la principal o, si aún no está en Drive, otra
@@ -258,6 +264,10 @@ function stageLabel(code) {
   return s ? s.label : "";
 }
 
+function stageText(obs) {                 // nombre actual de la escala (no el guardado antes)
+  return stageLabel(obs.bbch_code) || (obs.bbch_label || "").replace(/^BBCH\s*[\d-]+\s*[:·-]\s*/i, "");
+}
+
 function renderWeek() {
   const season = C.seasonOf(C.parseDate(S.week));
   $("season").textContent = C.seasonTitle(season);
@@ -283,7 +293,7 @@ function render() {
     if (obs && obs.bbch_code !== null && obs.bbch_code !== undefined) done++;
     const el = document.createElement("button");
     el.className = "card row";
-    const sub = obs?.bbch_code != null ? `BBCH ${C.codeStr(obs.bbch_code)}: ${obs.bbch_label || stageLabel(obs.bbch_code)}` : "Pendiente de registro";
+    const sub = obs?.bbch_code != null ? `BBCH ${C.codeStr(obs.bbch_code)}: ${stageText(obs)}` : "Pendiente de registro";
     el.innerHTML = `<div class="thumb">🌱</div>
       <div><div class="place"></div><div class="name"></div><div class="sub"></div></div>
       <div class="badges"><span class="badge">${photos.length ? photos.length + " FOTO" + (photos.length > 1 ? "S" : "") : "SIN FOTOS"}</span>
@@ -322,18 +332,34 @@ function renderPhotos(v) {
   box.innerHTML = "";
   const photos = obs ? C.photosFor(S.state, obs.uid) : [];
   if (!photos.length) box.innerHTML = `<p class="muted small">Sin fotos esta semana.</p>`;
-  for (const p of photos) {
+  const jobs = photos.map((p) => {
     const d = document.createElement("div");
     d.className = "ph pending";
-    d.innerHTML = `<span>${p.kind === "canopy" ? "Canopia" : "Detalle"}${p.is_primary ? " ★" : ""}</span>`;
+    d.innerHTML = `<span>${p.kind === "canopy" ? "Canopia" : "Detalle"}${p.is_primary ? " ★" : ""}</span><em>Buscando…</em>`;
     box.appendChild(d);
-    photoUrl(p.path).then((u) => {
-      if (!u) { d.title = "Aún no está en Drive (el otro equipo la subirá)"; return; }
+    return photoUrl(p.path).then((u) => {
+      const em = d.querySelector("em");
+      if (!u) {
+        const err = S.photoErr.get(base(p.path));
+        em.textContent = err === "missing" ? "No está en Drive" : "Error al bajar";
+        d.title = `${base(p.path)}${err && err !== "missing" ? " · " + err : ""}`;
+        return err === "missing" ? "missing" : "error";
+      }
+      em.remove();
       d.classList.remove("pending");
       d.style.backgroundImage = `url(${u})`;
       d.onclick = () => { $("vimg").src = u; $("viewer").showModal(); };
-    }).catch(() => {});
-  }
+      return "ok";
+    }).catch(() => "error");
+  });
+  Promise.all(jobs).then((res) => {
+    const missing = res.filter((r) => r === "missing").length, errors = res.filter((r) => r === "error").length;
+    const msg = [];
+    if (missing) msg.push(`${missing} foto(s) aún no están en Google Drive: en el celular, Ajustes › Respaldo en ` +
+      "Google Drive › «Subir anteriores» (con Wi-Fi si está activado «Subir solo con Wi-Fi»).");
+    if (errors) msg.push(`${errors} foto(s) no se pudieron descargar (pase el mouse sobre la foto para ver el detalle).`);
+    if (msg.length && !$("dmsg").textContent) $("dmsg").textContent = msg.join(" ");
+  });
 }
 
 function openDetail(v) {
