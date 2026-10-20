@@ -128,24 +128,35 @@ async function download(id) {
 }
 
 // ================================================================== caché (IndexedDB)
+// «bundles»: paquetes ya leídos; «photos»: fotos ya bajadas (no se vuelven a pedir a Drive).
 const idb = new Promise((resolve) => {
   try {
-    const r = indexedDB.open("phenorubus", 1);
-    r.onupgradeneeded = () => r.result.createObjectStore("bundles");
+    const r = indexedDB.open("phenorubus", 2);
+    r.onupgradeneeded = () => {
+      for (const st of ["bundles", "photos"]) if (!r.result.objectStoreNames.contains(st)) r.result.createObjectStore(st);
+    };
     r.onsuccess = () => resolve(r.result);
     r.onerror = () => resolve(null);
   } catch { resolve(null); }
 });
-async function cacheGet(key) {
+async function cacheGet(key, store = "bundles") {
   const db = await idb; if (!db) return null;
   return new Promise((res) => {
-    const r = db.transaction("bundles").objectStore("bundles").get(key);
-    r.onsuccess = () => res(r.result || null); r.onerror = () => res(null);
+    try {
+      const r = db.transaction(store).objectStore(store).get(key);
+      r.onsuccess = () => res(r.result || null); r.onerror = () => res(null);
+    } catch { res(null); }
   });
 }
-async function cachePut(key, val) {
+async function cachePut(key, val, store = "bundles") {
   const db = await idb; if (!db) return;
-  db.transaction("bundles", "readwrite").objectStore("bundles").put(val, key);
+  try { db.transaction(store, "readwrite").objectStore(store).put(val, key); } catch { /* caché llena: se ignora */ }
+}
+
+async function pool(items, n, fn) {        // fn(item, i) con n en paralelo
+  let next = 0;
+  const run = async () => { while (next < items.length) { const i = next++; await fn(items[i], i); } };
+  await Promise.all(Array.from({ length: Math.min(n, items.length) }, run));
 }
 
 // ================================================================== sincronización
@@ -157,24 +168,34 @@ async function loadWorkspaces() {
   if (!S.sync) throw new Error("Aún no hay datos en Drive: abra la app del celular con Google Drive conectado y pulse «Sincronizar».");
   const files = await list(`'${S.sync}' in parents and trashed=false`);
   const byCode = new Map();
-  for (const f of files) {
-    if (f.mimeType === FOLDER) continue;
-    if (!/^ensayos-.*\.json$/.test(f.name)) continue;
-    const res = await download(f.id);
-    for (const ws of await res.json()) byCode.set(ws.code, ws);
-  }
+  const lists = new Array(files.length);
+  await pool(files, 6, async (f, i) => {
+    if (f.mimeType !== FOLDER && /^ensayos-.*\.json$/.test(f.name)) lists[i] = await (await download(f.id)).json();
+  });
+  for (const l of lists) for (const ws of l || []) byCode.set(ws.code, ws);
   for (const f of files) if (f.mimeType === FOLDER && !byCode.has(f.name)) byCode.set(f.name, { code: f.name, name: f.name, profile: "" });
   S.workspaces = [...byCode.values()];
   for (const f of files) if (f.mimeType === FOLDER) S.folders.set(`${S.sync}/${f.name}`, f.id);
 }
 
-async function loadWorkspace(code) {
+// Abre el ensayo al instante con lo guardado en el navegador; Drive se consulta después.
+async function openCached(code) {
   S.ws = S.workspaces.find((w) => w.code === code) || S.workspaces[0];
-  localStorage.setItem("pr_ws", S.ws.code);
+  store.set("pr_ws", S.ws.code);
   S.state = C.emptyState();
   S.bundles = [];
-  for (const p of pending()) S.bundles.push([p.name, p.bundle]);
   S.photoIds.clear();
+  S.wsFolder = null;
+  const names = (await cacheGet(`${S.ws.code}/__index`)) || [];
+  const got = await Promise.all(names.map((n) => cacheGet(`${S.ws.code}/${n}`)));
+  names.forEach((n, i) => { if (got[i]) { C.applyBundle(S.state, n, got[i]); S.bundles.push([n, got[i]]); } });
+  for (const p of pending()) { C.applyBundle(S.state, p.name, p.bundle); S.bundles.push([p.name, p.bundle]); }
+}
+
+async function loadWorkspace(code) {
+  await openCached(code);
+  if (S.bundles.length) render();
+  else { $("rows").innerHTML = `<p class="muted">Cargando desde Google Drive…</p>`; $("mlist").innerHTML = ""; }
   S.wsFolder = await folder(S.ws.code, S.sync);
   await pull();
 }
@@ -183,18 +204,24 @@ async function pull() {
   status("Sincronizando…");
   const files = (await list(`'${S.wsFolder}' in parents and trashed=false`))
     .filter((f) => f.name.endsWith(".json")).sort((a, b) => a.name.localeCompare(b.name));
-  let n = 0;
-  for (const f of files) {
-    if (S.state.seen.has(f.name)) continue;
+  let n = 0, done = 0;
+  const todo = files.filter((f) => !S.state.seen.has(f.name));
+  const got = new Array(todo.length);
+  await pool(todo, 8, async (f, i) => {      // en paralelo; se aplican después en orden
     const key = `${S.ws.code}/${f.name}`;
     let bundle = await cacheGet(key);
     if (!bundle) {
       bundle = await (await download(f.id)).json();
       cachePut(key, bundle);
     }
-    n += C.applyBundle(S.state, f.name, bundle);
-    S.bundles.push([f.name, bundle]);
-  }
+    got[i] = bundle;
+    if (todo.length > 8) status(`Sincronizando ${++done}/${todo.length}…`);
+  });
+  todo.forEach((f, i) => {
+    n += C.applyBundle(S.state, f.name, got[i]);
+    S.bundles.push([f.name, got[i]]);
+  });
+  cachePut(`${S.ws.code}/__index`, files.map((f) => f.name));
   await pushPending();
   status(`Sincronizado ${new Date().toLocaleTimeString("es", { hour: "2-digit", minute: "2-digit" })}`);
   return n;
@@ -213,6 +240,7 @@ async function send(changes) {
 }
 
 async function pushPending() {
+  if (!S.wsFolder) return;                 // aún conectando con Drive: se envía al sincronizar
   const left = [];
   for (const p of pending()) {
     try {
@@ -227,18 +255,51 @@ async function pushPending() {
 // ================================================================== fotos
 function base(path) { return (path || "").split(/[\\/]/).pop(); }
 
-async function photoUrl(path) {
+// Búsqueda de fotos en Drive por nombre, de a varias por consulta (una por cada 40 fotos).
+const lookups = new Map();
+let lookupTimer = null;
+function findId(name) {
+  return new Promise((resolve, reject) => {
+    if (!lookups.has(name)) lookups.set(name, []);
+    lookups.get(name).push([resolve, reject]);
+    lookupTimer ||= setTimeout(flushLookups, 0);
+  });
+}
+async function flushLookups() {
+  lookupTimer = null;
+  const batch = [...lookups];
+  lookups.clear();
+  const parts = [];
+  for (let i = 0; i < batch.length; i += 40) parts.push(batch.slice(i, i + 40));
+  await pool(parts, 4, async (part) => {
+    try {
+      const found = await list(`(${part.map(([n]) => `name='${q(n)}'`).join(" or ")}) and trashed=false`, "files(id,name)");
+      const ids = new Map(found.map((f) => [f.name, f.id]));
+      for (const [n, waiters] of part) waiters.forEach(([res]) => res(ids.get(n) || null));
+    } catch (e) {
+      for (const [, waiters] of part) waiters.forEach(([, rej]) => rej(e));
+    }
+  });
+}
+
+const inflight = new Map();
+function photoUrl(path) {
   const name = base(path);
-  if (S.photoUrls.has(name)) return S.photoUrls.get(name);
-  let id = S.photoIds.get(name);
-  if (id === undefined) {
-    const found = await list(`name='${q(name)}' and trashed=false`, "files(id,name)");
-    id = found[0]?.id || null;
-    S.photoIds.set(name, id);
-  }
-  if (!id) { S.photoErr.set(name, "missing"); return null; }   // aún no está en Drive
+  if (S.photoUrls.has(name)) return Promise.resolve(S.photoUrls.get(name));
+  if (!inflight.has(name)) inflight.set(name, fetchPhoto(name).finally(() => inflight.delete(name)));
+  return inflight.get(name);
+}
+
+async function fetchPhoto(name) {
+  const cached = await cacheGet(name, "photos");
+  if (cached) { const url = URL.createObjectURL(cached); S.photoUrls.set(name, url); return url; }
   try {
-    const url = URL.createObjectURL(await (await download(id)).blob());
+    let id = S.photoIds.get(name);
+    if (id === undefined) { id = await findId(name); S.photoIds.set(name, id); }
+    if (!id) { S.photoErr.set(name, "missing"); return null; }   // aún no está en Drive
+    const blob = await (await download(id)).blob();
+    cachePut(name, blob, "photos");
+    const url = URL.createObjectURL(blob);
     S.photoUrls.set(name, url);
     S.photoErr.delete(name);
     return url;
@@ -290,6 +351,7 @@ async function addPhotos(v, files, kind) {
     const id = await upload(dir, name, blob, "image/jpeg");
     S.photoIds.set(name, id);
     S.photoUrls.set(name, URL.createObjectURL(blob));
+    cachePut(name, blob, "photos");
     const ch = C.photoChange(S.state, obs.uid, kind, `photos/T${season}/web/${name}`);
     changes.push(ch);
     C.applyBundle(S.state, `local-${C.newUid()}`, { changes: [ch] });
@@ -924,20 +986,45 @@ async function start() {
   $("app").hidden = false;
   ["sync", "logout", "ws"].forEach((id) => ($(id).hidden = false));
   rememberUser();
+  setInterval(() => S.wsFolder && pull().then((n) => n && render()).catch(() => {}), 5 * 60 * 1000);
+  let cached = null;
+  try { cached = JSON.parse(store.get("pr_wslist") || "null"); } catch { /* sin caché */ }
+  if (cached?.length) {                    // se muestra al instante lo guardado; Drive, en segundo plano
+    S.workspaces = cached;
+    fillWorkspaces();
+    await openCached($("ws").value);
+    render();
+    status("Sincronizando…");
+    try {
+      await loadWorkspaces();
+      store.set("pr_wslist", JSON.stringify(S.workspaces));
+      fillWorkspaces();
+      if (S.workspaces.some((w) => w.code === S.ws.code)) {
+        S.ws = S.workspaces.find((w) => w.code === S.ws.code);
+        S.wsFolder = await folder(S.ws.code, S.sync);
+        if (await pull()) render();
+      } else { await loadWorkspace($("ws").value); render(); }
+    } catch (e) { status(e.message); }
+    return;
+  }
   status("Cargando…");
   await loadWorkspaces();
+  store.set("pr_wslist", JSON.stringify(S.workspaces));
+  fillWorkspaces();
+  await loadWorkspace($("ws").value);
+  render();
+}
+
+function fillWorkspaces() {
   const sel = $("ws");
+  const keep = S.ws?.code || store.get("pr_ws");
   sel.innerHTML = "";
   for (const w of S.workspaces) {
     const o = document.createElement("option");
     o.value = w.code; o.textContent = `${PROFILES[w.profile] ? PROFILES[w.profile] + " · " : ""}${w.name} (${w.code})`;
     sel.appendChild(o);
   }
-  const saved = localStorage.getItem("pr_ws");
-  sel.value = S.workspaces.some((w) => w.code === saved) ? saved : S.workspaces[0]?.code;
-  await loadWorkspace(sel.value);
-  render();
-  setInterval(() => pull().then((n) => n && render()).catch(() => {}), 5 * 60 * 1000);
+  sel.value = S.workspaces.some((w) => w.code === keep) ? keep : S.workspaces[0]?.code;
 }
 
 async function boot() {
@@ -950,10 +1037,13 @@ async function boot() {
   $("relogin").onclick = () => signIn("").then(() => pull()).then(render).catch((e) => status(e.message));
   $("logout").onclick = () => {
     if (S.token && window.google?.accounts?.oauth2) google.accounts.oauth2.revoke(S.token, () => {});
-    S.token = null; store.set("pr_token", null); store.set("pr_email", null); location.reload();
+    S.token = null;
+    for (const k of ["pr_token", "pr_email", "pr_wslist", "pr_ws"]) store.set(k, null);
+    idb.then((db) => { db?.close(); indexedDB.deleteDatabase("phenorubus"); }).finally(() => location.reload());   // en un PC compartido no quedan datos
   };
   $("sync").onclick = () => pull().then(render).catch((e) => status(e.message));
-  $("ws").onchange = (e) => loadWorkspace(e.target.value).then(render).catch((er) => status(er.message));
+  $("ws").onchange = (e) => (S.sync ? loadWorkspace(e.target.value) : openCached(e.target.value))
+    .then(render).catch((er) => status(er.message));
   document.querySelectorAll(".tabs button").forEach((b) => (b.onclick = () => {
     S.tab = b.dataset.tab;
     document.querySelectorAll(".tabs button").forEach((x) => x.classList.toggle("on", x === b));

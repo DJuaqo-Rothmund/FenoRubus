@@ -1,49 +1,48 @@
 // PhenoRubus Web · informes en PDF idénticos a los de la app: el mismo código Python
-// (reporter.py / pdf_report.py, empaquetado en py.zip) corre en el navegador con Pyodide
-// sobre una base SQLite armada con los paquetes de sincronización.
+// (reporter.py / pdf_report.py, empaquetado en py.zip) corre con Pyodide en un Web Worker
+// (pdf-worker.js) sobre una base SQLite armada con los paquetes de sincronización.
 const PYODIDE = window.__PR_PYODIDE__ || "https://cdn.jsdelivr.net/pyodide/v0.26.4/full/";
-let booting = null;
+let worker = null, seq = 0;
+const jobs = new Map();
 
-export function warm() {                  // se carga una vez (~10 MB, queda en caché del navegador)
-  booting ||= (async () => {
-    const { loadPyodide } = await import(`${PYODIDE}pyodide.mjs`);
-    const py = await loadPyodide({ indexURL: PYODIDE });
-    await py.loadPackage(["sqlite3", "jinja2", "pillow"]);
-    const zip = await (await fetch(`py.zip?v=${Date.now() >> 22}`)).arrayBuffer();
-    py.unpackArchive(zip, "zip", { extractDir: "/app" });
-    py.runPython("import os, sys; sys.path.insert(0, '/app'); os.environ['FENORUBUS_DATA'] = '/data'; os.makedirs('/data', exist_ok=True)");
-    return { py, wr: py.pyimport("webreport") };
-  })();
-  booting.catch(() => { booting = null; });
-  return booting;
+function call(msg, handlers = {}) {
+  worker ||= new Worker("pdf-worker.js", { type: "module" });
+  worker.onmessage = ({ data: m }) => {
+    const job = jobs.get(m.id);
+    if (!job) return;
+    if (m.progress) return job.progress?.(m.progress);
+    if (m.need) return job.need(m.need, m.id);
+    jobs.delete(m.id);
+    m.error ? job.reject(new Error(m.error)) : job.resolve(m);
+  };
+  const id = ++seq;
+  return new Promise((resolve, reject) => {
+    jobs.set(id, { resolve, reject, ...handlers });
+    worker.postMessage({ id, indexURL: PYODIDE, ...msg });
+  });
 }
+
+export function warm() { return call({ op: "warm" }); }
 
 // ctx: {ws, bundles: [[nombre, paquete]…], photoBlob(path) -> Blob|null, progress(texto)}
 export async function makePdf(ctx, kind, arg, season) {
-  ctx.progress("Cargando el generador de informes (la primera vez tarda un poco)…");
-  const { py, wr } = await warm();
-  ctx.progress("Preparando los datos…");
-  wr.load(ctx.ws.code, JSON.stringify(ctx.ws), JSON.stringify(ctx.bundles));
-  const paths = kind === "treatments" ? [] : JSON.parse(wr.photos(ctx.ws.code, kind, arg, season));
-  const todo = [...new Set(paths)].filter((p) => !py.FS.analyzePath(`/data/${p}`).exists);
-  let done = 0;
-  const worker = async () => {
-    while (todo.length) {
-      const rel = todo.shift();
-      const blob = await ctx.photoBlob(rel).catch(() => null);
-      if (blob) {
-        const file = `/data/${rel}`;
-        py.FS.mkdirTree(file.slice(0, file.lastIndexOf("/")));
-        py.FS.writeFile(file, new Uint8Array(await blob.arrayBuffer()));
-      }
-      ctx.progress(`Descargando fotos ${++done}/${done + todo.length}…`);
-    }
-  };
-  await Promise.all([worker(), worker(), worker(), worker()]);
-  ctx.progress("Generando el PDF…");
-  await new Promise((r) => setTimeout(r, 30));        // deja pintar el mensaje
-  const path = wr.report(ctx.ws.code, kind, arg, season);
-  const data = py.FS.readFile(path);
-  py.FS.unlink(path);
-  return { name: path.split("/").pop(), blob: new Blob([data], { type: "application/pdf" }) };
+  const r = await call({ op: "pdf", ws: ctx.ws, bundles: ctx.bundles, kind, arg, season }, {
+    progress: ctx.progress,
+    need: async (paths, jid) => {
+      const out = [];
+      let done = 0;
+      const todo = [...paths];
+      const run = async () => {
+        while (todo.length) {
+          const rel = todo.shift();
+          const blob = await ctx.photoBlob(rel).catch(() => null);
+          if (blob) out.push([rel, await blob.arrayBuffer()]);
+          ctx.progress(`Descargando fotos ${++done}/${paths.length}…`);
+        }
+      };
+      await Promise.all([run(), run(), run(), run(), run(), run()]);
+      worker.postMessage({ op: "photos", id: jid, photos: out }, out.map(([, b]) => b));
+    },
+  });
+  return { name: r.name, blob: new Blob([r.pdf], { type: "application/pdf" }) };
 }
