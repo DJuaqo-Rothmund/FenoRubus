@@ -1024,7 +1024,8 @@ const profileOf = (w) => (PROFILES[w.profile] ? w.profile : "");
 function fillWorkspaces() {
   const profs = PROFILE_TABS.filter(([p]) => S.workspaces.some((w) => profileOf(w) === p));
   const saved = S.workspaces.find((w) => w.code === store.get("pr_ws"));
-  const cur = S.ws ? profileOf(S.ws) : saved ? profileOf(saved) : store.get("pr_prof");
+  const cur = S.ws ? profileOf(S.ws) : saved ? profileOf(saved)
+    : store.get("pr_prof") ?? (S.workspaces[0] ? profileOf(S.workspaces[0]) : "");
   const prof = profs.some(([p]) => p === cur) ? cur : profs[0]?.[0] ?? "";
   store.set("pr_prof", prof);
   const seg = $("profiles");
