@@ -199,6 +199,24 @@ export function photoChange(state, obsUid, kind, relPath) {
     data: { observation_id: obsUid, kind, path: relPath, source: "web", captured_at: ts, is_primary: has ? 0 : 1 } };
 }
 
+// Borra fotos (= Database.delete_photo): si se va la principal de un tipo, pasa a principal
+// la más reciente que quede de ese tipo. El archivo en Drive no se toca (como en la app).
+export function photoDeleteChanges(state, uids) {
+  const gone = new Set(uids);
+  const all = rows(state, "photos");
+  const ts = nowTs();
+  const changes = [...gone].map((uid) => ({ entity: "photos", uid, ts, deleted: 1 }));
+  const groups = new Set(all.filter((p) => gone.has(p.uid) && p.is_primary).map((p) => `${p.observation_id}|${p.kind}`));
+  for (const g of groups) {
+    const left = all.filter((p) => `${p.observation_id}|${p.kind}` === g && !gone.has(p.uid));
+    if (!left.length || left.some((p) => p.is_primary)) continue;
+    const next = left.sort((a, b) => (b.captured_at || "").localeCompare(a.captured_at || ""))[0];
+    const { uid, ...data } = next;
+    changes.push({ entity: "photos", uid, ts, deleted: 0, data: { ...data, is_primary: 1 } });
+  }
+  return changes;
+}
+
 export function bundle(device, workspace, changes) {
   return { format: 1, device, workspace, created: nowTs(),
     upto: changes.length ? changes[changes.length - 1].ts : null, changes, settings: {} };

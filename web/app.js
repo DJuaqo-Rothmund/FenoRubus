@@ -480,8 +480,31 @@ async function uploadTo(kind, files) {
   finally { zone.classList.remove("busy"); }
 }
 
+async function deletePhotos(uids) {
+  if (!uids.length) return;
+  const what = uids.length === 1 ? "esta foto" : `estas ${uids.length} fotos`;
+  if (!confirm(`¿Eliminar ${what} del registro?\n(Se quita también en el celular al sincronizar; el archivo queda en Drive.)`)) return;
+  try {
+    await send(C.photoDeleteChanges(S.state, uids));
+    S.photoSel.clear();
+    $("dmsg").textContent = uids.length === 1 ? "Foto eliminada." : `${uids.length} fotos eliminadas.`;
+    renderPhotos(S.current);
+    render();
+  } catch (e) { $("dmsg").textContent = `No se pudo eliminar: ${e.message}`; }
+}
+
+function selBar() {
+  const n = S.photoSel.size;
+  $("dselbar").hidden = !n;
+  $("dseltext").textContent = n === 1 ? "1 foto seleccionada" : `${n} fotos seleccionadas`;
+}
+
 function renderPhotos(v) {
   const obs = C.observationFor(S.state, v.uid, S.week);
+  S.photoSel ||= new Set();
+  const live = new Set((obs ? C.photosFor(S.state, obs.uid) : []).map((p) => p.uid));
+  for (const u of [...S.photoSel]) if (!live.has(u)) S.photoSel.delete(u);
+  selBar();
   const boxes = {};
   document.querySelectorAll("#detail .drop").forEach((z) => {
     boxes[z.dataset.kind] = z.querySelector(".photos");
@@ -493,6 +516,15 @@ function renderPhotos(v) {
     d.className = "ph pending";
     d.innerHTML = `<span>${p.is_primary ? "★ Principal" : ""}</span><em>Buscando…</em>`;
     if (!p.is_primary) d.querySelector("span").remove();
+    const pick = document.createElement("button");
+    pick.type = "button"; pick.className = "pick"; pick.title = "Seleccionar";
+    const del = document.createElement("button");
+    del.type = "button"; del.className = "pdel"; del.textContent = "✕"; del.title = "Eliminar esta foto";
+    const mark = () => { pick.textContent = S.photoSel.has(p.uid) ? "✓" : ""; d.classList.toggle("selected", S.photoSel.has(p.uid)); };
+    pick.onclick = (e) => { e.stopPropagation(); S.photoSel.has(p.uid) ? S.photoSel.delete(p.uid) : S.photoSel.add(p.uid); mark(); selBar(); };
+    del.onclick = (e) => { e.stopPropagation(); deletePhotos([p.uid]); };
+    d.append(pick, del);
+    mark();
     (boxes[p.kind] || boxes.detail).appendChild(d);
     return photoUrl(p.path).then((u) => {
       const em = d.querySelector("em");
@@ -505,7 +537,7 @@ function renderPhotos(v) {
       em.remove();
       d.classList.remove("pending");
       d.style.backgroundImage = `url(${u})`;
-      d.onclick = () => { $("vimg").src = u; $("viewer").showModal(); };
+      d.onclick = (e) => { e.stopPropagation(); $("vimg").src = u; $("viewer").showModal(); };
       return "ok";
     }).catch(() => "error");
   });
@@ -528,6 +560,7 @@ function openDetail(v) {
   fillBbch($("dbbch"), obs?.bbch_code ?? null);
   $("dnotes").value = obs?.notes || "";
   $("dmsg").textContent = "";
+  S.photoSel = new Set();
   renderPhotos(v);
   $("detail").showModal();
 }
@@ -1122,6 +1155,8 @@ async function boot() {
   $("dsave").onclick = saveDetail;
   $("msave").onclick = saveMeasure;
   $("ncreate").onclick = createMeasure;
+  $("dseldel").onclick = () => deletePhotos([...S.photoSel]);
+  $("dselnone").onclick = () => { S.photoSel.clear(); renderPhotos(S.current); };
   document.querySelectorAll("#detail .drop").forEach((z) =>
     dropZone(z, z.querySelector("input"), (files) => uploadTo(z.dataset.kind, files)));
   // Soltar una foto fuera de las casillas no debe abrirla en el navegador (se perdería la página).

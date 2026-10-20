@@ -166,3 +166,16 @@ table.hm td.c.na { color: #c4c9c0; font-weight: 400; background: #f6f7f3; }
 .drophint { text-align: center; color: var(--berry); font-weight: 600; font-size: 13px; padding: 14px 6px;
   border-radius: 12px; background: #fdf6f8; }
 .mdrop { cursor: default; min-height: 0; }
+.photos .ph .pick, .photos .ph .pdel { position: absolute; top: 5px; width: 26px; height: 26px; border-radius: 50%;
+  border: 2px solid #fff; cursor: pointer; display: grid; place-items: center; padding: 0; font-size: 13px; font-weight: 700;
+  box-shadow: 0 1px 4px #0005; opacity: 0; transition: opacity .15s; }
+.photos .ph .pick { left: 5px; background: #fff8; color: #fff; }
+.photos .ph .pdel { right: 5px; background: #000a; color: #fff; }
+.photos .ph:hover .pick, .photos .ph:hover .pdel, .photos .ph.selected .pick { opacity: 1; }
+@media (hover: none) { .photos .ph .pick, .photos .ph .pdel { opacity: 1; } }
+.photos .ph .pdel:hover { background: var(--berry); }
+.photos .ph.selected { outline: 3px solid var(--berry); outline-offset: 2px; }
+.photos .ph.selected .pick { background: var(--berry); }
+.selbar { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; background: var(--berry-soft); border-radius: 12px;
+  padding: 8px 10px; font-weight: 600; color: var(--berry-dark); }
+.danger { background: var(--berry); color: #fff; border: 0; border-radius: 999px; padding: 6px 14px; font-weight: 600; cursor: pointer; }
