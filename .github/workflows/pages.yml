@@ -28,8 +28,10 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
-      - name: Escala BBCH para la web
-        run: python tools/make_web_data.py
+      - name: Escala BBCH, estilo de informes y planos para la web
+        run: |
+          pip install jinja2 pillow
+          python tools/make_web_data.py
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3
         with:
