@@ -154,3 +154,15 @@ table.hm td.c.na { color: #c4c9c0; font-weight: 400; background: #f6f7f3; }
 .profiles button { flex: 1; border: 2px solid var(--leaf-soft); border-radius: 14px; padding: 10px; background: #fff;
   font-weight: 700; color: var(--leaf-dark); cursor: pointer; }
 .profiles button.on { border-color: var(--leaf-dark); background: var(--leaf-dark); color: #fff; }
+.drops { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+@media (max-width: 560px) { .drops { grid-template-columns: 1fr; } }
+.drop { border: 2px dashed var(--line); border-radius: 16px; padding: 10px; display: grid; gap: 8px; align-content: start;
+  cursor: pointer; background: #fff; transition: border-color .15s, background .15s; min-height: 150px; }
+.drop:hover { border-color: var(--berry-soft); }
+.drop.over { border-color: var(--berry); background: var(--berry-soft); }
+.drop.busy { opacity: .6; pointer-events: none; }
+.drophead { display: flex; align-items: baseline; gap: 8px; font-weight: 600; color: var(--leaf-dark); }
+.drop .photos { grid-template-columns: repeat(auto-fill, minmax(90px, 1fr)); }
+.drophint { text-align: center; color: var(--berry); font-weight: 600; font-size: 13px; padding: 14px 6px;
+  border-radius: 12px; background: #fdf6f8; }
+.mdrop { cursor: default; min-height: 0; }

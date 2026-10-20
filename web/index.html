@@ -123,12 +123,21 @@
         <textarea id="dnotes" rows="3" placeholder="Observaciones de campo"></textarea>
       </label>
       <div class="field">
-        <div class="photohead">Fotos
-          <span class="spacer"></span>
-          <select id="dkind"><option value="detail">Detalle</option><option value="canopy">Canopia</option></select>
-          <label class="ghost upload">＋ Subir fotos<input id="dfiles" type="file" accept="image/*" multiple hidden></label>
+        <div class="photohead">Fotos <span class="muted small">· arrastre los archivos a cada casilla o haga clic en ella</span></div>
+        <div class="drops">
+          <div class="drop" data-kind="canopy">
+            <div class="drophead"><b>Canopia</b><span class="muted small">Vista general</span></div>
+            <div class="photos"></div>
+            <div class="drophint">＋ Arrastre fotos aquí o haga clic</div>
+            <input type="file" accept="image/*" multiple hidden>
+          </div>
+          <div class="drop" data-kind="detail">
+            <div class="drophead"><b>Detalle</b><span class="muted small">Brote, flor o fruto</span></div>
+            <div class="photos"></div>
+            <div class="drophint">＋ Arrastre fotos aquí o haga clic</div>
+            <input type="file" accept="image/*" multiple hidden>
+          </div>
         </div>
-        <div id="dphotos" class="photos"></div>
       </div>
       <p id="dmsg" class="muted small"></p>
       <div class="actions">

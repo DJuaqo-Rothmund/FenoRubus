@@ -455,17 +455,45 @@ function fillBbch(sel, code) {
   }
 }
 
+// Casilla que recibe fotos arrastradas o elegidas con un clic (fuera de las miniaturas).
+function dropZone(el, input, onFiles, { click = true, msg = "dmsg" } = {}) {
+  const take = (list) => {
+    const files = [...list].filter((f) => f.type.startsWith("image/") || /\.(jpe?g|png|heic|webp)$/i.test(f.name));
+    if (files.length) onFiles(files);
+    else if (list.length) $(msg).textContent = "Solo se pueden subir imágenes.";
+  };
+  if (click) {
+    el.onclick = (e) => { if (!e.target.closest(".ph:not(.pending)")) input.click(); };
+    input.onclick = (e) => e.stopPropagation();
+  }
+  input.onchange = () => { const l = [...input.files]; input.value = ""; take(l); };
+  el.ondragover = (e) => { e.preventDefault(); e.dataTransfer.dropEffect = "copy"; el.classList.add("over"); };
+  el.ondragleave = (e) => { if (!el.contains(e.relatedTarget)) el.classList.remove("over"); };
+  el.ondrop = (e) => { e.preventDefault(); el.classList.remove("over"); take(e.dataTransfer.files); };
+}
+
+async function uploadTo(kind, files) {
+  const zone = document.querySelector(`#detail .drop[data-kind="${kind}"]`);
+  zone.classList.add("busy");
+  try { await addPhotos(S.current, files, kind); renderPhotos(S.current); render(); }
+  catch (er) { $("dmsg").textContent = `No se pudieron subir: ${er.message}`; }
+  finally { zone.classList.remove("busy"); }
+}
+
 function renderPhotos(v) {
   const obs = C.observationFor(S.state, v.uid, S.week);
-  const box = $("dphotos");
-  box.innerHTML = "";
+  const boxes = {};
+  document.querySelectorAll("#detail .drop").forEach((z) => {
+    boxes[z.dataset.kind] = z.querySelector(".photos");
+    boxes[z.dataset.kind].innerHTML = "";
+  });
   const photos = obs ? C.photosFor(S.state, obs.uid) : [];
-  if (!photos.length) box.innerHTML = `<p class="muted small">Sin fotos esta semana.</p>`;
   const jobs = photos.map((p) => {
     const d = document.createElement("div");
     d.className = "ph pending";
-    d.innerHTML = `<span>${p.kind === "canopy" ? "Canopia" : "Detalle"}${p.is_primary ? " ★" : ""}</span><em>Buscando…</em>`;
-    box.appendChild(d);
+    d.innerHTML = `<span>${p.is_primary ? "★ Principal" : ""}</span><em>Buscando…</em>`;
+    if (!p.is_primary) d.querySelector("span").remove();
+    (boxes[p.kind] || boxes.detail).appendChild(d);
     return photoUrl(p.path).then((u) => {
       const em = d.querySelector("em");
       if (!u) {
@@ -600,6 +628,7 @@ function openMeasure(uid) {
 function renderMeasureBody() {
   const M = S.meas, box = $("mbody");
   box.innerHTML = "";
+  box.className = "";
   if (M.m.kind === "table") {
     const t = document.createElement("table");
     t.className = "mgrid";
@@ -667,7 +696,7 @@ function renderMeasureBody() {
   } else {
     const head = document.createElement("div");
     head.className = "photohead";
-    head.innerHTML = `<span class="muted small">Fotos de esta semana: agregue una descripción y, si corresponde, la variedad.</span><span class="spacer"></span>
+    head.innerHTML = `<span class="muted small">Arrastre fotos aquí o use «Subir fotos»; luego agregue la descripción y, si corresponde, la variedad.</span><span class="spacer"></span>
       <label class="ghost upload">＋ Subir fotos<input id="mfiles" type="file" accept="image/*" multiple hidden></label>`;
     box.appendChild(head);
     const grid = document.createElement("div");
@@ -696,13 +725,11 @@ function renderMeasureBody() {
       }).catch(() => {});
     }
     box.appendChild(grid);
-    $("mfiles").onchange = async (e) => {
-      const files = [...e.target.files];
-      e.target.value = "";
-      if (!files.length) return;
+    box.classList.add("drop", "mdrop");
+    dropZone(box, $("mfiles"), async (files) => {
       try { await addMeasureImages(files); renderMeasureBody(); render(); }
       catch (er) { $("mmsg").textContent = `No se pudieron subir: ${er.message}`; }
-    };
+    }, { click: false, msg: "mmsg" });
   }
 }
 
@@ -1095,13 +1122,11 @@ async function boot() {
   $("dsave").onclick = saveDetail;
   $("msave").onclick = saveMeasure;
   $("ncreate").onclick = createMeasure;
-  $("dfiles").onchange = async (e) => {
-    const files = [...e.target.files];
-    e.target.value = "";
-    if (!files.length) return;
-    try { await addPhotos(S.current, files, $("dkind").value); renderPhotos(S.current); render(); }
-    catch (er) { $("dmsg").textContent = `No se pudieron subir: ${er.message}`; }
-  };
+  document.querySelectorAll("#detail .drop").forEach((z) =>
+    dropZone(z, z.querySelector("input"), (files) => uploadTo(z.dataset.kind, files)));
+  // Soltar una foto fuera de las casillas no debe abrirla en el navegador (se perdería la página).
+  window.addEventListener("dragover", (e) => e.preventDefault());
+  window.addEventListener("drop", (e) => e.preventDefault());
   loginLabel();
   if (window.__PR_TOKEN__) { await signIn(); await start(); return; }
   const saved = savedToken();
