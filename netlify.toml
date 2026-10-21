@@ -1,0 +1,18 @@
+# PhenoRubus Web en Netlify (gratis): publica la carpeta web/ igual que GitHub Pages.
+# La escala BBCH, el estilo de informes y el código de los PDF (py.zip) se generan desde
+# la app en cada publicación, así nunca difieren.
+[build]
+  publish = "web"
+  command = "pip install jinja2 pillow && python tools/make_web_data.py"
+  # Solo se vuelve a publicar si cambió algo que usa la web (no por cambios solo de la app).
+  ignore = "git diff --quiet $CACHED_COMMIT_REF $COMMIT_REF -- web tools/make_web_data.py tools/web templates assets/ui '*.py' netlify.toml"
+
+[build.environment]
+  PYTHON_VERSION = "3.11"
+
+# Los archivos de la web se revisan en cada visita (así llegan las actualizaciones al tiro).
+[[headers]]
+  for = "/*"
+  [headers.values]
+    Cache-Control = "no-cache"
+    X-Content-Type-Options = "nosniff"
