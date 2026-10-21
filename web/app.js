@@ -233,9 +233,9 @@ async function pull() {
 function pending() { return JSON.parse(localStorage.getItem(`pr_pending_${S.ws.code}`) || "[]"); }
 function setPending(list_) { localStorage.setItem(`pr_pending_${S.ws.code}`, JSON.stringify(list_)); }
 
-async function send(changes) {
+async function send(changes, settings = {}) {
   const name = `${C.stamp()}-${S.device}.json`;
-  const bundle = C.bundle(S.device, S.ws.code, changes);
+  const bundle = C.bundle(S.device, S.ws.code, changes, settings);
   C.applyBundle(S.state, name, bundle);            // se ve al instante
   S.bundles.push([name, bundle]);
   setPending([...pending(), { name, bundle }]);
@@ -402,6 +402,7 @@ function renderWeek() {
 function render() {
   if (S.tab === "matrix") renderMatrix();
   if (S.tab === "reports") renderReports();
+  if (S.tab === "settings") renderSettings();
   renderSampling();
 }
 
@@ -902,6 +903,144 @@ async function saveMeasure(ev) {
   } finally { $("msave").disabled = false; }
 }
 
+// ================================================================== ajustes
+function isPredio() { return S.ws?.profile === "predio"; }
+
+function renderSettings() {
+  const predio = isPredio();
+  $("vlabel").textContent = predio ? "SECTORES DEL PREDIO" : "VARIEDADES Y PARCELAS";
+  $("vadd").textContent = predio ? "＋ Nuevo sector" : "＋ Nueva variedad";
+  const show = $("vshowarch").checked;
+  const box = $("vlist");
+  box.innerHTML = "";
+  const list = C.allVarieties(S.state).filter((v) => show || v.active !== 0);
+  if (!list.length) box.innerHTML = `<p class="muted small">Aún no hay ${predio ? "sectores" : "variedades"}.</p>`;
+  for (const v of list) {
+    const b = document.createElement("button");
+    b.className = "vrow" + (v.active === 0 ? " arch" : "");
+    b.innerHTML = `<div><div class="place"></div><b></b><div class="tag"></div></div><span class="badge"></span>`;
+    b.querySelector(".place").textContent = C.unitPlace(v);
+    b.querySelector("b").textContent = C.unitMain(v);
+    b.querySelector(".tag").textContent = [v.code && `Código ${v.code}`, v.treatment && `Tratamiento ${v.treatment} · repetición ${v.rep}`,
+      v.notes].filter(Boolean).join(" · ");
+    b.querySelector(".badge").textContent = v.active === 0 ? "ARCHIVADA" : "EDITAR";
+    b.onclick = () => openVariety(v);
+    box.appendChild(b);
+  }
+  // Ensayo de tratamientos (solo I+D)
+  $("trialcard").hidden = predio;
+  if (!predio) {
+    const parcels = C.allVarieties(S.state).filter((v) => v.active !== 0 && v.treatment != null);
+    const nt = C.setting(S.state, "trial_treatments", 0) || Math.max(0, ...parcels.map((v) => Number(v.treatment)));
+    const nr = C.setting(S.state, "trial_reps", 0) || Math.max(0, ...parcels.map((v) => Number(v.rep)));
+    if (document.activeElement !== $("tnum")) $("tnum").value = nt || "";
+    if (document.activeElement !== $("trep")) $("trep").value = nr || "";
+    const tl = $("tlist");
+    tl.innerHTML = "";
+    const meta = new Map(C.rows(S.state, "treatments").map((t) => [Number(t.num), t]));
+    for (let t = 1; t <= nt; t++) {
+      const m = meta.get(t) || {};
+      const row = document.createElement("div");
+      row.className = "trow";
+      row.innerHTML = `<b>T${t}</b><input placeholder="Nombre (ej. Testigo)"><input placeholder="Descripción"><input placeholder="Variedad (opcional)"><button class="ghost">Guardar</button>`;
+      const [n, d, cv] = row.querySelectorAll("input");
+      n.value = m.name || ""; d.value = m.description || ""; cv.value = m.cultivar || "";
+      row.querySelector("button").onclick = async () => {
+        try {
+          await send([C.treatmentChange(S.state, t, { name: n.value, description: d.value, cultivar: cv.value })]);
+          $("tmsg").textContent = `T${t} guardado.`;
+        } catch (e) { $("tmsg").textContent = e.message; }
+      };
+      tl.appendChild(row);
+    }
+  }
+  // Primera semana
+  const season = C.seasonOf(C.parseDate(S.week));
+  $("fwseason").textContent = C.seasonTitle(season).replace("Temporada", "temporada");
+  const sel = $("fweek");
+  const fixed = C.setting(S.state, `first_week:${season}`);
+  sel.innerHTML = `<option value="">Automática (la primera con registros)</option>`;
+  for (let d = C.seasonFirstMonday(season), i = 0; i < 53 && C.seasonOf(d) === season; d = C.addDays(d, 7), i++) {
+    const o = document.createElement("option");
+    o.value = C.iso(d); o.textContent = `${C.weekTitle(C.iso(d))} · ${C.weekLabel(C.iso(d))}`;
+    sel.appendChild(o);
+  }
+  sel.value = fixed || "";
+  sel.dataset.season = season;
+}
+
+const RIEGO = [1, 2, 3, 4];
+function openVariety(v) {
+  S.editV = v || null;
+  const predio = isPredio();
+  $("vtitle").textContent = v ? (predio ? "Editar sector" : "Editar variedad") : (predio ? "Nuevo sector" : "Nueva variedad");
+  const f = $("vfields");
+  const field = (label, html, full = false) => `<label class="field${full ? " full" : ""}">${label}${html}</label>`;
+  f.innerHTML = predio
+    ? field("Variedad", `<input id="fcult" placeholder="Ej. Tulameen">`, true)
+      + field("Equipo de riego", `<select id="firr"><option value="">—</option>${RIEGO.map((n) => `<option value="${n}">Equipo ${n}</option>`).join("")}</select>`)
+      + field("Sector", `<input id="fsec" type="number" min="1" max="99">`)
+      + field("Año de plantación", `<input id="fyear" type="number" min="1950" max="2100" placeholder="Opcional">`)
+      + field("Código", `<input id="fcode" placeholder="Opcional">`)
+    : field("Nombre", `<input id="fname" placeholder="Ej. Glen Ample">`, true)
+      + field("Código", `<input id="fcode" placeholder="Opcional (va en el nombre de las fotos)">`)
+      + field("Notas", `<input id="fnotes" placeholder="Opcional">`, true);
+  const set = (id, val) => { if ($(id)) $(id).value = val ?? ""; };
+  if (v) {
+    set("fcult", v.cultivar); set("firr", v.irrigation); set("fsec", v.sector); set("fyear", v.plant_year);
+    set("fcode", v.code); set("fname", v.name); set("fnotes", v.notes);
+  }
+  $("vmsg").textContent = "";
+  $("varchive").hidden = !v;
+  $("varchive").textContent = v && v.active === 0 ? "Restaurar" : "Archivar";
+  $("vdialog").showModal();
+}
+
+async function saveVariety(ev) {
+  ev.preventDefault();
+  const v = S.editV;
+  try {
+    const ch = isPredio()
+      ? C.unitChange(S.state, v, { cultivar: $("fcult").value, code: $("fcode").value.trim(), sector: $("fsec").value,
+        irrigation: $("firr").value, plant_year: $("fyear").value })
+      : C.varietyChange(S.state, v, { name: $("fname").value, code: $("fcode").value.trim(), notes: $("fnotes").value.trim() });
+    await send([ch]);
+    $("vdialog").close();
+    render();
+  } catch (e) { $("vmsg").textContent = e.message; }
+}
+
+async function toggleArchive() {
+  const v = S.editV;
+  if (!v) return;
+  const archive = v.active !== 0;
+  if (archive && !confirm(`¿Archivar «${C.unitMain(v)}»?\nDeja de aparecer en el muestreo; sus registros se conservan y se puede restaurar.`)) return;
+  try {
+    await send([C.varietyChange(S.state, v, { active: archive ? 0 : 1 })]);
+    $("vdialog").close();
+    render();
+  } catch (e) { $("vmsg").textContent = e.message; }
+}
+
+async function applyTrial() {
+  try {
+    const r = C.trialSetup(S.state, $("tnum").value, $("trep").value);
+    if (r.archived && !confirm(`Se archivarán ${r.archived} parcela(s) que sobran (sus registros se conservan). ¿Continuar?`)) return;
+    await send(r.changes, r.settings);
+    $("tmsg").textContent = `Listo: ${r.added} parcela(s) nuevas, ${r.restored} restaurada(s), ${r.archived} archivada(s).`;
+    render();
+  } catch (e) { $("tmsg").textContent = e.message; }
+}
+
+async function setFirstWeek() {
+  const sel = $("fweek");
+  try {
+    await send([], C.firstWeekSettings(Number(sel.dataset.season), sel.value || null));
+    status(sel.value ? `Primera semana: ${C.weekLabel(sel.value)}` : "Primera semana automática");
+    render();
+  } catch (e) { status(e.message); }
+}
+
 // ================================================================== matriz y plano
 function renderMatrix() {
   const season = S.mSeason ?? C.seasonOf(C.parseDate(S.week));
@@ -1187,7 +1326,7 @@ async function boot() {
   document.querySelectorAll(".tabs button").forEach((b) => (b.onclick = () => {
     S.tab = b.dataset.tab;
     document.querySelectorAll(".tabs button").forEach((x) => x.classList.toggle("on", x === b));
-    for (const t of ["sampling", "matrix", "reports"]) $(`tab-${t}`).hidden = t !== S.tab;
+    for (const t of ["sampling", "matrix", "reports", "settings"]) $(`tab-${t}`).hidden = t !== S.tab;
     if (S.tab === "reports") warmPdf().catch(() => {});     // el generador de PDF se precarga
     render();
   }));
@@ -1202,6 +1341,12 @@ async function boot() {
   $("today").onclick = () => { S.week = C.iso(C.mondayOf(C.todayUTC())); render(); };
   $("dsave").onclick = saveDetail;
   $("msave").onclick = saveMeasure;
+  $("vadd").onclick = () => openVariety(null);
+  $("vsave").onclick = saveVariety;
+  $("varchive").onclick = toggleArchive;
+  $("vshowarch").onchange = renderSettings;
+  $("tapply").onclick = applyTrial;
+  $("fweek").onchange = setFirstWeek;
   $("mdelweek").onclick = () => deleteMeasure(false);
   $("mdelall").onclick = () => deleteMeasure(true);
   $("skipweek").onchange = (e) => setSkipped(e.target.checked);

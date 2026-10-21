@@ -217,9 +217,9 @@ export function photoDeleteChanges(state, uids) {
   return changes;
 }
 
-export function bundle(device, workspace, changes) {
+export function bundle(device, workspace, changes, settings = {}) {
   return { format: 1, device, workspace, created: nowTs(),
-    upto: changes.length ? changes[changes.length - 1].ts : null, changes, settings: {} };
+    upto: changes.length ? changes[changes.length - 1].ts : null, changes, settings };
 }
 export function stamp() {                 // nombre del paquete (= sync_drive._stamp)
   return new Date().toISOString().replace(/[-:]/g, "").replace("Z", "").replace(".", "").slice(0, 18);
@@ -251,10 +251,13 @@ export function hasData(state, obs) {
 export function seasonWeeks(state, season) {
   const skipped = new Set(rows(state, "sampling_weeks").filter((w) => w.skipped).map((w) => w.start_date || w.uid));
   const withData = new Set(rows(state, "observations").filter((o) => hasData(state, o)).map((o) => o.week_id));
-  const starts = [...withData].filter((s) => seasonOf(parseDate(s)) === season && !skipped.has(s)).sort();
+  // Primera semana fija en Ajustes (= report_first_week): desde ahí, sin borrar las anteriores.
+  const fixed = setting(state, `first_week:${season}`);
+  const starts = [...withData].filter((s) => seasonOf(parseDate(s)) === season && !skipped.has(s)
+    && (!fixed || s >= fixed)).sort();
   if (!starts.length) return [];
   const out = [];
-  for (let d = parseDate(starts[0]); iso(d) <= starts[starts.length - 1]; d = addDays(d, 7)) {
+  for (let d = parseDate(fixed && fixed < starts[0] ? fixed : starts[0]); iso(d) <= starts[starts.length - 1]; d = addDays(d, 7)) {
     if (!skipped.has(iso(d))) out.push(iso(d));
   }
   return out;
@@ -378,6 +381,103 @@ export function measureDeleteChanges(state, measureUid, weekStart = null) {
     .map((e) => ({ entity: "measure_entries", uid: e.uid, ts, deleted: 1 }));
   if (!weekStart) changes.push({ entity: "measures", uid: measureUid, ts, deleted: 1 });
   return changes;
+}
+
+// ------------------------------------------------------------------ ajustes (variedades, ensayo)
+export function setting(state, key, def = null) {     // = Database.get_setting (valor JSON)
+  const raw = state.settings[key];
+  if (raw === undefined || raw === null) return def;
+  try { const v = JSON.parse(raw); return v === null ? def : v; } catch { return raw; }
+}
+export function allVarieties(state) {                 // con las archivadas
+  return rows(state, "varieties")
+    .sort((a, b) => (a.sort_order || 0) - (b.sort_order || 0) || (a.name || "").localeCompare(b.name || "", "es"));
+}
+function sameName(a, b) { return (a || "").trim().toLowerCase() === (b || "").trim().toLowerCase(); }
+
+// Alta o edición de una variedad (= add_variety / update_variety): el nombre no se repite.
+export function varietyChange(state, v, fields) {
+  const ts = nowTs();
+  const data = { name: "", code: "", sector: null, irrigation: null, notes: "", active: 1,
+    sort_order: 0, created_at: ts, updated_at: ts, treatment: null, rep: null, cultivar: null, plant_year: null };
+  if (v) { const { uid: _u, ...old } = v; Object.assign(data, old); }
+  Object.assign(data, fields, { updated_at: ts });
+  data.name = (data.name || "").trim();
+  if (!data.name) throw new Error("El nombre no puede quedar vacío.");
+  const other = allVarieties(state).find((x) => x.uid !== v?.uid && sameName(x.name, data.name));
+  if (other && other.active !== 0) throw new Error(`Ya existe «${other.name}».`);
+  if (other && !v) return { entity: "varieties", uid: other.uid, ts, deleted: 0, data: { ...other, ...fields, name: other.name, active: 1, updated_at: ts } };
+  if (!v) data.sort_order = Math.max(0, ...allVarieties(state).map((x) => Number(x.sort_order) || 0)) + 1;
+  return { entity: "varieties", uid: v?.uid || newUid(), ts, deleted: 0, data };
+}
+
+export function unitName(sector, irrigation) {        // = phenology.unit_name
+  const parts = [];
+  if (irrigation) parts.push(`Equipo de riego ${Number(irrigation)}`);
+  if (sector) parts.push((parts.length ? "sector" : "Sector") + ` ${Number(sector)}`);
+  return parts.join(", ");
+}
+// Unidad de predio (= Database.save_unit): «Equipo de riego n, sector m» + variedad aparte.
+export function unitChange(state, v, { cultivar, code = "", sector = null, irrigation = null, plant_year = null }) {
+  cultivar = (cultivar || "").trim();
+  sector = sector ? Number(sector) : null; irrigation = irrigation ? Number(irrigation) : null;
+  plant_year = plant_year ? Number(plant_year) : null;
+  if (!cultivar) throw new Error("Indique la variedad.");
+  if (!sector && !irrigation) throw new Error("Elija el sector y/o el equipo de riego.");
+  if (plant_year !== null && !(plant_year >= 1950 && plant_year <= 2100)) throw new Error("El año de plantación no es válido.");
+  const base = unitName(sector, irrigation);
+  const all = allVarieties(state);
+  const dup = all.find((x) => x.active !== 0 && x.uid !== v?.uid && (Number(x.sector) || 0) === (sector || 0)
+    && (Number(x.irrigation) || 0) === (irrigation || 0) && sameName(x.cultivar, cultivar) && (Number(x.plant_year) || 0) === (plant_year || 0));
+  if (dup) throw new Error(`Ya existe «${base}» con la variedad ${cultivar}${plant_year ? ` (${plant_year}).` : "."}`);
+  const cands = [base, `${base} · ${cultivar}`, ...(plant_year ? [`${base} · ${cultivar} ${plant_year}`] : [])];
+  const name = cands.find((c) => { const o = all.find((x) => sameName(x.name, c)); return !o || o.uid === v?.uid || (o.active === 0 && !v); });
+  if (!name) throw new Error(`Ya existe «${base}» con la variedad ${cultivar}.`);
+  const reuse = !v && all.find((x) => sameName(x.name, name) && x.active === 0);
+  return varietyChange(state, v || reuse || null, { name, code: code || "", cultivar, sector, irrigation, plant_year, active: 1 });
+}
+
+// Ensayo de tratamientos × repeticiones (= Database.setup_trial): parcelas T1R1…TnRm; las que
+// sobran se archivan (sus registros quedan) y reaparecen al volver a aumentar.
+export const MAX_TREATMENTS = 30, MAX_REPS = 12;
+export function trialSetup(state, nt, nr) {
+  nt = Number(nt); nr = Number(nr);
+  if (!(nt >= 1 && nt <= MAX_TREATMENTS) || !(nr >= 1 && nr <= MAX_REPS)) {
+    throw new Error(`Tratamientos: 1 a ${MAX_TREATMENTS} · repeticiones: 1 a ${MAX_REPS}.`);
+  }
+  const ts = nowTs();
+  const changes = [];
+  const out = { added: 0, restored: 0, archived: 0 };
+  const all = allVarieties(state);
+  const tre = new Map(rows(state, "treatments").map((t) => [Number(t.num), t]));
+  for (let t = 1; t <= nt; t++) {
+    if (!tre.has(t)) changes.push({ entity: "treatments", uid: `T${t}`, ts, deleted: 0, data: { num: t, name: "", description: "", cultivar: null } });
+    for (let r = 1; r <= nr; r++) {
+      const name = `T${t}R${r}`;
+      const cur = all.find((x) => Number(x.treatment) === t && Number(x.rep) === r) || all.find((x) => sameName(x.name, name));
+      if (!cur) out.added++; else if (cur.active === 0) out.restored++;
+      if (cur && cur.active !== 0 && Number(cur.treatment) === t && Number(cur.rep) === r && Number(cur.sort_order) === t * 100 + r) continue;
+      const base = cur ? (({ uid: _u, ...o }) => o)(cur) : { name, code: name, sector: null, irrigation: null, notes: "", created_at: ts, cultivar: null, plant_year: null };
+      changes.push({ entity: "varieties", uid: cur?.uid || newUid(), ts, deleted: 0,
+        data: { ...base, treatment: t, rep: r, active: 1, sort_order: t * 100 + r, updated_at: ts } });
+    }
+  }
+  for (const v of all) {
+    if (v.active !== 0 && v.treatment != null && (Number(v.treatment) > nt || Number(v.rep) > nr)) {
+      const { uid, ...o } = v;
+      changes.push({ entity: "varieties", uid, ts, deleted: 0, data: { ...o, active: 0, updated_at: ts } });
+      out.archived++;
+    }
+  }
+  return { ...out, changes, settings: { trial_treatments: JSON.stringify(nt), trial_reps: JSON.stringify(nr) } };
+}
+export function treatmentChange(state, num, { name = "", description = "", cultivar = null }) {
+  return { entity: "treatments", uid: `T${num}`, ts: nowTs(), deleted: 0,
+    data: { num: Number(num), name: (name || "").trim(), description: (description || "").trim(), cultivar: (cultivar || "").trim() || null } };
+}
+// Primera semana fija de la temporada (null = automática, la primera con datos).
+export function firstWeekSettings(season, start) {
+  return { [`first_week:${season}`]: JSON.stringify(start || null) };
 }
 
 // ------------------------------------------------------------------ tratamientos

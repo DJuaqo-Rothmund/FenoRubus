@@ -40,6 +40,7 @@
       <button data-tab="sampling" class="on">Muestreo</button>
       <button data-tab="matrix">Matriz</button>
       <button data-tab="reports">Informes</button>
+      <button data-tab="settings">Ajustes</button>
     </nav>
     <div id="tab-sampling">
     <section class="card weekbar">
@@ -110,7 +111,47 @@
         <p id="rmsg" class="muted small"></p>
       </section>
     </div>
+    <div id="tab-settings" hidden>
+      <section class="card">
+        <div class="row-h"><div class="label" id="vlabel">VARIEDADES</div><button id="vadd" class="primary">＋ Nueva</button></div>
+        <label class="skip"><input type="checkbox" id="vshowarch"> Mostrar archivadas</label>
+        <div id="vlist" class="vlist"></div>
+      </section>
+      <section class="card" id="trialcard" hidden>
+        <div class="label">ENSAYO DE TRATAMIENTOS</div>
+        <div class="trialsize">
+          <label>Tratamientos <input id="tnum" type="number" min="1" max="30"></label>
+          <span>×</span>
+          <label>Repeticiones <input id="trep" type="number" min="1" max="12"></label>
+          <button id="tapply" class="ghost">Aplicar</button>
+        </div>
+        <p class="muted small">Crea las parcelas T1R1, T1R2…; si se reducen, las que sobran se archivan (sus registros se conservan).</p>
+        <div id="tlist" class="tlist"></div>
+        <p id="tmsg" class="muted small"></p>
+      </section>
+      <section class="card">
+        <div class="label">TEMPORADA</div>
+        <label class="field">Primera semana de la <span id="fwseason"></span>
+          <select id="fweek"></select>
+        </label>
+        <p class="muted small">La matriz y los informes parten desde esa semana. No se borra ningún registro.</p>
+      </section>
+    </div>
   </main>
+
+  <dialog id="vdialog">
+    <form method="dialog" class="detail">
+      <div class="dhead"><h2 id="vtitle">Variedad</h2><button value="cancel" class="round" aria-label="Cerrar">✕</button></div>
+      <div id="vfields" class="vfields"></div>
+      <p id="vmsg" class="warn small"></p>
+      <div class="actions">
+        <button type="button" id="varchive" class="ghost danger-ghost">Archivar</button>
+        <span class="spacer"></span>
+        <button value="cancel" class="ghost">Cancelar</button>
+        <button id="vsave" value="default" class="primary">Guardar</button>
+      </div>
+    </form>
+  </dialog>
 
   <dialog id="detail">
     <form method="dialog" class="detail">

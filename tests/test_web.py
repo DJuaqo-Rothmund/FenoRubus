@@ -117,3 +117,27 @@ def test_web_stats_match_trial_stats(tmp_path):
         assert (m is None) == (pm is None) and (pm is None or m == pytest.approx(pm))
         assert (se is None) == (pse is None) and (pse is None or se == pytest.approx(pse))
     assert res["tcrit"] == pytest.approx([st.t_crit(d) for d in (2, 6, 20)], rel=1e-9)
+
+
+def test_web_settings_changes_apply_in_app(tmp_path):
+    """Ajustes hechos en la web (unidad de predio, variedad, ensayo de tratamientos, nombre de
+    tratamiento y primera semana) quedan en la app igual que si se hubieran hecho ahí."""
+    db = Database(str(tmp_path / "app" / "AM.sqlite3"), code="AM")
+    db.add_variety("Variedad Web", code="VW")
+    bundle = sync.export_changes(db, str(tmp_path / "app"))
+    res = _node("settings", bundle, tmp_path)
+    assert res["unit"] == "Equipo de riego 1, sector 2"
+    assert res["errors"][0].startswith("Ya existe «Equipo de riego 1, sector 2» con la variedad")
+    assert res["errors"][1] == "Ya existe «Variedad Web»."
+    assert res["counts"] == [6, 0, 2]
+    sync.apply_changes(db, res["bundle"], str(tmp_path / "app"), week_for_date=db.week_for_date)
+    u = db.query_one("SELECT * FROM varieties WHERE name='Equipo de riego 1, sector 2'")
+    assert (u["cultivar"], u["sector"], u["irrigation"], u["plant_year"], u["code"]) == ("Tulameen", 2, 1, 2019, "TU")
+    v = db.query_one("SELECT * FROM varieties WHERE name='Variedad Web'")
+    assert (v["code"], v["notes"]) == ("VWX", "editada en la web")
+    assert db.trial_size() == (2, 2)
+    trts = db.list_treatments()
+    assert [t["label"] for t in trts] == ["T1 · Testigo", "T2"]
+    assert [p["name"] for p in trts[0]["parcels"]] == ["T1R1", "T1R2"] and trts[0]["variety"] == "Heritage"
+    assert db.query_one("SELECT active FROM varieties WHERE name='T3R2'")["active"] == 0
+    assert db.first_week_date(2026) == dt.date(2026, 9, 7)

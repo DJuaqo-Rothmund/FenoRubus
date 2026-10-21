@@ -23,6 +23,30 @@ if (mode === "stats") {
   const seq = [null, 7, 31, 65, 891, 99].map(C.seqColor);
   const sect = [[1, 1, false], [2, 5, false], [3, 10, true], [4, 3, false]].map(([e, s, f]) => C.sectorColor(e, s, f));
   writeFileSync(output, JSON.stringify({ dates: out, names, units, codes: [7, 65, 891].map(C.codeStr), seq, sect }));
+} else if (mode === "settings") {
+  // Ajustes hechos en la web: unidad de predio, edición de variedad, ensayo de tratamientos,
+  // nombre de un tratamiento y primera semana fija.
+  const st = C.emptyState();
+  C.applyBundle(st, "p1.json", data);
+  const local = (changes) => C.applyBundle(st, `l${Math.random()}`, { changes });
+  const errors = [];
+  const tryErr = (f) => { try { f(); errors.push(null); } catch (e) { errors.push(e.message); } };
+  const u = C.unitChange(st, null, { cultivar: "Tulameen", code: "TU", sector: 2, irrigation: 1, plant_year: 2019 });
+  local([u]);
+  tryErr(() => C.unitChange(st, null, { cultivar: "tulameen", sector: 2, irrigation: 1, plant_year: 2019 }));
+  tryErr(() => C.varietyChange(st, null, { name: "variedad web" }));
+  const v = C.allVarieties(st).find((x) => x.name === "Variedad Web");
+  const e = C.varietyChange(st, v, { code: "VWX", notes: "editada en la web" });
+  local([e]);
+  const t1 = C.trialSetup(st, 3, 2);
+  local(t1.changes);
+  const t2 = C.trialSetup(st, 2, 2);          // reduce: archiva T3R1 y T3R2
+  local(t2.changes);
+  const tn = C.treatmentChange(st, 1, { name: "Testigo", description: "sin aplicación", cultivar: "Heritage" });
+  const all = [u, e, ...t1.changes, ...t2.changes, tn];
+  const settings = { ...t1.settings, ...t2.settings, ...C.firstWeekSettings(2026, "2026-09-07") };
+  writeFileSync(output, JSON.stringify({ bundle: C.bundle("webtest", "AM", all, settings), errors,
+    counts: [t1.added, t1.archived, t2.archived], unit: u.data.name }));
 } else {
   const st = C.emptyState();
   C.applyBundle(st, "p1.json", data);
