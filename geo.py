@@ -285,3 +285,43 @@ class LocationRequest:
             except Exception:  # noqa: BLE001
                 pass
         self._timer = Clock.schedule_once(self.finish, timeout or self.TIMEOUT_S)
+
+
+# ------------------------------------------------------------ mapa de calor de fotos
+# Rampa del calor: verde (pocas fotos) → amarillo → naranjo → rojo (muchas).
+HEAT_RAMP = [(0.0, (111, 168, 106)), (0.35, (244, 180, 0)), (0.7, (255, 112, 67)), (1.0, (198, 40, 40))]
+
+
+def ramp(t: float) -> tuple[int, int, int]:
+    for (t0, c0), (t1, c1) in zip(HEAT_RAMP, HEAT_RAMP[1:]):
+        if t <= t1:
+            k = (t - t0) / (t1 - t0) if t1 > t0 else 0
+            return tuple(round(a + (b - a) * k) for a, b in zip(c0, c1))
+    return HEAT_RAMP[-1][1]
+
+
+def heat_grid(points: list[tuple[float, float, float]], radius: float) -> tuple[list[float], int, int, tuple]:
+    """Suma de núcleos suaves (1 - d²/r²)² de cada punto (x, y, peso), en una grilla de celdas
+    de 1×1 (mismas unidades que x, y). Devuelve (valores, ancho, alto, (x0, y0)); fila 0 = y0."""
+    if not points:
+        return [], 0, 0, (0, 0)
+    x0 = math.floor(min(p[0] for p in points) - radius)
+    y0 = math.floor(min(p[1] for p in points) - radius)
+    gw = int(math.ceil(max(p[0] for p in points) + radius)) - x0 + 1
+    gh = int(math.ceil(max(p[1] for p in points) + radius)) - y0 + 1
+    grid = [0.0] * (gw * gh)
+    r2 = radius * radius
+    ri = int(math.ceil(radius))
+    for px, py, w in points:
+        cx, cy = px - x0, py - y0
+        for j in range(max(0, int(cy) - ri), min(gh, int(cy) + ri + 2)):
+            dy2 = (j + .5 - cy) ** 2
+            if dy2 >= r2:
+                continue
+            row = j * gw
+            for i in range(max(0, int(cx) - ri), min(gw, int(cx) + ri + 2)):
+                d2 = (i + .5 - cx) ** 2 + dy2
+                if d2 < r2:
+                    k = 1 - d2 / r2
+                    grid[row + i] += w * k * k
+    return grid, gw, gh, (x0, y0)

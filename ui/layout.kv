@@ -1942,6 +1942,16 @@
                         id: season_chip
                         pos_hint: {"center_y": .5}
                         on_release: root.pick_season()
+                    Widget:
+                        size_hint_y: None
+                        height: dp(1)
+                    MapRound:
+                        icon: "map-marker-radius-outline"
+                        font_size: dp(22)
+                        size: dp(38), dp(38)
+                        text_color: c(theme.BERRY)
+                        pos_hint: {"center_y": .5}
+                        on_release: app.open_heatmap()
                 MDGridLayout:
                     cols: 2
                     spacing: dp(8)
@@ -3141,6 +3151,135 @@
         fg: c(theme.MIND_ACCENT) if root.in_reference else c(theme.MIND_TEXT)
         pos_hint: {"center_y": .5}
 
+
+<HeatmapScreen>:
+    md_bg_color: 0, 0, 0, 0
+    MDBoxLayout:
+        orientation: "vertical"
+        TopBar:
+            id: bar
+            title: "Mapa de fotos"
+            left_action_items: [["arrow-left", lambda x: app.back()]]
+        FloatLayout:
+            id: stage
+            MDBoxLayout:
+                adaptive_size: True
+                spacing: dp(8)
+                pos_hint: {"center_x": .5, "top": .985}
+                SegButton:
+                    text: "Toda la temporada"
+                    selected: root.whole_season
+                    size_hint: None, None
+                    size: dp(156), dp(38)
+                    on_release: root.set_scope(True)
+                SegButton:
+                    text: "Esta semana"
+                    selected: not root.whole_season
+                    size_hint: None, None
+                    size: dp(118), dp(38)
+                    on_release: root.set_scope(False)
+            MDBoxLayout:
+                orientation: "vertical"
+                adaptive_size: True
+                spacing: dp(8)
+                pos_hint: {"right": .97, "center_y": .55}
+                MapRound:
+                    icon: "plus"
+                    on_release: root.zoom(1)
+                MapRound:
+                    icon: "minus"
+                    on_release: root.zoom(-1)
+            PaperCard:
+                size_hint_x: .94
+                pos_hint: {"center_x": .5, "y": .02}
+                MDBoxLayout:
+                    adaptive_height: True
+                    spacing: dp(8)
+                    MDIcon:
+                        icon: "fire"
+                        theme_text_color: "Custom"
+                        text_color: c(theme.BERRY)
+                        size_hint: None, None
+                        size: dp(24), dp(24)
+                        pos_hint: {"center_y": .5}
+                    MDLabel:
+                        text: root.info
+                        font_style: "Caption"
+                        adaptive_height: True
+                        pos_hint: {"center_y": .5}
+                        theme_text_color: "Custom"
+                        text_color: c(theme.LEAF_DARK)
+                HeatLegend:
+                    size_hint_y: None
+                    height: dp(10)
+                MDBoxLayout:
+                    adaptive_height: True
+                    Muted:
+                        text: "Pocas fotos"
+                    Muted:
+                        text: "Muchas"
+                        halign: "right"
+                MDBoxLayout:
+                    orientation: "vertical"
+                    adaptive_height: True
+                    spacing: dp(6)
+                    opacity: 1 if root.has_pick else 0
+                    disabled: not root.has_pick
+                    height: self.minimum_height if root.has_pick else 0
+                    size_hint_y: None
+                    MDLabel:
+                        text: root.pick_title
+                        bold: True
+                        adaptive_height: True
+                        theme_text_color: "Custom"
+                        text_color: c(theme.LEAF_DARK)
+                    MDLabel:
+                        text: root.pick_detail
+                        font_style: "Caption"
+                        adaptive_height: True
+                        theme_text_color: "Custom"
+                        text_color: c(theme.MUTED)
+                    PrimaryButton:
+                        text: "Abrir registro"
+                        on_release: root.open_pick()
+
+<MapRound@ButtonBehavior+MDIcon>:
+    size_hint: None, None
+    size: dp(44), dp(44)
+    halign: "center"
+    theme_text_color: "Custom"
+    text_color: c(theme.LEAF_DARK)
+    canvas.before:
+        Color:
+            rgba: 1, 1, 1, .88
+        Ellipse:
+            pos: self.pos
+            size: self.size
+
+<HeatLegend@Widget>:
+    canvas:
+        Color:
+            rgba: c("#6FA86A")
+        RoundedRectangle:
+            pos: self.x, self.y
+            size: self.width * .36, self.height
+            radius: [dp(5), 0, 0, dp(5)]
+        Color:
+            rgba: c("#F4B400")
+        Rectangle:
+            pos: self.x + self.width * .34, self.y
+            size: self.width * .34, self.height
+        Color:
+            rgba: c("#FF7043")
+        Rectangle:
+            pos: self.x + self.width * .66, self.y
+            size: self.width * .2, self.height
+        Color:
+            rgba: c("#C62828")
+        RoundedRectangle:
+            pos: self.x + self.width * .84, self.y
+            size: self.width * .16, self.height
+            radius: [0, dp(5), dp(5), 0]
 
 <TimelineScreen>:
     md_bg_color: 0, 0, 0, 0

@@ -2038,3 +2038,23 @@ def test_desktop_google_login_with_browser_and_refresh(db):
         assert False
     except NeedsConsent:
         assert db.get_setting("drive_refresh_token") is None  # pide iniciar sesión de nuevo
+
+
+def test_photo_locations_and_heat_grid(db):
+    """Mapa de fotos: registros con fotos y ubicación (peso = n.º de fotos) y la grilla de calor."""
+    from geo import heat_grid, ramp
+    w = db.week_for_date(dt.date(2026, 10, 12))
+    a, b = db.add_variety("Mapa A"), db.add_variety("Mapa B")
+    oa = db.get_or_create_observation(a, w["id"])["id"]
+    ob = db.get_or_create_observation(b, w["id"])["id"]
+    for k in range(3):
+        db.add_photo(oa, "detail", f"/x/a{k}.jpg")
+    db.add_photo(ob, "detail", "/x/b.jpg")
+    db.update_observation(oa, latitude=-33.45, longitude=-70.66, gps_source="gps")
+    rows, missing = db.photo_locations(w["season"])
+    assert [(r["variety_id"], r["weight"]) for r in rows] == [(a, 3)] and missing == 1
+    assert db.photo_locations(w["season"], week_id=w["id"])[0][0]["lat"] == -33.45
+    grid, gw, gh, (x0, y0) = heat_grid([(10.0, 10.0, 3), (30.0, 10.0, 1)], 5)
+    peak = max(range(len(grid)), key=grid.__getitem__)
+    assert (x0 + peak % gw, y0 + peak // gw) in {(9, 9), (9, 10), (10, 9), (10, 10)}   # el más pesado
+    assert ramp(0) == (111, 168, 106) and ramp(1) == (198, 40, 40)

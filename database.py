@@ -1125,6 +1125,23 @@ class Database:
         return week
 
     # ----------------------------------------------------------- observations
+    def photo_locations(self, season: int, week_id: int | None = None) -> tuple[list[dict], int]:
+        """Registros con fotos y ubicación (mapa de calor): [{lat, lon, weight=n.º de fotos,
+        variety_id, week_id, …}] y cuántas fotos de la temporada no tienen ubicación."""
+        where = "w.season=? AND COALESCE(w.skipped, 0) = 0"
+        params: list = [season]
+        if week_id is not None:
+            where += " AND w.id=?"
+            params.append(week_id)
+        rows = self.query(
+            "SELECT o.id, o.variety_id, o.week_id, o.latitude AS lat, o.longitude AS lon, o.bbch_code, "
+            "o.gps_source, w.start_date, COUNT(p.id) AS weight FROM observations o "
+            "JOIN sampling_weeks w ON w.id = o.week_id JOIN photos p ON p.observation_id = o.id "
+            f"WHERE {where} GROUP BY o.id", params)
+        located = [r for r in rows if r["lat"] is not None and r["lon"] is not None]
+        missing = sum(r["weight"] for r in rows if r["lat"] is None or r["lon"] is None)
+        return located, missing
+
     def get_observation(self, variety_id: int, week_id: int) -> dict | None:
         return self.query_one(
             "SELECT * FROM observations WHERE variety_id=? AND week_id=?", (variety_id, week_id))

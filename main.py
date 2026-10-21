@@ -258,6 +258,16 @@ class FenoRubusApp(MDApp):
         self.go("workspaces")
 
     @property
+    def heatmap(self):
+        from ui.heatmap import HeatmapScreen
+        return self._screen(HeatmapScreen, "heatmap")
+
+    def open_heatmap(self):
+        """Mapa de calor de dónde se tomaron las fotos (desde «Vista previa»)."""
+        self.heatmap
+        self.go("heatmap")
+
+    @property
     def sectors(self):
         return self._screen(SectorsScreen, "sectors")
 
