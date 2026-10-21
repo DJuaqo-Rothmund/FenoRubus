@@ -27,7 +27,7 @@ self.onmessage = async ({ data: m }) => {
     const { py, wr } = await boot(m.indexURL);
     say("Preparando los datos…");
     wr.load(m.ws.code, JSON.stringify(m.ws), JSON.stringify(m.bundles));
-    const paths = m.kind === "treatments" ? [] : JSON.parse(wr.photos(m.ws.code, m.kind, m.arg, m.season));
+    const paths = ["treatments", "excel"].includes(m.kind) ? [] : JSON.parse(wr.photos(m.ws.code, m.kind, m.arg, m.season));
     const need = [...new Set(paths)].filter((p) => !py.FS.analyzePath(`/data/${p}`).exists);
     if (need.length) {
       const photos = await new Promise((res) => { waiting.set(m.id, res); self.postMessage({ id: m.id, need }); });
@@ -37,7 +37,7 @@ self.onmessage = async ({ data: m }) => {
         py.FS.writeFile(file, new Uint8Array(buf));
       }
     }
-    say("Generando el PDF…");
+    say(m.kind === "excel" ? "Generando la planilla Excel…" : "Generando el PDF…");
     const path = wr.report(m.ws.code, m.kind, m.arg, m.season);
     const bytes = py.FS.readFile(path);
     py.FS.unlink(path);

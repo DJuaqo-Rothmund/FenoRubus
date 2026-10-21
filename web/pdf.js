@@ -44,5 +44,6 @@ export async function makePdf(ctx, kind, arg, season) {
       worker.postMessage({ op: "photos", id: jid, photos: out }, out.map(([, b]) => b));
     },
   });
-  return { name: r.name, blob: new Blob([r.pdf], { type: "application/pdf" }) };
+  const type = r.name.endsWith(".xlsx") ? "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" : "application/pdf";
+  return { name: r.name, blob: new Blob([r.pdf], { type }) };
 }

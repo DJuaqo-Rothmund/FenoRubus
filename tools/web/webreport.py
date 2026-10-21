@@ -56,6 +56,13 @@ def _week_id(db, start: str) -> int:
     return row["id"]
 
 
+def _week_number(db, start: str) -> int:
+    row = db.query_one("SELECT week_number FROM sampling_weeks WHERE start_date=?", (start,))
+    if not row:
+        raise ValueError("No hay registros en esa semana.")
+    return row["week_number"]
+
+
 def photos(code: str, kind: str, arg: str, season: int) -> str:
     """Rutas de fotos (relativas a la carpeta de datos) que usa el informe: se bajan antes."""
     db, _ = _dbs[code]
@@ -68,9 +75,15 @@ def photos(code: str, kind: str, arg: str, season: int) -> str:
     elif kind == "month":
         q += " AND substr(w.start_date, 1, 7) = ?"
         params.append(arg)
+    elif kind == "period":
+        a, b = sorted(arg.split("|"))
+        q += " AND w.start_date BETWEEN ? AND ?"
+        params += [a, b]
     elif kind == "variety":
         q += " AND o.variety_id = (SELECT id FROM varieties WHERE uid = ?)"
         params.append(arg)
+    if kind == "excel":
+        return "[]"
     paths = [r["path"] for r in db.query(q, params)]
     if kind == "weekly":
         wid = _week_id(db, arg)
@@ -96,8 +109,15 @@ def report(code: str, kind: str, arg: str, season: int) -> str:
     elif kind == "variety":
         row = db.query_one("SELECT id FROM varieties WHERE uid=?", (arg,))
         res = r.variety(row["id"], season, "pdf")
+    elif kind == "period":
+        a, b = sorted(arg.split("|"))
+        res = r.period(season, _week_number(db, a), _week_number(db, b), "pdf")
     elif kind == "treatments":
         res = r.treatments(season, "pdf")
+    elif kind == "excel":
+        from measures_export import export_measures
+        ids = [m["id"] for m in db.list_measures()]
+        return export_measures(db, ids, season, os.path.join(DATA, "reports"))
     else:
         res = r.matrix(season, package="pdf")
     return res.path

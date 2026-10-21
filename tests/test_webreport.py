@@ -26,7 +26,11 @@ def test_webreport_builds_pdfs_from_bundles(tmp_path, monkeypatch):
     assert webreport.load("AM", json.dumps(ws), json.dumps([["b1", bundle]])) == 0     # ya leído
     names = [r["name"] for r in webreport._dbs["AM"][0].list_varieties()]
     assert names == [v["name"] for v in phone.list_varieties()]           # sin variedades de ejemplo
-    for kind, arg in (("weekly", week["start_date"]), ("matrix", "")):
+    m = phone.add_measure("Calibre", "table", ["mm"])
+    phone.add_entry(m, week["id"], vid, data={"mm": "18"})
+    assert webreport.load("AM", json.dumps(ws), json.dumps([["b2", sync.export_changes(phone, str(tmp_path / "phone"))]])) == 1
+    assert webreport.report("AM", "excel", "", 2026).endswith(".xlsx")
+    for kind, arg in (("weekly", week["start_date"]), ("matrix", ""), ("period", f"{week['start_date']}|{week['start_date']}")):
         path = webreport.report("AM", kind, arg, 2026)
         with open(path, "rb") as f:
             assert f.read(5) == b"%PDF-"

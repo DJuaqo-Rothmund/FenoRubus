@@ -101,12 +101,21 @@
           <select id="rmonth" class="pill"></select><span class="btns"><button class="ghost" data-rep="month" title="Ver en una pestaña nueva">Ver</button><button class="primary" data-pdf="month">PDF</button></span>
         </div>
         <div class="rep">
+          <div><b>Por período</b><div class="muted small">Evolución entre dos semanas: matriz, avance y fotos.</div></div>
+          <span class="range"><select id="rfrom" class="pill"></select><select id="rto" class="pill"></select></span>
+          <span class="btns"><button class="ghost" data-rep="period" title="Ver en una pestaña nueva">Ver</button><button class="primary" data-pdf="period">PDF</button></span>
+        </div>
+        <div class="rep">
           <div><b>Ficha por variedad / sector</b><div class="muted small">Evolución semana a semana con fotos.</div></div>
           <select id="rvar" class="pill"></select><span class="btns"><button class="ghost" data-rep="variety" title="Ver en una pestaña nueva">Ver</button><button class="primary" data-pdf="variety">PDF</button></span>
         </div>
         <div class="rep" id="rtrt" hidden>
           <div><b>Tratamientos</b><div class="muted small">Avance BBCH y planillas por tratamiento: medias, ANOVA y letras LSD.</div></div>
           <span></span><span class="btns"><button class="ghost" data-rep="treatments" title="Ver en una pestaña nueva">Ver</button><button class="primary" data-pdf="treatments">PDF</button></span>
+        </div>
+        <div class="rep" id="rxls">
+          <div><b>Mediciones a Excel</b><div class="muted small">Una hoja por medición, toda la temporada (igual que en la app).</div></div>
+          <span></span><span class="btns"><button class="primary" data-pdf="excel">Excel</button></span>
         </div>
         <p id="rmsg" class="muted small"></p>
       </section>

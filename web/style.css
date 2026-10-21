@@ -225,3 +225,4 @@ table.hm td.c.na { color: #c4c9c0; font-weight: 400; background: #f6f7f3; }
   background: #0007; color: #FFD54F; cursor: pointer; padding: 0; font-size: 14px; opacity: 0; transition: opacity .15s; }
 .photos .ph:hover .pstar { opacity: 1; }
 @media (hover: none) { .photos .ph .pstar { opacity: 1; } }
+.reports .range { display: flex; gap: 6px; } .reports .range select { min-width: 0; flex: 1; }

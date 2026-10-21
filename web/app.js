@@ -1229,6 +1229,11 @@ function renderReports() {
   };
   fill($("rweek"), [...weeks].reverse().map((w) => [w, `${C.weekTitle(w)} · ${C.weekLabel(w)}`]));
   if (weeks.includes(S.week) && !$("rweek").dataset.touched) $("rweek").value = S.week;
+  const wopts = weeks.map((w) => [w, `${C.weekTitle(w)} · ${C.weekLabel(w)}`]);
+  const hadFrom = $("rfrom").value;
+  fill($("rfrom"), wopts); fill($("rto"), wopts);
+  if (!hadFrom && weeks.length) { $("rfrom").value = weeks[Math.max(0, weeks.length - 4)]; $("rto").value = weeks[weeks.length - 1]; }
+  $("rxls").hidden = !C.measures(S.state).length;
   fill($("rmonth"), [...new Set(weeks.map((w) => w.slice(0, 7)))].map((m) => [m, `${C.MESES[Number(m.slice(5)) - 1]} ${m.slice(0, 4)}`]));
   $("rtrt").hidden = !C.treatments(S.state).length;
   fill($("rvar"), C.varieties(S.state).map((v) => [v.uid, C.unitMain(v) + (C.unitPlace(v) ? ` · ${C.unitPlace(v)}` : "")]));
@@ -1250,6 +1255,11 @@ async function runReport(kind) {
     } else if (kind === "variety") {
       await rep.variety(C.varieties(S.state).find((v) => v.uid === $("rvar").value), season);
     } else if (kind === "treatments") await rep.treatments(season);
+    else if (kind === "period") {
+      const [a, b] = [$("rfrom").value, $("rto").value].sort();
+      await rep.matrix(season, C.seasonWeeks(S.state, season).filter((w) => w >= a && w <= b),
+        `Evolución · Semanas ${C.isoWeek(C.parseDate(a))[0]}–${C.isoWeek(C.parseDate(b))[0]}`, true);
+    }
     $("rmsg").textContent = "Informe listo (pestaña nueva).";
   } catch (e) {
     $("rmsg").textContent = e.message;
@@ -1264,7 +1274,8 @@ async function photoBlob(path) {
 
 async function runPdf(kind) {
   const season = Number($("rseason").value);
-  const arg = { weekly: $("rweek").value, month: $("rmonth").value, variety: $("rvar").value }[kind] || "";
+  const arg = { weekly: $("rweek").value, month: $("rmonth").value, variety: $("rvar").value,
+    period: `${$("rfrom").value}|${$("rto").value}` }[kind] || "";
   const btns = document.querySelectorAll("[data-pdf]");
   btns.forEach((b) => (b.disabled = true));
   try {
@@ -1274,7 +1285,7 @@ async function runPdf(kind) {
     a.href = URL.createObjectURL(blob); a.download = name;
     document.body.appendChild(a); a.click(); a.remove();
     setTimeout(() => URL.revokeObjectURL(a.href), 60000);
-    $("rmsg").textContent = `PDF listo: ${name} (${Math.max(1, Math.round(blob.size / 1024))} KB, en Descargas).`;
+    $("rmsg").textContent = `${name.endsWith(".xlsx") ? "Excel" : "PDF"} listo: ${name} (${Math.max(1, Math.round(blob.size / 1024))} KB, en Descargas).`;
   } catch (e) {
     console.error(e);
     $("rmsg").textContent = `No se pudo generar el PDF: ${String(e.message || e).split("\n").filter(Boolean).pop()}`;
