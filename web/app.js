@@ -5,6 +5,7 @@ import { CLIENT_ID } from "./config.js";
 import { makeReports } from "./reports.js";
 import { warm as warmPdf, makePdf } from "./pdf.js";
 import { weekCompleted } from "./celebrate.js";
+import { photoHeat, pickPoint } from "./maps.js";
 
 const SCOPE = "https://www.googleapis.com/auth/drive.file";
 const API = "https://www.googleapis.com/drive/v3/files";
@@ -1141,6 +1142,53 @@ function renderMatrix() {
     if (all.length > heat.length) box.insertAdjacentHTML("beforeend", `<p class="muted small">${all.length - heat.length} sin registros en estas semanas (no se muestran).</p>`);
   }
   renderMap(season);
+  renderHeat(season);
+}
+
+// Mapa de calor de las fotos (= «Mapa de fotos» de la app).
+async function renderHeat(season) {
+  const week = S.hScope === "week" ? S.week : null;
+  const { rows, missing } = C.photoLocations(S.state, season, week);
+  const n = rows.reduce((a, r) => a + r.weight, 0);
+  const where = week ? C.weekTitle(week) : C.seasonTitle(season);
+  $("hinfo").textContent = rows.length
+    ? `${where} · ${n} foto${n !== 1 ? "s" : ""} en ${rows.length} punto${rows.length !== 1 ? "s" : ""}${missing ? ` · ${missing} sin ubicación` : ""}`
+    : `${where}: aún no hay fotos con ubicación. Al registrar, use «Mi ubicación», márquela en el mapa o suba fotos con GPS.`;
+  const vs = new Map(C.rows(S.state, "varieties").map((v) => [v.uid, v]));
+  try {
+    await photoHeat($("hmap"), rows, (p) => {
+      const v = vs.get(p.variety_id) || {};
+      const d = document.createElement("div");
+      d.className = "hpop";
+      d.innerHTML = `<b></b><div class="muted small"></div><div class="small"></div><button class="primary">Abrir registro</button>`;
+      d.querySelector("b").textContent = C.unitMain(v);
+      d.querySelector(".muted").textContent = C.unitPlace(v);
+      d.querySelector(".small:not(.muted)").textContent = [C.weekLabel(p.week_id), `${p.weight} foto${p.weight !== 1 ? "s" : ""}`,
+        p.bbch_code != null ? `BBCH ${C.codeStr(p.bbch_code)}` : ""].filter(Boolean).join(" · ");
+      d.querySelector("button").onclick = () => { S.week = p.week_id; openDetail(v); };
+      return d;
+    });
+  } catch (e) { $("hinfo").textContent = e.message; }
+}
+
+async function openPickMap() {
+  const obs = C.observationFor(S.state, S.current.uid, S.week);
+  let start = obs && obs.latitude != null ? [Number(obs.latitude), Number(obs.longitude)] : null;
+  if (!start) {   // si no tiene, cerca de los otros registros con ubicación
+    const any = C.rows(S.state, "observations").find((o) => o.latitude != null && o.longitude != null);
+    if (any) start = [Number(any.latitude), Number(any.longitude)];
+  }
+  $("pmsg").textContent = "";
+  $("pickmap").showModal();
+  try { S.pickGet = await pickPoint($("pmap"), start); } catch (e) { $("pmsg").textContent = e.message; }
+}
+
+async function savePickMap(ev) {
+  ev.preventDefault();
+  const pt = S.pickGet && S.pickGet();
+  if (!pt) { $("pmsg").textContent = "Toque el mapa para marcar el lugar."; return; }
+  try { await setLocation(pt[0], pt[1], null, "mapa"); $("pickmap").close(); $("dmsg").textContent = "Ubicación guardada."; }
+  catch (e) { $("pmsg").textContent = e.message; }
 }
 
 async function mapFor(code) {
@@ -1416,6 +1464,13 @@ async function boot() {
   $("ncreate").onclick = createMeasure;
   $("dseldel").onclick = () => deletePhotos([...S.photoSel]);
   $("dgps").onclick = locateMe;
+  $("dmap").onclick = openPickMap;
+  $("psave").onclick = savePickMap;
+  document.querySelectorAll("#hscope button").forEach((b) => (b.onclick = () => {
+    S.hScope = b.dataset.scope;
+    document.querySelectorAll("#hscope button").forEach((x) => x.classList.toggle("on", x === b));
+    renderHeat(S.mSeason ?? C.seasonOf(C.parseDate(S.week)));
+  }));
   $("dlocdel").onclick = () => setLocation(null, null, null, null).then(() => { $("dmsg").textContent = "Ubicación quitada."; });
   $("dselnone").onclick = () => { S.photoSel.clear(); renderPhotos(S.current); };
   document.querySelectorAll("#detail .drop").forEach((z) =>

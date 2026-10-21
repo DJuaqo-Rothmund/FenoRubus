@@ -77,6 +77,13 @@
         <div id="mheat"></div>
         <p class="muted small">Toque una celda para abrir ese registro.</p>
       </section>
+      <section class="card">
+        <div class="row-h"><div class="label">MAPA DE FOTOS</div>
+          <div class="chips" id="hscope"><button data-scope="season" class="on">Toda la temporada</button><button data-scope="week">Esta semana</button></div></div>
+        <div id="hmap" class="hmap"></div>
+        <div class="hlegend"><span>Pocas fotos</span><i></i><span>Muchas</span></div>
+        <p id="hinfo" class="muted small"></p>
+      </section>
       <section class="card" id="mapcard" hidden>
         <div class="row-h"><div class="label">PLANO DE SECTORES</div><div id="mapchips" class="chips"></div></div>
         <div id="map"></div>
@@ -147,6 +154,16 @@
       </section>
     </div>
   </main>
+
+  <dialog id="pickmap">
+    <form method="dialog" class="detail">
+      <div class="dhead"><div><h2>Marcar en el mapa</h2><div class="muted small">Toque el lugar donde se tomó la muestra (el pin se puede arrastrar).</div></div>
+        <button value="cancel" class="round" aria-label="Cerrar">✕</button></div>
+      <div id="pmap" class="hmap"></div>
+      <p id="pmsg" class="warn small"></p>
+      <div class="actions"><button value="cancel" class="ghost">Cancelar</button><button id="psave" value="default" class="primary">Guardar ubicación</button></div>
+    </form>
+  </dialog>
 
   <dialog id="vdialog">
     <form method="dialog" class="detail">

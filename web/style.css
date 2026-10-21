@@ -226,3 +226,8 @@ table.hm td.c.na { color: #c4c9c0; font-weight: 400; background: #f6f7f3; }
 .photos .ph:hover .pstar { opacity: 1; }
 @media (hover: none) { .photos .ph .pstar { opacity: 1; } }
 .reports .range { display: flex; gap: 6px; } .reports .range select { min-width: 0; flex: 1; }
+.hmap { height: 420px; border-radius: 16px; overflow: hidden; background: var(--leaf-soft); margin-top: 8px; z-index: 0; }
+#pickmap { width: min(760px, 96vw); }
+.hlegend { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--muted); margin-top: 8px; }
+.hlegend i { flex: 1; height: 8px; border-radius: 4px; background: linear-gradient(90deg, #6FA86A, #F4B400 35%, #FF7043 70%, #C62828); }
+.hpop b { color: var(--leaf-dark); } .hpop button { margin-top: 6px; }

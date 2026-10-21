@@ -402,6 +402,25 @@ export function weekChange(state, weekStart) {   // la semana, si aún no existe
     data: { season: seasonOf(parseDate(weekStart)), week_number: 0, start_date: weekStart, label: weekLabel(weekStart), skipped: 0 } }];
 }
 
+// ------------------------------------------------------------------ mapa de fotos
+// Registros con fotos y ubicación (= Database.photo_locations): peso = n.º de fotos.
+export function photoLocations(state, season, weekStart = null) {
+  const skipped = new Set(rows(state, "sampling_weeks").filter((w) => w.skipped).map((w) => w.start_date || w.uid));
+  const count = new Map();
+  for (const p of rows(state, "photos")) count.set(p.observation_id, (count.get(p.observation_id) || 0) + 1);
+  const out = [];
+  let missing = 0;
+  for (const o of rows(state, "observations")) {
+    const n = count.get(o.uid) || 0;
+    if (!n || skipped.has(o.week_id) || seasonOf(parseDate(o.week_id)) !== season) continue;
+    if (weekStart && o.week_id !== weekStart) continue;
+    if (o.latitude == null || o.longitude == null) { missing += n; continue; }
+    out.push({ uid: o.uid, lat: Number(o.latitude), lon: Number(o.longitude), weight: n,
+      variety_id: o.variety_id, week_id: o.week_id, bbch_code: o.bbch_code });
+  }
+  return { rows: out, missing };
+}
+
 // ------------------------------------------------------------------ semanas
 export function weekRow(state, weekStart) {
   return rows(state, "sampling_weeks").find((w) => (w.start_date || w.uid) === weekStart) || null;
