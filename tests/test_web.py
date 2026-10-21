@@ -141,3 +141,29 @@ def test_web_settings_changes_apply_in_app(tmp_path):
     assert [p["name"] for p in trts[0]["parcels"]] == ["T1R1", "T1R2"] and trts[0]["variety"] == "Heritage"
     assert db.query_one("SELECT active FROM varieties WHERE name='T3R2'")["active"] == 0
     assert db.first_week_date(2026) == dt.date(2026, 9, 7)
+
+
+def test_web_exif_gps_matches_python(tmp_path):
+    """La web lee el GPS de la cámara (EXIF) igual que geo.exif_gps."""
+    from PIL import Image
+    import geo
+    files = []
+    for k, (lat, lon) in enumerate([(-33.4495, -70.6625), (40.5, 3.25), (None, None)]):
+        img = Image.new("RGB", (16, 16), "green")
+        exif = Image.Exif()
+        if lat is not None:
+            def dms(x):
+                x = abs(x)
+                d, m = int(x), int((x - int(x)) * 60)
+                return (d, m, round(((x - d) * 60 - m) * 60, 4))
+            exif[0x8825] = {1: "S" if lat < 0 else "N", 2: dms(lat), 3: "W" if lon < 0 else "E", 4: dms(lon)}
+        path = tmp_path / f"g{k}.jpg"
+        img.save(path, exif=exif)
+        files.append(str(path))
+    res = _node("exif", {"files": files}, tmp_path)
+    for f, r in zip(files, res):
+        py = geo.exif_gps(f)
+        assert (r is None) == (py is None)
+        if py:
+            assert abs(r[0] - py[0]) < 1e-6 and abs(r[1] - py[1]) < 1e-6
+    assert res[0][0] < 0 and res[0][1] < 0 and res[2] is None

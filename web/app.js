@@ -345,6 +345,18 @@ async function addPhotos(v, files, kind) {
   const taken = new Set(C.rows(S.state, "photos").map((p) => base(p.path)));
   const dir = await weekFolderId();
   const season = C.seasonOf(C.parseDate(S.week));
+  // Sin ubicación: la toma del GPS de la primera foto que lo traiga (como la app).
+  if (obs.latitude == null || obs.longitude == null) {
+    for (const f of files) {
+      const gps = C.exifGps(await f.arrayBuffer().catch(() => new ArrayBuffer(0)));
+      if (gps) {
+        const r = C.observationChanges(S.state, v.uid, S.week, { latitude: gps[0], longitude: gps[1], gps_accuracy: null, gps_source: "foto" });
+        changes.push(...r.changes);
+        C.applyBundle(S.state, `local-${C.newUid()}`, { changes: r.changes });
+        break;
+      }
+    }
+  }
   for (const f of files) {
     let seq = 1, name;
     do { name = `${C.photoBasename(v, S.week, kind, seq++, S.ws.code)}.jpg`; } while (taken.has(name));
@@ -509,7 +521,7 @@ function dropZone(el, input, onFiles, { click = true, msg = "dmsg" } = {}) {
 async function uploadTo(kind, files) {
   const zone = document.querySelector(`#detail .drop[data-kind="${kind}"]`);
   zone.classList.add("busy");
-  try { await addPhotos(S.current, files, kind); renderPhotos(S.current); render(); }
+  try { await addPhotos(S.current, files, kind); renderPhotos(S.current); renderLocation(); render(); }
   catch (er) { $("dmsg").textContent = `No se pudieron subir: ${er.message}`; }
   finally { zone.classList.remove("busy"); }
 }
@@ -554,6 +566,16 @@ function renderPhotos(v) {
     pick.type = "button"; pick.className = "pick"; pick.title = "Seleccionar";
     const del = document.createElement("button");
     del.type = "button"; del.className = "pdel"; del.textContent = "✕"; del.title = "Eliminar esta foto";
+    if (!p.is_primary) {
+      const star = document.createElement("button");
+      star.type = "button"; star.className = "pstar"; star.textContent = "★"; star.title = "Hacer principal";
+      star.onclick = async (e) => {
+        e.stopPropagation();
+        try { await send(C.photoPrimaryChanges(S.state, p.uid)); renderPhotos(S.current); render(); }
+        catch (er) { $("dmsg").textContent = `No se pudo cambiar: ${er.message}`; }
+      };
+      d.append(star);
+    }
     const mark = () => { pick.textContent = S.photoSel.has(p.uid) ? "✓" : ""; d.classList.toggle("selected", S.photoSel.has(p.uid)); };
     pick.onclick = (e) => { e.stopPropagation(); S.photoSel.has(p.uid) ? S.photoSel.delete(p.uid) : S.photoSel.add(p.uid); mark(); selBar(); };
     del.onclick = (e) => { e.stopPropagation(); deletePhotos([p.uid]); };
@@ -585,6 +607,34 @@ function renderPhotos(v) {
   });
 }
 
+// ------------------------------------------------------------ ubicación del registro
+const GPS_SOURCES = { gps: "GPS del equipo", foto: "desde la foto", mapa: "marcada en el mapa" };
+function renderLocation() {
+  const obs = C.observationFor(S.state, S.current.uid, S.week);
+  const has = obs && obs.latitude != null && obs.longitude != null;
+  $("dloc").textContent = has
+    ? `${Number(obs.latitude).toFixed(6)}, ${Number(obs.longitude).toFixed(6)} · ${GPS_SOURCES[obs.gps_source] || obs.gps_source || ""}`
+      + (obs.gps_accuracy ? ` · ±${Math.round(obs.gps_accuracy)} m` : "")
+    : "Sin ubicación (opcional; se completa sola si la foto trae GPS)";
+  $("dlocdel").hidden = !has;
+}
+async function setLocation(lat, lon, accuracy, source) {
+  const { changes } = C.observationChanges(S.state, S.current.uid, S.week,
+    { latitude: lat, longitude: lon, gps_accuracy: accuracy ?? null, gps_source: source });
+  await send(changes);
+  renderLocation();
+  render();
+}
+function locateMe() {
+  if (!navigator.geolocation) { $("dmsg").textContent = "Este navegador no entrega la ubicación."; return; }
+  $("dmsg").textContent = "Buscando ubicación…";
+  navigator.geolocation.getCurrentPosition(
+    (p) => setLocation(p.coords.latitude, p.coords.longitude, p.coords.accuracy, "gps")
+      .then(() => { $("dmsg").textContent = "Ubicación guardada."; }),
+    (e) => { $("dmsg").textContent = `No se pudo obtener la ubicación: ${e.code === 1 ? "permiso denegado" : e.message}`; },
+    { enableHighAccuracy: true, timeout: 20000, maximumAge: 0 });
+}
+
 function openDetail(v) {
   S.current = v;
   const obs = C.observationFor(S.state, v.uid, S.week);
@@ -596,6 +646,7 @@ function openDetail(v) {
   $("dmsg").textContent = "";
   S.photoSel = new Set();
   renderPhotos(v);
+  renderLocation();
   $("detail").showModal();
 }
 
@@ -1353,6 +1404,8 @@ async function boot() {
   $("clearweek").onclick = clearWeek;
   $("ncreate").onclick = createMeasure;
   $("dseldel").onclick = () => deletePhotos([...S.photoSel]);
+  $("dgps").onclick = locateMe;
+  $("dlocdel").onclick = () => setLocation(null, null, null, null).then(() => { $("dmsg").textContent = "Ubicación quitada."; });
   $("dselnone").onclick = () => { S.photoSel.clear(); renderPhotos(S.current); };
   document.querySelectorAll("#detail .drop").forEach((z) =>
     dropZone(z, z.querySelector("input"), (files) => uploadTo(z.dataset.kind, files)));

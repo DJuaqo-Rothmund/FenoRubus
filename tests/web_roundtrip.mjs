@@ -23,6 +23,9 @@ if (mode === "stats") {
   const seq = [null, 7, 31, 65, 891, 99].map(C.seqColor);
   const sect = [[1, 1, false], [2, 5, false], [3, 10, true], [4, 3, false]].map(([e, s, f]) => C.sectorColor(e, s, f));
   writeFileSync(output, JSON.stringify({ dates: out, names, units, codes: [7, 65, 891].map(C.codeStr), seq, sect }));
+} else if (mode === "exif") {
+  const out = data.files.map((f) => { const b = readFileSync(f); return C.exifGps(b.buffer.slice(b.byteOffset, b.byteOffset + b.byteLength)); });
+  writeFileSync(output, JSON.stringify(out));
 } else if (mode === "settings") {
   // Ajustes hechos en la web: unidad de predio, edición de variedad, ensayo de tratamientos,
   // nombre de un tratamiento y primera semana fija.

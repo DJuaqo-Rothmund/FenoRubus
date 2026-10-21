@@ -199,6 +199,56 @@ export function photoChange(state, obsUid, kind, relPath) {
     data: { observation_id: obsUid, kind, path: relPath, source: "web", captured_at: ts, is_primary: has ? 0 : 1 } };
 }
 
+// Foto principal de su tipo en el registro (= Database.set_primary).
+export function photoPrimaryChanges(state, photoUid) {
+  const all = rows(state, "photos");
+  const p = all.find((x) => x.uid === photoUid);
+  if (!p) return [];
+  const ts = nowTs();
+  return all.filter((x) => x.observation_id === p.observation_id && x.kind === p.kind
+    && (x.uid === photoUid ? !x.is_primary : x.is_primary))
+    .map(({ uid, ...data }) => ({ entity: "photos", uid, ts, deleted: 0, data: { ...data, is_primary: uid === photoUid ? 1 : 0 } }));
+}
+
+// Coordenadas GPS guardadas por la cámara en un JPEG (EXIF), como geo.exif_gps. null si no hay.
+export function exifGps(buf) {
+  const v = new DataView(buf instanceof ArrayBuffer ? buf : buf.buffer);
+  if (v.byteLength < 4 || v.getUint16(0) !== 0xffd8) return null;
+  let off = 2;
+  while (off + 4 < v.byteLength) {
+    const marker = v.getUint16(off), len = v.getUint16(off + 2);
+    if (marker === 0xffe1 && v.getUint32(off + 4) === 0x45786966) return tiffGps(v, off + 10);
+    if ((marker & 0xff00) !== 0xff00 || marker === 0xffda) return null;
+    off += 2 + len;
+  }
+  return null;
+}
+function tiffGps(v, t) {
+  try {
+    const le = v.getUint16(t) === 0x4949;
+    const u16 = (o) => v.getUint16(t + o, le), u32 = (o) => v.getUint32(t + o, le);
+    const entries = (ifd) => { const n = u16(ifd); return Array.from({ length: n }, (_, i) => ifd + 2 + i * 12); };
+    const gpsPtr = entries(u32(4)).find((e) => u16(e) === 0x8825);
+    if (gpsPtr === undefined) return null;
+    const tags = {};
+    for (const e of entries(u32(gpsPtr + 8))) tags[u16(e)] = e;
+    const ref = (tag) => tags[tag] === undefined ? "" : String.fromCharCode(v.getUint8(t + tags[tag] + 8));
+    const deg = (tag) => {
+      if (tags[tag] === undefined) return null;
+      const o = u32(tags[tag] + 8);
+      const r = (i) => { const d = u32(o + i * 8 + 4); return d ? u32(o + i * 8) / d : 0; };
+      return r(0) + r(1) / 60 + r(2) / 3600;
+    };
+    let lat = deg(2), lon = deg(4);
+    if (lat === null || lon === null) return null;
+    if (ref(1).toUpperCase() === "S") lat = -lat;
+    if (ref(3).toUpperCase() === "W") lon = -lon;
+    if (Math.abs(lat) < 1e-9 && Math.abs(lon) < 1e-9) return null;
+    if (Math.abs(lat) > 90 || Math.abs(lon) > 180) return null;
+    return [lat, lon];
+  } catch { return null; }
+}
+
 // Borra fotos (= Database.delete_photo): si se va la principal de un tipo, pasa a principal
 // la más reciente que quede de ese tipo. El archivo en Drive no se toca (como en la app).
 export function photoDeleteChanges(state, uids) {
