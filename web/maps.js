@@ -20,10 +20,25 @@ function load() {
   return loading;
 }
 
+// Fondo satelital (Esri World Imagery) por defecto, con nombres de lugares encima; «Mapa»
+// (OpenStreetMap) para ver calles. La elección se recuerda en este navegador.
 function baseMap(L, el, center, zoom) {
-  const map = L.map(el, { zoomControl: true, attributionControl: true }).setView(center, zoom);
-  L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {
-    maxZoom: 19, attribution: "© OpenStreetMap" }).addTo(map);
+  const map = L.map(el, { zoomControl: true, attributionControl: true, maxZoom: 20 }).setView(center, zoom);
+  const esri = "https://server.arcgisonline.com/ArcGIS/rest/services";
+  const sat = L.layerGroup([
+    L.tileLayer(`${esri}/World_Imagery/MapServer/tile/{z}/{y}/{x}`, {
+      maxNativeZoom: 18, maxZoom: 20, attribution: "Imágenes © Esri, Maxar, Earthstar Geographics" }),
+    L.tileLayer(`${esri}/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}`, {
+      maxNativeZoom: 18, maxZoom: 20, opacity: .85 }),
+  ]);
+  const osm = L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {
+    maxNativeZoom: 19, maxZoom: 20, attribution: "© OpenStreetMap" });
+  const layers = { "Satélite": sat, "Mapa": osm };
+  let pick = "Satélite";
+  try { pick = localStorage.getItem("pr_basemap") || pick; } catch { /* sin almacenamiento */ }
+  (layers[pick] || sat).addTo(map);
+  L.control.layers(layers, null, { position: "topright", collapsed: false }).addTo(map);
+  map.on("baselayerchange", (e) => { try { localStorage.setItem("pr_basemap", e.name); } catch { /* nada */ } });
   return map;
 }
 
