@@ -5,7 +5,7 @@ import { CLIENT_ID } from "./config.js";
 import { makeReports } from "./reports.js";
 import { warm as warmPdf, makePdf } from "./pdf.js";
 import { weekCompleted } from "./celebrate.js";
-import { photoHeat, pickPoint } from "./maps.js";
+import { photoHeat, pickPoint, sectorMap } from "./maps.js";
 
 const SCOPE = "https://www.googleapis.com/auth/drive.file";
 const API = "https://www.googleapis.com/drive/v3/files";
@@ -1218,6 +1218,20 @@ async function renderMap(season) {
     b.onclick = () => { S.mapEq = eq; renderMap(season); };
     chips.appendChild(b);
   }
+  if (plan.geo) {                 // sobre la imagen satelital (Leaflet)
+    $("map").classList.add("leaf");
+    try {
+      await sectorMap($("map"), plan, { color: (s) => C.sectorColor(s.equipo, s.sector, false)[0], hasData,
+        selected: S.mapSel, eq: S.mapEq, onSelect: (id) => { S.mapSel = id; renderMap(season); } });
+    } catch {                     // sin conexión al mapa: el plano dibujado de siempre
+      $("map")._sector = null;
+      drawPlanSvg(plan, hasData, season);
+    }
+  } else drawPlanSvg(plan, hasData, season);
+  sectorInfo(plan, obs, inSector);
+}
+
+function drawPlanSvg(plan, hasData, season) {
   const shown = plan.sectors.filter((s) => !S.mapEq || s.equipo === S.mapEq);
   let [x0, y0, x1, y1] = [Infinity, Infinity, -Infinity, -Infinity];
   for (const s of shown) for (const part of s.parts) for (let i = 0; i < part.length; i += 2) {
@@ -1242,7 +1256,11 @@ async function renderMap(season) {
     svg += `<text x="${cx}" y="${H - cy}" text-anchor="middle" dominant-baseline="middle" font-size="${fs}" fill="${light ? "#fff" : "#1B2A23"}">${s.sector}</text>`;
   }
   $("map").innerHTML = svg + "</svg>";
+  $("map").classList.remove("leaf");
   $("map").querySelectorAll("path").forEach((p) => (p.onclick = () => { S.mapSel = p.dataset.id; renderMap(season); }));
+}
+
+function sectorInfo(plan, obs, inSector) {
   const sel = plan.sectors.find((s) => s.id === S.mapSel);
   const info = $("mapinfo");
   info.innerHTML = "";
@@ -1251,7 +1269,7 @@ async function renderMap(season) {
   head.innerHTML = `<b>${sel.nombre}</b> <span class="muted small">· ${sel.ha ?? "?"} ha · ${sel.hileras ?? "?"} hileras · ${(sel.variedades || []).join(", ")}</span>`;
   info.appendChild(head);
   const units = inSector(sel);
-  if (!units.length) info.insertAdjacentHTML("beforeend", `<p class="muted small">Sin registros creados en este sector (créelos desde la app).</p>`);
+  if (!units.length) info.insertAdjacentHTML("beforeend", `<p class="muted small">Sin registros creados en este sector (se crean en Ajustes › Nuevo sector).</p>`);
   for (const v of units) {
     const mine = obs.filter((o) => o.variety_id === v.uid).sort((a, b) => a.week_id.localeCompare(b.week_id));
     const last = mine[mine.length - 1];

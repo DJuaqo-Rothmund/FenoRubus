@@ -985,8 +985,10 @@ def sector_map_block(box, plan, status, selected, on_select):
     from kivy.uix.anchorlayout import AnchorLayout
     from ui.sector_map import SectorMap, equipo_chip
     equipos = sorted({s["equipo"] for s in plan["sectors"]})
-    mp = SectorMap(plan, on_select=on_select, size_hint_y=None, height=dp(200))
+    from ui.mapview import default_layer, remember_layer
+    mp = SectorMap(plan, on_select=on_select, size_hint_y=None, height=dp(200), zoomable=True)
     mp.status, mp.selected = status, selected
+    mp.satellite = bool(plan.get("geo")) and default_layer() == "sat"
     mp.bind(width=lambda w, v: setattr(w, "height", max(dp(200), v * plan["h"] / plan["w"] * 1.1)))
 
     row = BoxLayout(size_hint=(None, None), height=dp(34), spacing=dp(6))
@@ -996,7 +998,8 @@ def sector_map_block(box, plan, status, selected, on_select):
         eq = 0 if mp.focused == f"E{eq}" else eq          # tocar el elegido: vista general
         mp.focus(f"E{eq}" if eq else "")
         for k, chip in chips.items():
-            chip.selected = k == eq
+            if k != "sat":
+                chip.selected = k == eq
 
     for eq in equipos:
         col, light = equipo_chip(eq)
@@ -1010,6 +1013,22 @@ def sector_map_block(box, plan, status, selected, on_select):
         chip.bind(on_release=lambda *_, eq=eq: show(eq))
         chips[eq] = chip
         row.add_widget(chip)
+    if plan.get("geo"):              # fondo: imagen satelital o plano solo (se recuerda)
+        sat = PillButton(text="Satélite", font_size="13sp", bold=True, size_hint=(None, None), height=dp(34),
+                         bg_on=c(theme.LEAF_DARK), fg_on=c("#FFFFFF"), bg_off=c("#FFFFFF", .6),
+                         fg_off=c(theme.LEAF_DARK), edge=c(theme.LEAF_DARK, .6))
+        sat.selected = mp.satellite
+        sat.text_size = (None, None)
+        sat.texture_update()
+        sat.width = sat.texture_size[0] + dp(22)
+
+        def flip(*_):
+            mp.satellite = not mp.satellite
+            sat.selected = mp.satellite
+            remember_layer("sat" if mp.satellite else "osm")
+        sat.bind(on_release=flip)
+        chips["sat"] = sat
+        row.add_widget(sat)
     row.width = sum(ch.width for ch in chips.values()) + row.spacing * max(0, len(chips) - 1)
     holder = AnchorLayout(anchor_x="center", size_hint_y=None, height=dp(34))
     holder.add_widget(row)
@@ -1793,17 +1812,18 @@ def map_dialog(start: tuple, zoom: int, on_pick):
                  pos_hint={"center_x": .5, "y": .5})   # la punta del pin marca el centro
     area.add_widget(pin)
     Clock.schedule_once(lambda *_: setattr(pin, "font_size", dp(52)), 0)  # tras el estilo de KivyMD
-    zoom_box = MDBoxLayout(orientation="vertical", size_hint=(None, None), size=(dp(52), dp(112)),
+    zoom_box = MDBoxLayout(orientation="vertical", size_hint=(None, None), size=(dp(52), dp(168)),
                            pos_hint={"right": .98, "top": .98}, spacing=dp(4))
     for icon, step in (("plus", 1), ("minus", -1)):
         zoom_box.add_widget(MDIconButton(icon=icon, md_bg_color=(1, 1, 1, .92),
                                          on_release=lambda *_, s=step: mp.zoom_by(s)))
+    # Satélite ↔ calles (la atribución la dibuja el mapa).
+    layer_btn = MDIconButton(icon="map-outline" if mp.layer == "sat" else "satellite-variant",
+                             md_bg_color=(1, 1, 1, .92))
+    layer_btn.bind(on_release=lambda b: setattr(
+        b, "icon", "map-outline" if mp.toggle_layer() == "sat" else "satellite-variant"))
+    zoom_box.add_widget(layer_btn)
     area.add_widget(zoom_box)
-    attribution = MDLabel(text="© OpenStreetMap", font_style="Caption", halign="right",
-                          size_hint=(None, None), size=(dp(130), dp(18)),
-                          pos_hint={"right": .99, "y": .01}, theme_text_color="Custom",
-                          text_color=(0.2, 0.2, 0.2, .9))
-    area.add_widget(attribution)
     root.add_widget(area)
 
     def update(*_):

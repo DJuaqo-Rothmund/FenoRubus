@@ -72,6 +72,8 @@ def convert(src: str, code: str, name: str) -> Path:
     ys = [y for s in sectors.values() for r in s["parts"] for y in r[1::2]]
     out = {"name": name, "origin": d.get("origen", ""), "w": round(max(xs), 1),
            "h": round(max(ys), 1),
+           # Para volver a lon/lat (mapa satelital): lon = (x + x0) / kx, lat = (y + y0) / ky.
+           "geo": {"x0": x0, "y0": y0, "kx": kx, "ky": ky},
            "sectors": sorted(sectors.values(), key=lambda s: (s["equipo"], s["sector"]))}
     dst = Path(__file__).resolve().parent.parent / "assets" / "maps" / f"{code}.json"
     dst.write_text(json.dumps(out, ensure_ascii=False, separators=(",", ":")), encoding="utf-8")

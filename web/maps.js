@@ -75,3 +75,47 @@ export async function pickPoint(el, start) {
   setTimeout(() => map.invalidateSize(), 50);
   return () => (marker ? [marker.getLatLng().lat, marker.getLatLng().lng] : null);
 }
+
+// Plano de sectores del predio sobre el satélite (= ui.sector_map con «Satélite»): cada sector
+// con el color de su equipo de riego y su número; un clic lo selecciona. El mapa se conserva
+// entre redibujos (no pierde el zoom); solo se reencuadra al cambiar de equipo.
+const NEON = { 1: "#FF3B3B", 2: "#FFC21A", 3: "#2E9BFF", 4: "#36E05A" };   // = ui.sector_map.NEON
+export async function sectorMap(el, plan, { color, hasData, selected, eq, onSelect }) {
+  const L = await load();
+  let st = el._sector;
+  if (!st || st.plan !== plan || !el._map) {
+    if (el._map) el._map.remove();
+    const g = plan.geo;
+    const ll = (x, y) => [(y + g.y0) / g.ky, (x + g.x0) / g.kx];
+    const map = baseMap(L, el, ll(plan.w / 2, plan.h / 2), 15);
+    el._map = map;
+    const items = new Map();
+    for (const s of plan.sectors) {
+      const rings = s.parts.map((p) => { const r = []; for (let i = 0; i < p.length; i += 2) r.push(ll(p[i], p[i + 1])); return r; });
+      const poly = L.polygon(rings, { weight: 1.2 }).addTo(map);
+      poly.bindTooltip(s.nombre, { sticky: true });
+      poly.on("click", () => st.onSelect(s.id));
+      const big = rings.reduce((a, b) => (b.length > a.length ? b : a));
+      const c = big.reduce((a, p) => [a[0] + p[0] / big.length, a[1] + p[1] / big.length], [0, 0]);
+      const label = L.marker(c, { interactive: false, icon: L.divIcon({ className: "seclabel", html: String(s.sector), iconSize: [22, 16] }) });
+      items.set(s.id, { s, poly, label });
+    }
+    const showLabels = () => { const on = map.getZoom() >= 15; for (const it of items.values()) on ? it.label.addTo(map) : it.label.remove(); };
+    map.on("zoomend", showLabels);
+    st = el._sector = { plan, map, items, eq: undefined, showLabels };
+  }
+  st.onSelect = onSelect;
+  for (const { s, poly } of st.items.values()) {
+    const sel = s.id === selected;
+    poly.setStyle({ fillColor: color(s), fillOpacity: hasData(s) ? .62 : .38,
+      color: sel ? NEON[s.equipo] || "#fff" : "#ffffff", weight: sel ? 4 : 1.2, opacity: 1 });
+    if (sel) poly.bringToFront();
+  }
+  if (st.eq !== eq) {
+    const pick = [...st.items.values()].filter(({ s }) => !eq || s.equipo === eq).map(({ poly }) => poly.getBounds());
+    if (pick.length) st.map.fitBounds(pick.reduce((a, b) => a.extend(b), L.latLngBounds(pick[0].getSouthWest(), pick[0].getNorthEast())), { padding: [12, 12] });
+    st.eq = eq;
+  }
+  setTimeout(() => { st.map.invalidateSize(); st.showLabels(); }, 50);
+  return st.map;
+}

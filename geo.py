@@ -20,6 +20,12 @@ from platform_utils import IS_ANDROID, data_subdir
 
 TILE_SIZE = 256
 TILE_URL = "https://tile.openstreetmap.org/{z}/{x}/{y}.png"
+# Imagen satelital (Esri World Imagery, gratuita con atribución; ojo: en su URL va y antes que x).
+SAT_URL = "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}"
+SAT_MAX_ZOOM = 18           # más cerca, se amplía la tesela de este nivel
+LAYERS = {"osm": (TILE_URL, "tiles", "png"), "sat": (SAT_URL, "tiles_sat", "jpg")}
+SAT_CREDIT = "Imágenes © Esri, Maxar, Earthstar Geographics"
+OSM_CREDIT = "© OpenStreetMap"
 USER_AGENT = "PhenoRubus/1.1 (cuaderno fenologico de frambueso; Android)"
 DEFAULT_CENTER = (-33.45, -70.66)   # Chile central (vista inicial sin otra referencia)
 
@@ -77,31 +83,32 @@ def tile_to_latlon(x: float, y: float, zoom: int) -> tuple[float, float]:
     return lat, lon
 
 
-def tile_path(z: int, x: int, y: int) -> str:
-    return os.path.join(data_subdir("tiles", str(z), str(x)), f"{y}.png")
+def tile_path(z: int, x: int, y: int, layer: str = "osm") -> str:
+    _url, folder, ext = LAYERS[layer]
+    return os.path.join(data_subdir(folder, str(z), str(x)), f"{y}.{ext}")
 
 
 _fetching: set = set()
 _lock = threading.Lock()
 
 
-def fetch_tile(z: int, x: int, y: int) -> str | None:
+def fetch_tile(z: int, x: int, y: int, layer: str = "osm") -> str | None:
     """Descarga (una vez) la tesela y devuelve su ruta en caché; None si falla."""
     n = 2 ** z
     if not (0 <= y < n):
         return None
     x %= n
-    path = tile_path(z, x, y)
+    path = tile_path(z, x, y, layer)
     if os.path.exists(path):
         return path
-    key = (z, x, y)
+    key = (layer, z, x, y)
     with _lock:
         if key in _fetching:
             return None
         _fetching.add(key)
     try:
         from drive_backup import _ssl_context
-        req = urllib.request.Request(TILE_URL.format(z=z, x=x, y=y),
+        req = urllib.request.Request(LAYERS[layer][0].format(z=z, x=x, y=y),
                                      headers={"User-Agent": USER_AGENT})
         with urllib.request.urlopen(req, timeout=15, context=_ssl_context()) as r:
             data = r.read()

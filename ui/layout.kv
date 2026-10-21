@@ -3189,6 +3189,10 @@
                 MapRound:
                     icon: "minus"
                     on_release: root.zoom(-1)
+                MapRound:
+                    id: layer_btn
+                    icon: "map-outline"
+                    on_release: root.toggle_layer()
             PaperCard:
                 size_hint_x: .94
                 pos_hint: {"center_x": .5, "y": .02}

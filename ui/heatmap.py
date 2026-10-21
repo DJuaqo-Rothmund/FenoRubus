@@ -182,11 +182,17 @@ class HeatmapScreen(MDScreen):
             self._map = HeatMap(rows, on_pick=self.pick, workers=a.workers, size_hint=(1, 1),
                                 pos_hint={"x": 0, "y": 0})
             stage.add_widget(self._map, index=len(stage.children))   # debajo de botones y tarjetas
+            self.ids.layer_btn.icon = "map-outline" if self._map.layer == "sat" else "satellite-variant"
         else:
             self._map.set_points(rows)
 
     def zoom(self, step: int):
         self._map.zoom_by(step)
+
+    def toggle_layer(self):
+        """Satélite ↔ calles; el ícono muestra a cuál se cambia."""
+        layer = self._map.toggle_layer()
+        self.ids.layer_btn.icon = "map-outline" if layer == "sat" else "satellite-variant"
 
     def pick(self, row):
         if row is None:

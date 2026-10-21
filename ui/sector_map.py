@@ -153,6 +153,7 @@ class SectorMap(StencilView):
     zoomable = BooleanProperty(False)
     status = DictProperty()
     zoom = NumericProperty(1.0)
+    satellite = BooleanProperty(False)   # imagen satelital debajo (si el plano trae «geo»)
 
     MAX_ZOOM = 14.0
 
@@ -182,10 +183,16 @@ class SectorMap(StencilView):
             self._labels[s["id"]] = _label_point(best[1])
         self._shift = None
         self._redraw = Clock.create_trigger(self._draw, -1)
+        self._tiles = None
+        if plan.get("geo"):
+            from kivymd.app import MDApp
+            from ui.mapview import TileCache
+            self._tiles = TileCache(getattr(MDApp.get_running_app(), "workers", None), self._redraw)
         self.bind(pos=self._move)
         self.bind(size=lambda *_: self.focused and self.focus(self.focused, animate=False))
         self.bind(size=self._redraw, selected=self._redraw,
-                  status=self._redraw, zoom=self._redraw, rotate=self._redraw)
+                  status=self._redraw, zoom=self._redraw, rotate=self._redraw,
+                  satellite=self._redraw)
 
     # ----------------------------------------------------------- coordenadas
     def _dims(self):
@@ -281,6 +288,40 @@ class SectorMap(StencilView):
 
         self._focus_ev = Clock.schedule_interval(step, 1 / 60)
 
+    # ------------------------------------------------------- fondo satelital
+    def _satellite(self):
+        """Teselas satelitales bajo el plano: cada una se ubica por sus esquinas (lon/lat →
+        metros del plano → pantalla), así sigue al plano al acercar, mover o girar."""
+        import geo
+        g = self.plan["geo"]
+        to_xy = lambda lat, lon: (lon * g["kx"] - g["x0"], lat * g["ky"] - g["y0"])   # noqa: E731
+        s = self._base() * self.zoom                     # px de pantalla por metro
+        lat_c = (self.plan["h"] / 2 + g["y0"]) / g["ky"]
+        z = int(math.ceil(math.log2(max(1.0, 156543.03 * math.cos(math.radians(lat_c)) * s))))
+        z = max(10, min(20, z))
+        corners = [self.to_map(self.x + a * self.width, self.y + b * self.height) for a in (0, 1) for b in (0, 1)]
+        lons = [(x + g["x0"]) / g["kx"] for x, _y in corners]
+        lats = [(y + g["y0"]) / g["ky"] for _x, y in corners]
+        tx0, ty0 = geo.latlon_to_tile(max(lats), min(lons), z)
+        tx1, ty1 = geo.latlon_to_tile(min(lats), max(lons), z)
+        if (tx1 - tx0) * (ty1 - ty0) > 400:            # demasiadas: no dibujar
+            return
+        Color(1, 1, 1, 1)
+        for ty in range(int(ty0), int(ty1) + 1):
+            for tx in range(int(tx0), int(tx1) + 1):
+                tex = self._tiles.get(z, tx, ty, "sat")
+                if tex is None:
+                    continue
+                pts = []
+                for dx, dy in ((0, 1), (1, 1), (1, 0), (0, 0)):   # abajo-izq, abajo-der, arriba-der, arriba-izq
+                    lat, lon = geo.tile_to_latlon(tx + dx, ty + dy, z)
+                    pts.append(self._local(*to_xy(lat, lon)))
+                uv = tex.tex_coords
+                verts = []
+                for i, (px, py) in enumerate(pts):
+                    verts += [px, py, uv[2 * i], uv[2 * i + 1]]
+                Mesh(vertices=verts, indices=[0, 1, 2, 3], mode="triangle_fan", texture=tex)
+
     # ---------------------------------------------------------------- dibujo
     def _texture(self, sid):
         if sid not in self._textures:
@@ -296,16 +337,25 @@ class SectorMap(StencilView):
             return
         sel = self.selected
         info = {x["id"]: x for x in self.plan["sectors"]}
+        sat = self.satellite and self._tiles is not None
+        # Sobre la imagen satelital: siempre el color de su equipo (más transparente si no
+        # tiene datos); en el plano solo, los sin datos van desvaídos.
         colors = {sid: sector_color(info[sid]["equipo"], info[sid]["sector"],
-                                    faded=not (self.status.get(sid) or {}).get("data"))
+                                    faded=not sat and not (self.status.get(sid) or {}).get("data"))
                   for sid in info}
         ts = self._local
         w, h = self.size
         with self.canvas:
             PushMatrix()
             self._shift = Translate(*self.pos)
+            if sat:
+                Color(0.16, 0.2, 0.16, 1)                     # mientras bajan las teselas
+                Rectangle(pos=(0, 0), size=self.size)
+                self._satellite()
             for sid, ring, meshes, _a in self._parts:
-                Color(*colors[sid][0])
+                rgba = colors[sid][0]
+                faded = not (self.status.get(sid) or {}).get("data")
+                Color(*rgba[:3], (.38 if faded else .62) if sat else (rgba[3] if len(rgba) > 3 else 1))
                 for verts, idx in meshes:
                     v = list(verts)
                     for k in range(0, len(v), 4):
@@ -330,7 +380,10 @@ class SectorMap(StencilView):
                 if math.sqrt(area) * s < tex.width * .9:
                     continue
                 st = self.status.get(sid) or {}
-                Color(*(c("#FFFFFF") if colors[sid][1] else
+                if sat:              # sobre la imagen: número blanco con sombra
+                    Color(0, 0, 0, .6)
+                    Rectangle(texture=tex, size=tex.size, pos=(x - tex.width / 2 + dp(1), y - tex.height / 2 - dp(1)))
+                Color(*(c("#FFFFFF") if colors[sid][1] or sat else
                         c(theme.INK, .9) if st.get("data") else c(theme.MUTED, .75)))
                 Rectangle(texture=tex, size=tex.size, pos=(x - tex.width / 2, y - tex.height / 2))
                 if st.get("dot"):        # mediciones: punto blanco con borde oscuro

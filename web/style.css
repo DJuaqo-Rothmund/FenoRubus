@@ -113,10 +113,10 @@ table.hm td.n { position: sticky; left: 0; background: #fff; white-space: nowrap
 table.hm td.n small { display: block; font-weight: 400; color: var(--muted); font-size: 11px; }
 table.hm td.c { min-width: 42px; text-align: center; border-radius: 6px; font: 600 12.5px ui-monospace, Menlo, Consolas, monospace; padding: 7px 2px; cursor: pointer; }
 table.hm td.c.na { color: #c4c9c0; font-weight: 400; background: #f6f7f3; }
-#map svg { width: 100%; height: auto; display: block; background: #fbfcf9; border-radius: 12px; }
-#map path { stroke: #fff; stroke-width: 2; cursor: pointer; vector-effect: non-scaling-stroke; }
-#map path.sel { stroke: #1B2A23; stroke-width: 3; }
-#map text { font-family: system-ui, sans-serif; font-weight: 700; pointer-events: none; }
+#map:not(.leaf) svg { width: 100%; height: auto; display: block; background: #fbfcf9; border-radius: 12px; }
+#map:not(.leaf) path { stroke: #fff; stroke-width: 2; cursor: pointer; vector-effect: non-scaling-stroke; }
+#map:not(.leaf) path.sel { stroke: #1B2A23; stroke-width: 3; }
+#map:not(.leaf) text { font-family: system-ui, sans-serif; font-weight: 700; pointer-events: none; }
 #mapinfo { margin-top: 10px; display: grid; gap: 8px; }
 #mapinfo .unit .badge { align-self: center; }
 #mapinfo .unit { display: flex; justify-content: space-between; gap: 10px; padding: 8px 12px; border: 1px solid var(--line); border-radius: 12px; background: #fff; cursor: pointer; }
@@ -231,3 +231,5 @@ table.hm td.c.na { color: #c4c9c0; font-weight: 400; background: #f6f7f3; }
 .hlegend { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--muted); margin-top: 8px; }
 .hlegend i { flex: 1; height: 8px; border-radius: 4px; background: linear-gradient(90deg, #6FA86A, #F4B400 35%, #FF7043 70%, #C62828); }
 .hpop b { color: var(--leaf-dark); } .hpop button { margin-top: 6px; }
+#map.leaf { height: 460px; border-radius: 16px; overflow: hidden; z-index: 0; }
+.seclabel { color: #fff; font: 700 12px system-ui, sans-serif; text-align: center; text-shadow: 0 0 3px #000, 0 1px 2px #000; }
