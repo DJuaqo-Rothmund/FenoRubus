@@ -229,6 +229,7 @@ CREATE TABLE IF NOT EXISTS notebook_entries (  -- cuaderno de campo: una página
     id          INTEGER PRIMARY KEY AUTOINCREMENT,
     day         TEXT NOT NULL UNIQUE,           -- AAAA-MM-DD
     text        TEXT NOT NULL DEFAULT '',
+    ink         TEXT NOT NULL DEFAULT '',       -- escritura a mano (JSON, en renglones)
     created_at  TEXT NOT NULL,
     updated_at  TEXT NOT NULL
 );
@@ -347,6 +348,7 @@ class Database:
         "variety_attachments": [("week_id", "INTEGER")],                # foto adjunta semanal
         "ai_references": [("workspace", "TEXT")],                       # ensayo de la foto
         "treatments": [("cultivar", "TEXT")],                           # variedad del tratamiento
+        "notebook_entries": [("ink", "TEXT NOT NULL DEFAULT ''")],      # escritura a mano
     }
 
     def _add_missing_columns(self) -> None:
@@ -855,6 +857,13 @@ class Database:
             row["photos"] = self.query("SELECT * FROM notebook_photos WHERE entry_id=? ORDER BY created_at, id",
                                        (row["id"],))
         return row
+
+    def save_note_ink(self, entry_id: int, ink: str) -> None:
+        """Escritura a mano de la página: JSON [{"c": color, "w": grosor, "p": [x, y, …]}] con
+        x, y en renglones desde el borde superior izquierdo del texto (igual en app y web)."""
+        cur = self.query_one("SELECT ink FROM notebook_entries WHERE id=?", (entry_id,))
+        if cur is not None and (cur["ink"] or "") != ink:
+            self.execute("UPDATE notebook_entries SET ink=?, updated_at=? WHERE id=?", (ink, _now(), entry_id))
 
     def save_note_text(self, entry_id: int, text: str) -> None:
         cur = self.query_one("SELECT text FROM notebook_entries WHERE id=?", (entry_id,))

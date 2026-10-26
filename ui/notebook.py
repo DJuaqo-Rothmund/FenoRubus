@@ -122,7 +122,7 @@ class NotebookScreen(MDScreen):
             date = _dt.date.fromisoformat(d["day"])
             card = NoteCard(day=d["day"], day_num=str(date.day), month=ph.MESES[date.month - 1][:3].upper(),
                             weekday=f"{WEEKDAYS[date.weekday()].capitalize()} · {date.year}",
-                            text=excerpt(d["text"]) or "Sin texto",
+                            text=(excerpt(d["text"]) or ("Escrito a mano" if (d.get("ink") or "").strip() else "Sin texto")),
                             count=(f"{len(d['photos'])} foto{'s' if len(d['photos']) != 1 else ''}"
                                    if d["photos"] else ""))
             card.bind(on_release=lambda w: self.open_day(w.day))
@@ -154,8 +154,152 @@ class NotebookScreen(MDScreen):
         a.go("note_page")
 
 
+
+# --------------------------------------------------------------------------- escritura a mano
+INK_COLORS = ["#1E3A8A", "#212121", "#C62828", "#2E7D32"]
+
+
+class InkLayer(Widget):
+    """Escritura a mano sobre la hoja (modo lápiz). Los trazos se guardan en renglones
+    (x, y desde el borde superior izquierdo del texto) y siguen al texto al desplazarlo.
+    Con el lápiz activo: un dedo o el S-Pen escribe (con presión), dos dedos desplazan la
+    hoja; con la goma, tocar un trazo lo borra."""
+    active = BooleanProperty(False)
+    eraser = BooleanProperty(False)
+    color = StringProperty(INK_COLORS[0])
+
+    def __init__(self, **kw):
+        super().__init__(**kw)
+        self.strokes: list = []
+        self._cur = None
+        self._touches: dict = {}
+        self.ti = None
+        self.on_change = None
+        self.bind(pos=self.redraw, size=self.redraw)
+
+    def attach(self, ti):
+        self.ti = ti
+        ti.bind(scroll_y=self.redraw, line_height=self.redraw, pos=self.redraw, size=self.redraw)
+
+    # geometría: renglones <-> pantalla
+    def _step(self):
+        return (self.ti.line_height + self.ti.line_spacing) if self.ti else dp(24)
+
+    def _origin(self):
+        ti = self.ti
+        return ti.x + ti.padding[0], ti.top - ti.padding[1] + ti.scroll_y
+
+    def to_lines(self, x, y):
+        ox, oy = self._origin()
+        st = self._step()
+        return round((x - ox) / st, 3), round((oy - y) / st, 3)
+
+    def redraw(self, *_):
+        self.canvas.clear()
+        if not self.ti:
+            return
+        ox, oy = self._origin()
+        st = self._step()
+        with self.canvas:
+            for s in self.strokes + ([self._cur] if self._cur else []):
+                Color(*c(s["c"]))
+                p = s["p"]
+                pts = []
+                for i in range(0, len(p), 2):
+                    pts += [ox + p[i] * st, oy - p[i + 1] * st]
+                if len(pts) == 2:
+                    pts += [pts[0] + .5, pts[1]]
+                Line(points=pts, width=max(.8, s["w"] * st), cap="round", joint="round")
+
+    def load(self, ink: str):
+        import json
+        try:
+            self.strokes = json.loads(ink) if ink else []
+        except ValueError:
+            self.strokes = []
+        self.redraw()
+
+    def dumps(self) -> str:
+        import json
+        return json.dumps(self.strokes, separators=(",", ":")) if self.strokes else ""
+
+    def _changed(self):
+        self.redraw()
+        if self.on_change:
+            self.on_change()
+
+    def undo(self):
+        if self.strokes:
+            self.strokes.pop()
+            self._changed()
+
+    # toques
+    def on_touch_down(self, touch):
+        if not self.active or not self.collide_point(*touch.pos) or self.ti is None:
+            return False
+        touch.grab(self)
+        self._touches[touch.uid] = touch.pos
+        if len(self._touches) > 1:          # dos dedos: desplazar la hoja
+            self._cur = None
+            self.redraw()
+            return True
+        if self.eraser:
+            self._erase(touch.pos)
+            return True
+        pressure = touch.pressure if "pressure" in (touch.profile or []) else None
+        k = .55 + pressure * .9 if pressure else 1.0
+        x, y = self.to_lines(*touch.pos)
+        self._cur = {"c": self.color, "w": round(.06 * k, 3), "p": [x, y]}
+        self.redraw()
+        return True
+
+    def on_touch_move(self, touch):
+        if touch.grab_current is not self:
+            return False
+        prev = self._touches.get(touch.uid, touch.pos)
+        self._touches[touch.uid] = touch.pos
+        if len(self._touches) > 1:
+            n = len(self._touches)
+            self._scroll((touch.pos[1] - prev[1]) / n)
+        elif self.eraser:
+            self._erase(touch.pos)
+        elif self._cur is not None:
+            x, y = self.to_lines(*touch.pos)
+            px, py = self._cur["p"][-2:]
+            if math.hypot(x - px, y - py) * self._step() >= 1.5:
+                self._cur["p"] += [x, y]
+                self.redraw()
+        return True
+
+    def on_touch_up(self, touch):
+        if touch.grab_current is not self:
+            return False
+        touch.ungrab(self)
+        self._touches.pop(touch.uid, None)
+        if self._cur is not None and not self._touches:
+            self.strokes.append(self._cur)
+            self._cur = None
+            self._changed()
+        return True
+
+    def _scroll(self, dy):
+        ti = self.ti
+        bottom = max([max(s["p"][1::2]) for s in self.strokes if s["p"]] + [0]) * self._step()
+        content = max(ti.minimum_height - ti.height, bottom - ti.height * .5, 0) + ti.height * .5
+        ti.scroll_y = max(0, min(content, ti.scroll_y + dy))
+
+    def _erase(self, pos):
+        x, y = self.to_lines(*pos)
+        r = .35
+        keep = [s for s in self.strokes
+                if not any(abs(s["p"][i] - x) < r and abs(s["p"][i + 1] - y) < r for i in range(0, len(s["p"]), 2))]
+        if len(keep) != len(self.strokes):
+            self.strokes = keep
+            self._changed()
+
 # --------------------------------------------------------------------------- página
 class NoteScreen(MDScreen):
+    pen = BooleanProperty(False)           # modo lápiz (escritura a mano)
     day = StringProperty("")
     title = StringProperty("")
     wide = BooleanProperty(False)
@@ -165,6 +309,9 @@ class NoteScreen(MDScreen):
         # Se escribe directo en la hoja, sin el cuadro de texto nativo de Android (native_input).
         ti = self.ids.text
         ti.native_edit = False
+        ink = self.ids.ink
+        ink.attach(ti)
+        ink.on_change = self._ink_changed
         ti.bind(pos=self._rule, size=self._rule, scroll_y=self._rule, line_height=self._rule)
         self._rule()
 
@@ -194,6 +341,7 @@ class NoteScreen(MDScreen):
         self._loading = True
         self.ids.text.text = self.entry["text"]
         self._loading = False
+        self.ids.ink.load(self.entry.get("ink") or "")
         self.saved_text = "Guardado"
         self._layout()
         self.refresh_photos()
@@ -246,8 +394,26 @@ class NoteScreen(MDScreen):
     def save_now(self):
         if not getattr(self, "entry", None):
             return
-        notebook_db().save_note_text(self.entry["id"], self.ids.text.text)
+        db = notebook_db()
+        db.save_note_text(self.entry["id"], self.ids.text.text)
+        db.save_note_ink(self.entry["id"], self.ids.ink.dumps())
         self.saved_text = "Guardado"
+
+    # ------------------------------------------------------------ lápiz
+    def set_pen(self, on: bool):
+        self.pen = on
+        ink = self.ids.ink
+        ink.active = on
+        ink.eraser = False
+        if on:
+            self.ids.text.focus = False
+
+    def set_ink_color(self, col: str):
+        self.ids.ink.color = col
+        self.ids.ink.eraser = False
+
+    def _ink_changed(self):
+        self.on_text()
 
     # ------------------------------------------------------------ fotos
     def refresh_photos(self):
@@ -612,13 +778,14 @@ class AnnotateView(ModalView):
 
 class PenSwatch(ButtonBehavior, Widget):
     swatch = ListProperty([1, 0, 0, 1])
+    ring = ListProperty([1, 1, 1, 1])
     selected = BooleanProperty(False)
 
 
 def register():
     """Registra las clases para las reglas KV (se llama al cargar la app)."""
     from kivy.factory import Factory
-    for cls in (NoteCard, NoteThumb, NotebookScreen, NoteScreen, PenSwatch):
+    for cls in (NoteCard, NoteThumb, NotebookScreen, NoteScreen, PenSwatch, InkLayer):
         Factory.register(cls.__name__, cls=cls)
 
 
