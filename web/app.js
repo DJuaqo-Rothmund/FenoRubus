@@ -159,11 +159,19 @@ async function loadLabels() {
   cachePut("train/all", out);
   return out;
 }
+// Antes de escribir se suma lo que otro equipo (teléfono o PC) guardó entretanto: por foto
+// gana la marca más reciente, así se puede marcar en ambos a la vez sin perder nada.
 async function saveLabels(data) {
-  cachePut("train/all", data);
-  const blob = new Blob([JSON.stringify(data)], { type: "application/json" });
   const dir = await trainDir(true);
   const f = await list(`'${dir}' in parents and name='${TRAIN_FILE}' and trashed=false`, "files(id,name)");
+  if (f[0]) {
+    const remote = await (await download(f[0].id)).json().catch(() => null);
+    for (const [k, v] of Object.entries(remote?.photos || {})) {
+      if (!data.photos[k] || (v.ts || "") > (data.photos[k].ts || "")) data.photos[k] = v;
+    }
+  }
+  cachePut("train/all", data);
+  const blob = new Blob([JSON.stringify(data)], { type: "application/json" });
   if (f[0]) await updateFile(f[0].id, blob, "application/json");
   else await upload(dir, TRAIN_FILE, blob, "application/json");
 }

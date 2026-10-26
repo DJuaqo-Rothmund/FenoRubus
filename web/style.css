@@ -337,3 +337,17 @@ dialog.tpage[open] { display: flex; }
 .tpagebar .round { background: transparent; color: #fff; border-color: rgba(255,255,255,.35); }
 .tpagebody { overflow: auto; flex: 1; padding: 16px; max-width: 1100px; width: 100%; margin: 0 auto; }
 .tthumb .tc { position: absolute; top: 6px; left: 6px; background: rgba(0,0,0,.55); color: #fff; font-size: 11px; font-weight: 700; border-radius: 8px; padding: 1px 7px; }
+#ttitle { display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.thint .touch { display: none; }
+@media (max-width: 600px), (pointer: coarse) {
+  .tbarx { flex-wrap: nowrap; overflow-x: auto; gap: 6px; padding: 6px 8px; }
+  .tbarx .ghost, .tbarx .primary { white-space: nowrap; padding: 6px 12px; flex: none; }
+  .tbarx .grow { min-width: 0; }
+  #tname { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  #tsaved { display: none; }
+  .tclassbar { flex-wrap: nowrap; overflow-x: auto; padding: 0 8px 6px; scrollbar-width: none; }
+  .tclassbar button { flex: none; padding: 7px 12px; }
+  .tcount { flex: none; white-space: nowrap; }
+  .thint .mouse { display: none; }
+  .thint .touch { display: inline; }
+}

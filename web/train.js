@@ -222,9 +222,9 @@ const Ed = {
     saveNow();
     this.open(j);
   },
-  cleanRec() {           // una foto abierta y sin marcas no cuenta como marcada
+  cleanRec() {           // una foto solo abierta (nunca editada) no se guarda
     const r = this.rec;
-    if (r && !r.boxes.length && !r.empty) delete data.photos[this.photo.name];
+    if (r && !r.ts && !r.boxes.length && !r.empty) delete data.photos[this.photo.name];
   },
   changed() {
     this.rec.by = X.email() || "";
@@ -319,6 +319,14 @@ const Ed = {
     if (!this.img) return;
     this.cv.setPointerCapture(e.pointerId);
     const x = e.offsetX, y = e.offsetY;
+    (this.touches ||= new Map()).set(e.pointerId, [x, y]);
+    if (this.touches.size === 2) {        // dos dedos (teléfono o tablet): acercar y mover
+      if (this.drag?.mode === "move" || this.drag?.mode === "resize") Object.assign(this.rec.boxes[this.sel], this.drag.b0);
+      this.drag = { mode: "pinch", ...this.pinchState() };
+      this.draw();
+      return;
+    }
+    if (this.touches.size > 2) return;
     if (e.button === 1 || e.button === 2 || this.space) { this.drag = { mode: "pan", x, y }; return; }
     const [i, corner] = this.hit(x, y);
     if (i != null) {
@@ -333,6 +341,10 @@ const Ed = {
     }
     this.draw();
   },
+  pinchState() {
+    const [[x0, y0], [x1, y1]] = [...this.touches.values()];
+    return { d: Math.hypot(x1 - x0, y1 - y0) || 1, mx: (x0 + x1) / 2, my: (y0 + y1) / 2 };
+  },
   setClassButton(k) {
     this.cls = k;
     [...$("tclassbar").children].forEach((b) => b.classList.toggle("on", b.dataset.k === k));
@@ -341,6 +353,15 @@ const Ed = {
     const d = this.drag;
     if (!this.img) return;
     const x = e.offsetX, y = e.offsetY;
+    if (this.touches?.has(e.pointerId)) this.touches.set(e.pointerId, [x, y]);
+    if (d?.mode === "pinch") {
+      if (this.touches.size < 2) return;
+      const p = this.pinchState();
+      this.view.ox += p.mx - d.mx; this.view.oy += p.my - d.my;
+      this.zoomAt(p.d / d.d, p.mx, p.my);
+      Object.assign(d, p);
+      return;
+    }
     if (!d) {
       const [, corner] = this.hit(x, y);
       this.cv.style.cursor = corner ? "nwse-resize" : this.space ? "grab" : "crosshair";
@@ -363,12 +384,16 @@ const Ed = {
     this.draw();
   },
   up(e) {
+    this.touches?.delete(e.pointerId);
     const d = this.drag;
+    if (d?.mode === "pinch") { if (!this.touches.size) this.drag = null; return; }
     this.drag = null;
     if (!d || d.mode === "pan") return;
     if (d.mode === "new") {
       if (d.x1 == null) { this.draw(); return; }
-      const b = { c: this.cls, x: Math.min(d.x0, d.x1), y: Math.min(d.y0, d.y1), w: Math.abs(d.x1 - d.x0), h: Math.abs(d.y1 - d.y0) };
+      const cl = (v) => Math.max(0, Math.min(1, v));         // la caja no sale de la foto
+      const x0 = cl(Math.min(d.x0, d.x1)), y0 = cl(Math.min(d.y0, d.y1)), x1 = cl(Math.max(d.x0, d.x1)), y1 = cl(Math.max(d.y0, d.y1));
+      const b = { c: this.cls, x: x0, y: y0, w: x1 - x0, h: y1 - y0 };
       const [sx0, sy0] = this.toScr(b.x, b.y), [sx1, sy1] = this.toScr(b.x + b.w, b.y + b.h);
       if (sx1 - sx0 < 6 || sy1 - sy0 < 6) { this.draw(); return; }     // un clic suelto no crea caja
       this.rec.boxes.push(b);
