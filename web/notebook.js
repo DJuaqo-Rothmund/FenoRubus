@@ -28,11 +28,10 @@ function excerpt(text, n = 220) {
 export function init(ctx) {
   X = ctx;
   $("nbnew").onclick = () => openPage(C.iso(C.todayUTC()));
-  $("nbtext").oninput = () => {
-    $("nbsaved").textContent = "Escribiendo…";
-    clearTimeout(saveTimer);
-    saveTimer = setTimeout(saveText, 1500);
-  };
+  $("nbtext").oninput = dirty;
+  $("nbkeys").onclick = () => setPen(false);
+  $("nbpen").onclick = () => setPen(true);
+  Ink.init();
   $("nbpage").addEventListener("close", () => { saveText(); renderNotebook(); });
   $("nbdate").onchange = (e) => moveTo(e.target.value);
   $("nbdel").onclick = deletePage;
@@ -44,6 +43,23 @@ export function init(ctx) {
   zone.ondragleave = (e) => { if (!zone.contains(e.relatedTarget)) zone.classList.remove("over"); };
   zone.ondrop = (e) => { e.preventDefault(); zone.classList.remove("over"); addPhotos([...e.dataTransfer.files]); };
   Draw.init();
+}
+
+function dirty() {
+  $("nbsaved").textContent = "Escribiendo…";
+  clearTimeout(saveTimer);
+  saveTimer = setTimeout(saveText, 1500);
+}
+
+function setPen(on) {
+  document.querySelector(".nbsheet").classList.toggle("pen", on);
+  $("nbkeys").classList.toggle("on", !on);
+  $("nbpen").classList.toggle("on", on);
+  $("nbpentools").hidden = !on;
+  Ink.erase = false;
+  $("nberase").classList.remove("on");
+  if (on) $("nbtext").blur();
+  Ink.draw();
 }
 
 // ------------------------------------------------------------------ línea de tiempo
@@ -61,7 +77,7 @@ export function renderNotebook() {
     card.innerHTML = `<div class="nbdate"><b>${date.getUTCDate()}</b><span>${C.MES3[date.getUTCMonth()].toUpperCase()}</span></div>
       <div class="nbinfo"><div class="nbhead"><span>${w[0].toUpperCase()}${w.slice(1)} · ${date.getUTCFullYear()}</span>
       <span class="muted">${n ? `${n} foto${n === 1 ? "" : "s"}` : ""}</span></div>
-      <div class="nbtxt">${esc(excerpt(d.text)) || '<span class="muted">Sin texto</span>'}</div><div class="nbstrip"></div></div>`;
+      <div class="nbtxt">${esc(excerpt(d.text)) || `<span class="muted">${(d.ink || "").length > 2 ? "✎ Escrito a mano" : "Sin texto"}</span>`}</div><div class="nbstrip"></div></div>`;
     card.onclick = () => openPage(d.day);
     const strip = card.querySelector(".nbstrip");
     for (const p of d.photos.slice(0, 6)) {
@@ -82,11 +98,13 @@ export function openPage(day) {
   $("nbtitle").textContent = niceDay(day);
   $("nbdate").value = day;
   $("nbtext").value = cur?.text || "";
+  Ink.load(cur?.ink || "");
+  setPen(false);
   $("nbsaved").textContent = cur ? "Guardado" : "";
   $("nbmsg").textContent = "";
   renderPhotos();
   if (!$("nbpage").open) $("nbpage").showModal();
-  $("nbtext").focus();
+  if (!Ink.strokes.length) $("nbtext").focus();
 }
 
 async function ensureEntry(fields = {}) {      // la página se crea al escribir o subir la primera foto
@@ -98,10 +116,10 @@ async function ensureEntry(fields = {}) {      // la página se crea al escribir
 async function saveText() {
   clearTimeout(saveTimer);
   if (!page) return;
-  const text = $("nbtext").value;
+  const text = $("nbtext").value, ink = Ink.dumps();
   const cur = current();
-  if ((cur?.text || "") === text) { if (cur) $("nbsaved").textContent = "Guardado"; return; }
-  try { await ensureEntry({ text }); $("nbsaved").textContent = "Guardado"; }
+  if ((cur?.text || "") === text && (cur?.ink || "") === ink) { if (cur) $("nbsaved").textContent = "Guardado"; return; }
+  try { await ensureEntry({ text, ink }); $("nbsaved").textContent = "Guardado"; }
   catch (e) { $("nbsaved").textContent = `No se guardó: ${e.message}`; }
 }
 
@@ -358,3 +376,96 @@ function paint(g, strokes) {
     g.stroke();
   }
 }
+
+// ------------------------------------------------------------------ escritura a mano en la hoja
+// Igual que la app (ui.notebook.InkLayer): trazos en renglones desde el borde superior
+// izquierdo del texto, así la letra queda en el mismo renglón en el teléfono y en la web.
+const LINE = 30, PAD_X = 14;
+const Ink = {
+  strokes: [], cur: null, color: "#1E3A8A", erase: false, pointers: new Map(),
+  init() {
+    this.cv = $("nbink");
+    this.g = this.cv.getContext("2d");
+    this.ta = $("nbtext");
+    this.ta.addEventListener("scroll", () => this.draw());
+    new ResizeObserver(() => this.fit()).observe(this.ta);
+    document.querySelectorAll("#nbpentools .ink").forEach((b) => (b.onclick = () => {
+      this.color = b.dataset.c; this.erase = false;
+      document.querySelectorAll("#nbpentools .ink").forEach((x) => x.classList.toggle("on", x === b));
+      $("nberase").classList.remove("on");
+    }));
+    $("nberase").onclick = () => { this.erase = !this.erase; $("nberase").classList.toggle("on", this.erase); };
+    $("nbinkundo").onclick = () => { if (this.strokes.pop()) { this.draw(); dirty(); } };
+    this.cv.addEventListener("pointerdown", (e) => this.down(e));
+    this.cv.addEventListener("pointermove", (e) => this.move(e));
+    for (const ev of ["pointerup", "pointercancel"]) this.cv.addEventListener(ev, (e) => this.up(e));
+    this.cv.addEventListener("wheel", (e) => { e.preventDefault(); this.ta.scrollTop += e.deltaY; }, { passive: false });
+  },
+  load(json) {
+    try { this.strokes = json ? JSON.parse(json) : []; } catch { this.strokes = []; }
+    this.cur = null;
+    this.fit();
+  },
+  dumps() { return this.strokes.length ? JSON.stringify(this.strokes) : ""; },
+  fit() {
+    const dpr = window.devicePixelRatio || 1;
+    this.dpr = dpr;
+    this.cv.width = Math.max(1, Math.round(this.ta.clientWidth * dpr));
+    this.cv.height = Math.max(1, Math.round(this.ta.clientHeight * dpr));
+    this.draw();
+  },
+  toLines(e) {
+    const r = this.cv.getBoundingClientRect();
+    const x = e.clientX - r.left, y = e.clientY - r.top + this.ta.scrollTop;
+    return [Math.round((x - PAD_X) / LINE * 1000) / 1000, Math.round(y / LINE * 1000) / 1000];
+  },
+  draw() {
+    if (!this.g) return;
+    const g = this.g;
+    g.setTransform(1, 0, 0, 1, 0, 0);
+    g.clearRect(0, 0, this.cv.width, this.cv.height);
+    g.setTransform(this.dpr * LINE, 0, 0, this.dpr * LINE, this.dpr * PAD_X, -this.dpr * this.ta.scrollTop);
+    g.lineCap = g.lineJoin = "round";
+    for (const s of this.cur ? [...this.strokes, this.cur] : this.strokes) {
+      const p = s.p;
+      g.strokeStyle = g.fillStyle = s.c;
+      g.lineWidth = Math.max(.03, s.w * 2);
+      g.beginPath();
+      if (p.length <= 2) { g.arc(p[0], p[1], g.lineWidth / 2, 0, Math.PI * 2); g.fill(); continue; }
+      g.moveTo(p[0], p[1]);
+      for (let i = 2; i < p.length; i += 2) g.lineTo(p[i], p[i + 1]);
+      g.stroke();
+    }
+  },
+  down(e) {
+    this.cv.setPointerCapture(e.pointerId);
+    this.pointers.set(e.pointerId, e.clientY);
+    if (this.pointers.size > 1) { this.cur = null; this.draw(); return; }      // dos dedos: desplazar
+    if (this.erase) { this.eraseAt(e); return; }
+    const k = e.pointerType === "pen" && e.pressure > 0 ? .55 + e.pressure * .9 : 1;
+    this.cur = { c: this.color, w: Math.round(.06 * k * 1000) / 1000, p: this.toLines(e) };
+    this.draw();
+  },
+  move(e) {
+    if (!this.pointers.has(e.pointerId)) return;
+    const prev = this.pointers.get(e.pointerId);
+    this.pointers.set(e.pointerId, e.clientY);
+    if (this.pointers.size > 1) { this.ta.scrollTop -= (e.clientY - prev) / this.pointers.size; return; }
+    if (this.erase) { this.eraseAt(e); return; }
+    if (!this.cur) return;
+    for (const ev of e.getCoalescedEvents ? e.getCoalescedEvents() : [e]) {
+      const [x, y] = this.toLines(ev), p = this.cur.p;
+      if (Math.hypot(x - p[p.length - 2], y - p[p.length - 1]) * LINE >= 1.2) p.push(x, y);
+    }
+    this.draw();
+  },
+  up(e) {
+    this.pointers.delete(e.pointerId);
+    if (this.cur && !this.pointers.size) { this.strokes.push(this.cur); this.cur = null; this.draw(); dirty(); }
+  },
+  eraseAt(e) {
+    const [x, y] = this.toLines(e);
+    const keep = this.strokes.filter((s) => !s.p.some((v, i) => i % 2 === 0 && Math.abs(v - x) < .35 && Math.abs(s.p[i + 1] - y) < .35));
+    if (keep.length !== this.strokes.length) { this.strokes = keep; this.draw(); dirty(); }
+  },
+};

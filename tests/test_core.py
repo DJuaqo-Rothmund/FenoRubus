@@ -2110,7 +2110,8 @@ def test_notebook_page_from_web_reaches_phone(tmp_path):
     ts = "2026-10-26T12:00:00.000"
     changes = [
         {"entity": "notebook_entries", "uid": "w1", "ts": ts, "deleted": 0,
-         "data": {"day": "2026-10-26", "text": "Desde el PC", "created_at": ts, "updated_at": ts}},
+         "data": {"day": "2026-10-26", "text": "Desde el PC", "created_at": ts, "updated_at": ts,
+                  "ink": '[{"c":"#1E3A8A","w":0.06,"p":[1,2,3,2.5]}]'}},
         {"entity": "notebook_photos", "uid": "wp1", "ts": ts, "deleted": 0,
          "data": {"entry_id": "w1", "path": "photos/cuaderno/20261026-AM-cuaderno-w1-a1.jpg", "caption": "",
                   "annotated": 1, "created_at": ts}},
@@ -2122,7 +2123,7 @@ def test_notebook_page_from_web_reaches_phone(tmp_path):
     fake.files["wj"] = {"name": "20261026-AM-cuaderno-w1-a1.jpg", "parents": ["x"], "data": b"DRAWN", "folder": False}
     cel.run()
     page = copen(cws.by_code("AM")).note_for_day("2026-10-26")
-    assert page["text"] == "Desde el PC"
+    assert page["text"] == "Desde el PC" and page["ink"].startswith('[{"c":"#1E3A8A"')
     p = page["photos"][0]
     assert p["annotated"] == 1 and p["path"].startswith(cdir)
     assert open(p["path"], "rb").read() == b"DRAWN"

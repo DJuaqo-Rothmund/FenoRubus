@@ -594,8 +594,8 @@ export function noteFor(state, day) {
 export function noteChange(state, day, fields = {}) {
   const cur = noteFor(state, day);
   const ts = nowTs();
-  const data = cur ? { day: cur.day, text: cur.text || "", created_at: cur.created_at || ts }
-    : { day, text: "", created_at: ts };
+  const data = cur ? { day: cur.day, text: cur.text || "", ink: cur.ink || "", created_at: cur.created_at || ts }
+    : { day, text: "", ink: "", created_at: ts };
   const uid = cur ? cur.uid : newUid();
   return { uid, change: { entity: "notebook_entries", uid, ts, deleted: 0, data: { ...data, ...fields, updated_at: ts } } };
 }

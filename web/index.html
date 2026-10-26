@@ -293,7 +293,23 @@
         <button value="cancel" class="round" aria-label="Cerrar">✕</button>
       </div>
       <div class="nbbody">
-        <textarea id="nbtext" class="nbpaper" placeholder="¿Qué se vio hoy en terreno? Clima, labores, plagas, ideas…"></textarea>
+        <div class="nbsheet">
+          <div class="nbwrap">
+            <textarea id="nbtext" class="nbpaper" placeholder="¿Qué se vio hoy en terreno? Clima, labores, plagas, ideas…"></textarea>
+            <canvas id="nbink" class="nbink"></canvas>
+          </div>
+          <div class="nbtools">
+            <span class="seg"><button type="button" id="nbkeys" class="on">Teclado</button><button type="button" id="nbpen">✎ Lápiz</button></span>
+            <span class="spacer"></span>
+            <span id="nbpentools" class="nbpentools" hidden>
+              <button type="button" class="ink on" data-c="#1E3A8A" style="background:#1E3A8A" title="Azul"></button>
+              <button type="button" class="ink" data-c="#212121" style="background:#212121" title="Negro"></button>
+              <button type="button" class="ink" data-c="#C62828" style="background:#C62828" title="Rojo"></button>
+              <button type="button" id="nberase" class="ghost" title="Goma: toque un trazo para borrarlo">Goma</button>
+              <button type="button" id="nbinkundo" class="ghost" title="Deshacer">↶</button>
+            </span>
+          </div>
+        </div>
         <div id="nbdrop" class="drop nbdrop">
           <div class="drophead"><b>Fotos</b><span class="muted small">clic en una foto para dibujar</span></div>
           <div id="nbphotos" class="photos"></div>

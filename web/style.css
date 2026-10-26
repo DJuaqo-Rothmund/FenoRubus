@@ -283,3 +283,18 @@ dialog.nbdraw[open] { display: flex; }
   padding: 6px 14px; cursor: pointer; }
 .widths button.on { background: #C8963E; border-color: #C8963E; }
 .nbdhint { text-align: center; opacity: .6; padding: 0 0 8px; }
+
+.nbsheet { display: grid; gap: 6px; align-content: start; }
+.nbwrap { position: relative; }
+.nbwrap .nbpaper { display: block; }
+.nbink { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; border-radius: 16px; }
+.nbsheet.pen .nbink { pointer-events: auto; touch-action: none; cursor: crosshair; }
+.nbsheet.pen .nbpaper { padding-bottom: 50vh; }
+.nbtools { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.nbtools .seg { display: inline-flex; background: #EEDAB8; border-radius: 999px; padding: 3px; }
+.nbtools .seg button { border: 0; background: transparent; border-radius: 999px; padding: 6px 14px; font-weight: 600; color: #6B4423; cursor: pointer; }
+.nbtools .seg button.on { background: #6B4423; color: #fff; }
+.nbpentools { display: inline-flex; align-items: center; gap: 6px; }
+.nbpentools .ink { width: 28px; height: 28px; border-radius: 50%; border: 3px solid #fff; box-shadow: 0 0 0 1px rgba(0,0,0,.15); cursor: pointer; }
+.nbpentools .ink.on { box-shadow: 0 0 0 2px #C8963E; }
+.nbpentools .ghost.on { background: #EEDAB8; }
