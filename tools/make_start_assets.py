@@ -25,13 +25,12 @@ def background(w=824, h=1720):
     top, mid, bot = np.array((222, 239, 214)), np.array((250, 246, 238)), np.array((246, 214, 226))
     c = np.where(y < .5, top + (mid - top) * (y / .5), mid + (bot - mid) * ((y - .5) / .5))
     bg = Image.fromarray(np.repeat(c[:, None, :], w, axis=1).astype("uint8")).convert("RGBA")
-    pred = Image.open(os.path.join(UI, "start_predio.png")).convert("RGBA").resize((440, 440))
-    logo = Image.open(os.path.join(UI, "logo_line.png")).convert("RGBA").resize((400, 400))
-    for im, cx, cy, rot, op in ((tint(logo, (168, 24, 74), .15), -60, 1520, 18, 1),
-                                (tint(pred, (47, 86, 67), .12), 800, 500, -20, 1),
-                                (tint(logo, (168, 24, 74), .10), 840, 1640, -12, 1)):
-        im = im.rotate(rot, expand=True, resample=Image.BICUBIC)
-        bg.alpha_composite(im, (int(cx - im.width / 2), int(cy - im.height / 2)))
+    # Marca de agua: floricaña (planta con flores, frutos y raíces) de una lámina botánica,
+    # sin sus textos (tools/start_bg/floricana.png), grande, centrada y en sepia tenue.
+    plant = Image.open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "start_bg", "floricana.png"))
+    plant = plant.convert("RGBA").resize((int(plant.width * 1650 / plant.height), 1650), Image.LANCZOS)
+    plant = tint(plant, (92, 70, 48), .22)
+    bg.alpha_composite(plant, ((w - plant.width) // 2, h - plant.height + 60))
     bg.convert("RGB").save(os.path.join(UI, "start_bg.jpg"), quality=86)
 
 
