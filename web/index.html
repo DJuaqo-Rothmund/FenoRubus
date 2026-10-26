@@ -41,6 +41,7 @@
       <button data-tab="matrix">Matriz</button>
       <button data-tab="notebook">Cuaderno</button>
       <button data-tab="reports">Informes</button>
+      <button data-tab="train" id="traintab" hidden>Entrenar IA</button>
       <button data-tab="settings">Ajustes</button>
     </nav>
     <div id="tab-sampling">
@@ -101,6 +102,17 @@
       </section>
       <p id="nbempty" class="muted nbempty">Aún no hay páginas. Anote aquí lo que vea en terreno cada día.</p>
       <section id="nblist" class="rows"></section>
+    </div>
+
+    <div id="tab-train" hidden>
+      <section class="card">
+        <div class="row-h"><div class="label">ENTRENAR IA · MARCAR FLORES Y FRUTOS</div>
+          <div class="chips" id="tfilter"><button data-f="todo" class="on">Todas</button><button data-f="sin">Sin marcar</button><button data-f="con">Marcadas</button></div></div>
+        <div id="tstats" class="muted small"></div>
+        <p class="muted small">Abra una foto de detalle y encierre con una caja cada brote, botón, flor o fruto (teclas 1–8 para la
+          clase). Las marcas se guardan en su Drive, aparte de los registros, y servirán para entrenar el detector.</p>
+      </section>
+      <section id="tgrid" class="tgrid"></section>
     </div>
 
     <div id="tab-reports" hidden>
@@ -343,6 +355,27 @@
       <button type="button" id="nbdsave" class="primary nbbtn">Guardar</button>
     </div>
     <div class="nbdhint small">Mouse, dedo o lápiz dibuja · rueda o dos dedos acercan</div>
+  </dialog>
+
+  <dialog id="tdialog" class="tdialog">
+    <div class="tbarx">
+      <button type="button" id="tclose" class="round" aria-label="Cerrar">✕</button>
+      <div class="grow"><b id="ttitle"></b><div id="tname" class="small"></div></div>
+      <span id="tsaved" class="small"></span>
+      <button type="button" id="tprev" class="ghost" title="Foto anterior (←)">‹ Anterior</button>
+      <button type="button" id="tnext" class="primary" title="Guardar y siguiente (→ o Enter)">Siguiente ›</button>
+    </div>
+    <div id="tclassbar" class="tclassbar"></div>
+    <canvas id="tcanvas"></canvas>
+    <div class="tbarx">
+      <span id="tcount" class="tcount"></span>
+      <span class="spacer"></span>
+      <button type="button" id="tcopy" class="ghost" title="Copiar las cajas de la foto anterior (C)">Copiar anterior</button>
+      <button type="button" id="tempty" class="ghost" title="La foto no tiene estructuras que marcar (V)">Sin estructuras</button>
+      <button type="button" id="tfit" class="ghost" title="Ver la foto completa (F)">Encuadrar</button>
+      <button type="button" id="tdel" class="ghost" title="Borrar la caja elegida (Supr)">Borrar caja</button>
+    </div>
+    <div class="thint small">Arrastre para crear una caja · clic en una caja para elegirla, moverla o cambiarle la clase (1–8) · esquinas para ajustar · rueda: zoom · clic derecho o espacio + arrastre: mover</div>
   </dialog>
 
   <dialog id="viewer"><img id="vimg" alt=""><form method="dialog"><button class="round">✕</button></form></dialog>

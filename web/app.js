@@ -2,6 +2,7 @@
 // sincronización en Drive (los mismos de la app) y pantallas de muestreo semanal.
 import * as C from "./core.js";
 import * as NB from "./notebook.js";
+import * as TR from "./train.js";
 import { CLIENT_ID } from "./config.js";
 import { makeReports } from "./reports.js";
 import { warm as warmPdf, makePdf } from "./pdf.js";
@@ -124,6 +125,39 @@ async function upload(parent, name, blob, mime) {
   const body = new Blob([`--${b}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n`, meta,
     `\r\n--${b}\r\nContent-Type: ${mime}\r\n\r\n`, blob, `\r\n--${b}--\r\n`]);
   return (await api("POST", UPLOAD, body, `multipart/related; boundary=${b}`)).id;
+}
+
+async function updateFile(id, blob, mime) {
+  const b = "pr" + C.newUid();
+  const body = new Blob([`--${b}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n{}`,
+    `\r\n--${b}\r\nContent-Type: ${mime}\r\n\r\n`, blob, `\r\n--${b}--\r\n`]);
+  return api("PATCH", `https://www.googleapis.com/upload/drive/v3/files/${id}?uploadType=multipart&fields=id`, body,
+    `multipart/related; boundary=${b}`);
+}
+
+// Marcas para entrenar el detector (web/train.js): un JSON por ensayo/predio en
+// «PhenoRubus · Imágenes de Fenología/Entrenamiento IA/», aparte de los registros.
+const TRAIN_DIR = "Entrenamiento IA";
+async function trainFile(code, create) {
+  const root = await folder(ROOT, null, create);
+  const dir = root && await folder(TRAIN_DIR, root, create);
+  if (!dir) return [null, null];
+  const f = await list(`'${dir}' in parents and name='${q(code)}.json' and trashed=false`, "files(id,name)");
+  return [dir, f[0]?.id || null];
+}
+async function loadLabels(code) {
+  const [, id] = await trainFile(code, false);
+  if (!id) return (await cacheGet(`train/${code}`)) || null;
+  const got = await (await download(id)).json();
+  cachePut(`train/${code}`, got);
+  return got;
+}
+async function saveLabels(code, data) {
+  cachePut(`train/${code}`, data);
+  const blob = new Blob([JSON.stringify(data)], { type: "application/json" });
+  const [dir, id] = await trainFile(code, true);
+  if (id) await updateFile(id, blob, "application/json");
+  else await upload(dir, `${code}.json`, blob, "application/json");
 }
 
 async function download(id) {
@@ -427,6 +461,7 @@ function render() {
   if (S.tab === "reports") renderReports();
   if (S.tab === "settings") renderSettings();
   if (S.tab === "notebook") NB.renderNotebook();
+  if (S.tab === "train") TR.renderTrain();
   renderSampling();
 }
 
@@ -1477,7 +1512,7 @@ async function boot() {
   document.querySelectorAll(".tabs button").forEach((b) => (b.onclick = () => {
     S.tab = b.dataset.tab;
     document.querySelectorAll(".tabs button").forEach((x) => x.classList.toggle("on", x === b));
-    for (const t of ["sampling", "matrix", "notebook", "reports", "settings"]) $(`tab-${t}`).hidden = t !== S.tab;
+    for (const t of ["sampling", "matrix", "notebook", "train", "reports", "settings"]) $(`tab-${t}`).hidden = t !== S.tab;
     if (S.tab === "reports") warmPdf().catch(() => {});     // el generador de PDF se precarga
     render();
   }));
@@ -1491,6 +1526,8 @@ async function boot() {
   $("next").onclick = () => shift(7);
   $("today").onclick = () => { S.week = C.iso(C.mondayOf(C.todayUTC())); render(); };
   NB.init({ S, send, photoUrl, resize, uploadPhoto: uploadNotePhoto });
+  $("traintab").hidden = !TR.enabled();      // se activa abriendo la web con «#lab» una vez
+  TR.init({ S, photoUrl, loadLabels, saveLabels, email: () => store.get("pr_email") });
   $("dsave").onclick = saveDetail;
   $("msave").onclick = saveMeasure;
   $("vadd").onclick = () => openVariety(null);
