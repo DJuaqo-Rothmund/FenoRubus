@@ -26,6 +26,7 @@ _QUERIES = (
     "SELECT path FROM photos",
     "SELECT path FROM variety_attachments",
     "SELECT path FROM measure_entries WHERE path IS NOT NULL",
+    "SELECT path FROM notebook_photos",
     "SELECT image_path AS path FROM ai_references WHERE image_path IS NOT NULL",
 )
 

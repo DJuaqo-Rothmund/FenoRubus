@@ -45,6 +45,9 @@ TABLES: dict[str, dict] = {
                         "fk": {"measure_id": "measures", "week_id": "sampling_weeks",
                                "variety_id": "varieties"},
                         "natural": ()},
+    "notebook_entries": {"uid": "lower(hex(randomblob(16)))", "fk": {}, "natural": ("day",)},
+    "notebook_photos": {"uid": "lower(hex(randomblob(16)))", "fk": {"entry_id": "notebook_entries"},
+                        "natural": ("entry_id", "path")},
     "variety_metrics": {"uid": "lower(hex(randomblob(16)))", "fk": {"variety_id": "varieties"},
                         "natural": ("variety_id", "season")},
     "custom_fields": {"uid": "lower(hex(randomblob(16)))", "fk": {"variety_id": "varieties"},
@@ -52,8 +55,10 @@ TABLES: dict[str, dict] = {
 }
 # Orden de aplicación: primero lo que otros referencian.
 ORDER = ["varieties", "sampling_weeks", "treatments", "measures", "observations", "photos",
-         "variety_attachments", "measure_entries", "variety_metrics", "custom_fields"]
-PATH_COLUMNS = {"photos": "path", "variety_attachments": "path", "measure_entries": "path"}
+         "variety_attachments", "measure_entries", "variety_metrics", "custom_fields",
+         "notebook_entries", "notebook_photos"]
+PATH_COLUMNS = {"photos": "path", "variety_attachments": "path", "measure_entries": "path",
+                "notebook_photos": "path"}
 # Ajustes del ensayo que también viajan (semana de referencia, primera semana fijada…).
 SETTING_PREFIXES = ("season_start:", "first_week:", "treatment_", "trial_")
 

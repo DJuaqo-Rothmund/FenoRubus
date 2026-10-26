@@ -225,6 +225,23 @@ CREATE TABLE IF NOT EXISTS documents (
     created_at  TEXT NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS notebook_entries (  -- cuaderno de campo: una página por día
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    day         TEXT NOT NULL UNIQUE,           -- AAAA-MM-DD
+    text        TEXT NOT NULL DEFAULT '',
+    created_at  TEXT NOT NULL,
+    updated_at  TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS notebook_photos (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    entry_id    INTEGER NOT NULL REFERENCES notebook_entries(id) ON DELETE CASCADE,
+    path        TEXT NOT NULL,                  -- la versión vigente (con dibujos si se anotó)
+    caption     TEXT DEFAULT '',
+    annotated   INTEGER NOT NULL DEFAULT 0,
+    created_at  TEXT NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS settings (
     key    TEXT PRIMARY KEY,
     value  TEXT
@@ -815,6 +832,57 @@ class Database:
     def delete_attachment(self, attachment_id: int) -> None:
         self.execute("DELETE FROM variety_attachments WHERE id=?", (attachment_id,))
         self.log("delete", "attachment", attachment_id)
+
+    # ------------------------------------------- cuaderno de campo (bitácora)
+    def note_days(self) -> list[dict]:
+        """Páginas del cuaderno, de la más reciente a la más antigua, con sus fotos."""
+        rows = self.query("SELECT * FROM notebook_entries ORDER BY day DESC")
+        photos: dict = {}
+        for p in self.query("SELECT * FROM notebook_photos ORDER BY created_at, id"):
+            photos.setdefault(p["entry_id"], []).append(p)
+        for r in rows:
+            r["photos"] = photos.get(r["id"], [])
+        return rows
+
+    def note_for_day(self, day: str, create: bool = False) -> dict | None:
+        row = self.query_one("SELECT * FROM notebook_entries WHERE day=?", (day[:10],))
+        if row is None and create:
+            now = _now()
+            self.execute("INSERT INTO notebook_entries(day, text, created_at, updated_at) VALUES (?,?,?,?)",
+                         (day[:10], "", now, now))
+            row = self.query_one("SELECT * FROM notebook_entries WHERE day=?", (day[:10],))
+        if row is not None:
+            row["photos"] = self.query("SELECT * FROM notebook_photos WHERE entry_id=? ORDER BY created_at, id",
+                                       (row["id"],))
+        return row
+
+    def save_note_text(self, entry_id: int, text: str) -> None:
+        cur = self.query_one("SELECT text FROM notebook_entries WHERE id=?", (entry_id,))
+        if cur is not None and cur["text"] != text:
+            self.execute("UPDATE notebook_entries SET text=?, updated_at=? WHERE id=?", (text, _now(), entry_id))
+
+    def move_note(self, entry_id: int, day: str) -> None:
+        """Cambia la fecha de una página (si ese día ya tenía página, se rechaza)."""
+        if self.query_one("SELECT 1 FROM notebook_entries WHERE day=? AND id<>?", (day[:10], entry_id)):
+            raise ValueError("Ese día ya tiene una página en el cuaderno.")
+        self.execute("UPDATE notebook_entries SET day=?, updated_at=? WHERE id=?", (day[:10], _now(), entry_id))
+
+    def delete_note(self, entry_id: int) -> None:
+        self.execute("DELETE FROM notebook_photos WHERE entry_id=?", (entry_id,))
+        self.execute("DELETE FROM notebook_entries WHERE id=?", (entry_id,))
+        self.log("delete", "note", entry_id)
+
+    def add_note_photo(self, entry_id: int, path: str, caption: str = "") -> int:
+        cur = self.execute("INSERT INTO notebook_photos(entry_id, path, caption, annotated, created_at) "
+                           "VALUES (?,?,?,0,?)", (entry_id, path, caption, _now()))
+        self.execute("UPDATE notebook_entries SET updated_at=? WHERE id=?", (_now(), entry_id))
+        return cur.lastrowid
+
+    def set_note_photo(self, photo_id: int, path: str, annotated: bool = True) -> None:
+        self.execute("UPDATE notebook_photos SET path=?, annotated=? WHERE id=?", (path, int(annotated), photo_id))
+
+    def delete_note_photo(self, photo_id: int) -> None:
+        self.execute("DELETE FROM notebook_photos WHERE id=?", (photo_id,))
 
     # ------------------------------------------- mediciones personalizadas
     MEASURE_KINDS = {"images": "Registro de imágenes", "table": "Planilla de datos"}

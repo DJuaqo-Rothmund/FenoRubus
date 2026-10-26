@@ -2058,3 +2058,42 @@ def test_photo_locations_and_heat_grid(db):
     peak = max(range(len(grid)), key=grid.__getitem__)
     assert (x0 + peak % gw, y0 + peak // gw) in {(9, 9), (9, 10), (10, 9), (10, 10)}   # el más pesado
     assert ramp(0) == (111, 168, 106) and ramp(1) == (198, 40, 40)
+
+
+def test_notebook_pages_photos_and_sync(tmp_path):
+    """Cuaderno de campo: una página por día con texto y fotos; viaja al otro equipo y la
+    foto anotada (con trazos) reemplaza a la original allá."""
+    fake = FakeDrive()
+    cel, cws, copen, cdir = _device(tmp_path, "cel", fake)
+    pc, pws, popen, pdir = _device(tmp_path, "pc", fake)
+    am = copen(cws.by_code("AM"))
+    e = am.note_for_day("2026-10-20", create=True)
+    assert am.note_for_day("2026-10-20", create=True)["id"] == e["id"]      # un día = una página
+    am.save_note_text(e["id"], "Maleza en hilera 4; riego corto.")
+    photo = os.path.join(cdir, "photos", "cuaderno", "20261020-AM-cuaderno.jpg")
+    os.makedirs(os.path.dirname(photo))
+    open(photo, "wb").write(b"JPEG1")
+    pid = am.add_note_photo(e["id"], photo)
+    am.note_for_day("2026-10-18", create=True)
+    assert [d["day"] for d in am.note_days()] == ["2026-10-20", "2026-10-18"]
+    try:
+        am.move_note(e["id"], "2026-10-18")
+        assert False, "no se pueden juntar dos días"
+    except ValueError:
+        pass
+    fake.files["n1"] = {"name": "20261020-AM-cuaderno.jpg", "parents": ["x"], "data": b"JPEG1", "folder": False}
+    cel.run()
+    pc.run()
+    pam = popen(pws.by_code("AM"))
+    page = pam.note_for_day("2026-10-20")
+    assert page["text"] == "Maleza en hilera 4; riego corto." and len(page["photos"]) == 1
+    assert open(page["photos"][0]["path"], "rb").read() == b"JPEG1"
+    # Anotada en el celular: archivo nuevo con los trazos; el PC baja esa versión.
+    drawn = photo.replace(".jpg", "-a1.jpg")
+    open(drawn, "wb").write(b"JPEG2")
+    am.set_note_photo(pid, drawn)
+    fake.files["n2"] = {"name": os.path.basename(drawn), "parents": ["x"], "data": b"JPEG2", "folder": False}
+    cel.run()
+    pc.run()
+    p2 = pam.note_for_day("2026-10-20")["photos"][0]
+    assert p2["annotated"] == 1 and open(p2["path"], "rb").read() == b"JPEG2"

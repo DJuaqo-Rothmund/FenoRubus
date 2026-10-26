@@ -198,7 +198,8 @@ class Workspaces:
         return f"{PROFILES.get(ws['profile'], 'Otros')}/{safe}"
 
     # ------------------------------------------------- traspaso I+D -> Predio
-    RECORD_TABLES = ("observations", "photos", "variety_attachments", "measure_entries")
+    RECORD_TABLES = ("observations", "photos", "variety_attachments", "measure_entries",
+                     "notebook_entries", "notebook_photos")
 
     def records(self, ws: dict) -> int:
         """Registros (observaciones, fotos, adjuntas, mediciones) guardados en un ensayo."""

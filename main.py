@@ -325,8 +325,9 @@ class FenoRubusApp(MDApp):
         self.toast(f"Listo: {res['units']} sectores y {res['photos']} fotos ahora en "
                    f"{dst['name']} ({res['new']}).")
 
-    def open_workspace(self, ws_id: int, target: str = "home"):
-        """Cambia de ensayo o predio: todas las pantallas se rehacen con sus datos."""
+    def open_workspace(self, ws_id: int, target: str | None = "home"):
+        """Cambia de ensayo o predio: todas las pantallas se rehacen con sus datos.
+        target=None: solo cambia de ensayo, sin moverse de la pantalla actual (cuaderno)."""
         ws = self.workspaces.get(ws_id)
         if ws is None:
             return
@@ -341,7 +342,8 @@ class FenoRubusApp(MDApp):
         # Las pantallas ya construidas se REUTILIZAN (rehacerlas tomaba más de 1 s en
         # teléfonos básicos): cada una vuelve a leer la base al mostrarse; solo se olvidan
         # las selecciones que eran del ensayo anterior.
-        self._history = []
+        if target is not None:
+            self._history = []
         if self.home is None:
             self.home = HomeScreen(name="home")
             self.sm.add_widget(self.home)
@@ -349,7 +351,9 @@ class FenoRubusApp(MDApp):
         ids.reports.sel_week = ids.reports.sel_variety = ids.reports.sel_month = None
         ids.preview._season = None
         self.home.refresh_current()
-        if target == "sectors":   # predio: lista de sectores; «atrás» vuelve a la lista de predios
+        if target is None:
+            pass
+        elif target == "sectors":   # predio: lista de sectores; «atrás» vuelve a la lista de predios
             self.sectors
             self._history = ["start", "workspaces"]
             self.sm.current = "sectors"

@@ -67,14 +67,16 @@ def _checkpoint_copy(db, dest: str) -> str:
 # ------------------------------------------------------------------ respaldo
 # Otras imágenes que viajan en la copia: (tabla, clave del manifiesto, carpeta en el ZIP)
 _EXTRA_IMAGES = (("variety_attachments", "attachments", "adjuntos"),
-                 ("measure_entries", "measures", "mediciones"))
+                 ("measure_entries", "measures", "mediciones"),
+                 ("notebook_photos", "notebook", "cuaderno"))
 
 
 def _write_workspace(zf, db, prefix: str = "") -> int:
     """Base + fotos de UN ensayo dentro del ZIP (bajo `prefix`). Devuelve n.º de fotos."""
     tmp_db = _checkpoint_copy(db, os.path.join(data_subdir("tmp"), DB_NAME))
     manifest = {"app": "PhenoRubus", "created": _dt.datetime.now().isoformat(timespec="seconds"),
-                "code": getattr(db, "code", ""), "photos": {}, "attachments": {}, "measures": {}}
+                "code": getattr(db, "code", ""), "photos": {}, "attachments": {}, "measures": {},
+                "notebook": {}}
     zf.write(tmp_db, prefix + DB_NAME)
     os.remove(tmp_db)
     for r in db.query("SELECT id, path FROM photos"):

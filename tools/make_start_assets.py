@@ -110,6 +110,81 @@ def bar_icons():
         im.save(os.path.join(UI, f"spin_{k}.png"))
 
 
+def notebook_icon():
+    """Cuaderno de campo: cuaderno con espiral, renglones y lápiz, con una frambuesa en la
+    esquina y destellos; trazo café (como el resto de los íconos de inicio) y burbuja ocre."""
+    import math as _m
+    S = 4                                   # se dibuja a 4× y se reduce (bordes suaves)
+    n = 360 * S
+    ink = (0x6B, 0x44, 0x23, 255)           # café
+    paper = (250, 246, 238, 255)
+    im = Image.new("RGBA", (n, n), (0, 0, 0, 0))
+    d = ImageDraw.Draw(im)
+    w = 12 * S
+
+    def dot(x, y, r):
+        d.ellipse([(x - r) * S, (y - r) * S, (x + r) * S, (y + r) * S], fill=ink)
+
+    def line(pts, width=w):
+        d.line([(x * S, y * S) for x, y in pts], fill=ink, width=width, joint="curve")
+        for x, y in (pts[0], pts[-1]):
+            dot(x, y, width / S / 2)
+
+    def star(x, y, r):                       # destello de 4 puntas
+        k = r * .28
+        pts = [(x, y - r), (x + k, y - k), (x + r, y), (x + k, y + k), (x, y + r), (x - k, y + k), (x - r, y), (x - k, y - k)]
+        d.polygon([(a * S, b * S) for a, b in pts], fill=ink)
+
+    # tapa y hoja interior
+    d.rounded_rectangle([78 * S, 38 * S, 268 * S, 312 * S], radius=24 * S, outline=ink, width=w)
+    d.rounded_rectangle([104 * S, 60 * S, 246 * S, 290 * S], radius=12 * S, outline=ink, width=int(w * .7))
+    # espiral: anillos que cruzan el borde izquierdo
+    for k in range(7):
+        y = 70 + k * 34
+        d.rounded_rectangle([60 * S, (y - 7) * S, 98 * S, (y + 7) * S], radius=7 * S, outline=ink, width=int(w * .65))
+        d.rectangle([80 * S, (y - 3) * S, 96 * S, (y + 3) * S], fill=paper)
+    # renglones
+    for k, x1 in enumerate((222, 222, 200, 222, 170)):
+        y = 98 + k * 28
+        line([(126, y), (x1, y)], int(w * .65))
+    # lápiz en diagonal
+    a, b = (150, 262), (246, 150)
+    ang = _m.atan2(b[1] - a[1], b[0] - a[0])
+    px, py = -_m.sin(ang) * 13, _m.cos(ang) * 13
+    c1, c2, c3, c4 = (a[0] + px, a[1] + py), (b[0] + px, b[1] + py), (b[0] - px, b[1] - py), (a[0] - px, a[1] - py)
+    d.polygon([(x * S, y * S) for x, y in (c1, c2, c3, c4)], fill=paper)
+    line([c1, c2]); line([c4, c3]); line([c2, c3])
+    tip = (a[0] - _m.cos(ang) * 28, a[1] - _m.sin(ang) * 28)
+    d.polygon([(x * S, y * S) for x, y in (c1, tip, c4)], fill=paper)
+    line([c1, tip, c4])
+    dot(tip[0] + _m.cos(ang) * 7, tip[1] + _m.sin(ang) * 7, 5)
+    back = (b[0] - _m.cos(ang) * 22, b[1] - _m.sin(ang) * 22)
+    line([(back[0] + px, back[1] + py), (back[0] - px, back[1] - py)], int(w * .65))
+    # frambuesa grande en la esquina inferior derecha, sobre la tapa
+    cx, cy, r = 270, 258, 13
+    fill = (238, 218, 184, 255)              # mismo ocre de la burbuja
+    # forma de frambuesa: más ancha arriba, termina en punta (drupas que se montan)
+    rows = [(-30, (-24, 0, 24)), (-9, (-34, -11, 11, 34)), (12, (-24, 0, 24)), (33, (-34, -11, 11, 34)),
+            (54, (-22, 0, 22)), (73, (-11, 11))]
+    for dy, xs in rows:
+        for dx in xs:
+            x, y = cx + dx, cy + dy
+            d.ellipse([(x - r) * S, (y - r) * S, (x + r) * S, (y + r) * S], fill=fill, outline=ink, width=int(w * .72))
+            d.arc([(x - r * .55) * S, (y - r * .55) * S, (x + r * .35) * S, (y + r * .35) * S], 190, 260,
+                  fill=ink, width=int(w * .45))     # brillo de cada drupa
+    # cáliz: hojitas sobre la frambuesa
+    for ex, ey in ((-30, -62), (-12, -70), (12, -70), (30, -62)):   # cáliz en estrella
+        d.polygon([((cx + ex * .25) * S, (cy - 40) * S), ((cx + ex) * S, (cy + ey + 12) * S),
+                   ((cx + ex * .55) * S, (cy - 42) * S)], fill=fill, outline=ink)
+        line([(cx + ex * .25, cy - 40), (cx + ex, cy + ey + 12), (cx + ex * .55, cy - 42)], int(w * .6))
+    line([(cx, cy - 44), (cx + 6, cy - 72)], int(w * .7))
+    # destellos
+    for x, y, r in ((44, 36, 16), (316, 44, 13), (326, 168, 10), (40, 318, 12)):
+        star(x, y, r)
+    im.resize((360, 360), Image.LANCZOS).save(os.path.join(UI, "start_notebook.png"))
+    blob(420, (238, 218, 184), 811).save(os.path.join(UI, "blob_notebook.png"))   # ocre claro
+
+
 def main():
     background()
     blob(420, (250, 214, 228), 115).save(os.path.join(UI, "blob_id.png"))
@@ -121,6 +196,7 @@ def main():
     glow.putalpha(glow.split()[3].point(lambda v: min(255, int(v * 2.2))))
     glow.save(os.path.join(UI, "ai_glow.png"))
     bar_icons()
+    notebook_icon()
 
 
 if __name__ == "__main__":
