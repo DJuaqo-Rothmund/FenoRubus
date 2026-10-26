@@ -43,19 +43,31 @@ function baseMap(L, el, center, zoom) {
 }
 
 // Mapa de calor: points = [{lat, lon, weight, …}]; popup(p) -> nodo HTML del punto.
-export async function photoHeat(el, points, popup) {
+// fallback: [[lat, lon], [lat, lon]] del predio para encuadrar si no hay fotos (no Santiago).
+// keepView: al cambiar entre temporada y semana se conserva la vista actual.
+export async function photoHeat(el, points, popup, { fallback = null, keepView = false } = {}) {
   const L = await load();
-  if (el._map) { el._map.remove(); el._map = null; }
-  const map = baseMap(L, el, DEFAULT_CENTER, 12);
-  el._map = map;
+  let map = el._map;
+  if (!map || !el._heatLayer) {
+    if (map) map.remove();
+    map = baseMap(L, el, DEFAULT_CENTER, 12);
+    el._map = map;
+    keepView = false;
+  }
+  if (el._heatLayer) el._heatLayer.forEach((l) => l.remove());
+  el._heatLayer = [];
   if (points.length) {
     const top = Math.max(...points.map((p) => p.weight));
-    L.heatLayer(points.map((p) => [p.lat, p.lon, p.weight / top]), { radius: 30, blur: 22, maxZoom: 17, gradient: RAMP, minOpacity: .25 }).addTo(map);
+    el._heatLayer.push(L.heatLayer(points.map((p) => [p.lat, p.lon, p.weight / top]),
+      { radius: 30, blur: 22, maxZoom: 17, gradient: RAMP, minOpacity: .25 }).addTo(map));
     for (const p of points) {
-      L.circleMarker([p.lat, p.lon], { radius: 5, color: "#fff", weight: 1.5, fillColor: "#A8184A", fillOpacity: 1 })
-        .bindPopup(() => popup(p)).addTo(map);
+      el._heatLayer.push(L.circleMarker([p.lat, p.lon], { radius: 5, color: "#fff", weight: 1.5, fillColor: "#A8184A", fillOpacity: 1 })
+        .bindPopup(() => popup(p)).addTo(map));
     }
-    map.fitBounds(L.latLngBounds(points.map((p) => [p.lat, p.lon])).pad(.25), { maxZoom: 18 });
+  }
+  if (!keepView) {
+    if (points.length) map.fitBounds(L.latLngBounds(points.map((p) => [p.lat, p.lon])).pad(.25), { maxZoom: 18 });
+    else if (fallback) map.fitBounds(L.latLngBounds(fallback), { maxZoom: 17 });
   }
   setTimeout(() => map.invalidateSize(), 50);
   return map;

@@ -89,6 +89,31 @@ def make_thumbnail(src: str, dest: str, size: int) -> str:
     return dest
 
 
+_rotation = {"users": 0}
+
+
+def allow_rotation(on: bool) -> None:
+    """Pantallas de mapa: con on=True el teléfono puede girar (horizontal); al salir de la
+    última vuelve a vertical, como el resto de la app."""
+    if not IS_ANDROID:
+        return
+    _rotation["users"] = max(0, _rotation["users"] + (1 if on else -1))
+    free = _rotation["users"] > 0
+    try:
+        from android.runnable import run_on_ui_thread  # type: ignore
+
+        @run_on_ui_thread
+        def _set():
+            from jnius import autoclass  # type: ignore
+            info = autoclass("android.content.pm.ActivityInfo")
+            activity = autoclass("org.kivy.android.PythonActivity").mActivity
+            activity.setRequestedOrientation(info.SCREEN_ORIENTATION_FULL_USER if free
+                                             else info.SCREEN_ORIENTATION_PORTRAIT)
+        _set()
+    except Exception:  # noqa: BLE001 (sin rotación: el mapa sigue funcionando en vertical)
+        pass
+
+
 def request_runtime_permissions(callback: Callable[[bool], None] | None = None) -> None:
     if not IS_ANDROID:
         if callback:

@@ -1155,6 +1155,18 @@ async function renderHeat(season) {
     ? `${where} · ${n} foto${n !== 1 ? "s" : ""} en ${rows.length} punto${rows.length !== 1 ? "s" : ""}${missing ? ` · ${missing} sin ubicación` : ""}`
     : `${where}: aún no hay fotos con ubicación. Al registrar, use «Mi ubicación», márquela en el mapa o suba fotos con GPS.`;
   const vs = new Map(C.rows(S.state, "varieties").map((v) => [v.uid, v]));
+  // Sin fotos: encuadra el predio (su plano georreferenciado) o los registros con ubicación.
+  let fallback = null;
+  const plan = S.ws.profile === "predio" ? await mapFor(S.ws.code) : null;
+  if (plan?.geo) {
+    const g = plan.geo;
+    fallback = [[g.y0 / g.ky, g.x0 / g.kx], [(plan.h + g.y0) / g.ky, (plan.w + g.x0) / g.kx]];
+  } else {
+    const all = C.rows(S.state, "observations").filter((o) => o.latitude != null && o.longitude != null);
+    if (all.length) fallback = all.map((o) => [Number(o.latitude), Number(o.longitude)]);
+  }
+  const keepView = S.hKeep === true;
+  S.hKeep = false;
   try {
     await photoHeat($("hmap"), rows, (p) => {
       const v = vs.get(p.variety_id) || {};
@@ -1167,7 +1179,7 @@ async function renderHeat(season) {
         p.bbch_code != null ? `BBCH ${C.codeStr(p.bbch_code)}` : ""].filter(Boolean).join(" · ");
       d.querySelector("button").onclick = () => { S.week = p.week_id; openDetail(v); };
       return d;
-    });
+    }, { fallback, keepView });
   } catch (e) { $("hinfo").textContent = e.message; }
 }
 
@@ -1486,6 +1498,7 @@ async function boot() {
   $("psave").onclick = savePickMap;
   document.querySelectorAll("#hscope button").forEach((b) => (b.onclick = () => {
     S.hScope = b.dataset.scope;
+    S.hKeep = true;                       // misma vista al cambiar temporada ↔ semana
     document.querySelectorAll("#hscope button").forEach((x) => x.classList.toggle("on", x === b));
     renderHeat(S.mSeason ?? C.seasonOf(C.parseDate(S.week)));
   }));

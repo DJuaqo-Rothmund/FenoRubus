@@ -30,37 +30,65 @@ RADIUS = 40         # radio de cada punto (dp)
 DOTS_FROM = 17      # los puntos se dibujan desde este zoom (antes, solo el calor)
 
 
+def workspace_bounds() -> tuple[float, float, float, float] | None:
+    """(lat_min, lat_max, lon_min, lon_max) del predio activo según su plano georreferenciado;
+    si no hay plano, de los registros con ubicación de cualquier temporada. None si nada."""
+    a = MDApp.get_running_app()
+    ws = getattr(a, "workspace", None) or {}
+    try:
+        from ui.sector_map import load_map
+        plan = load_map(ws.get("code")) if ws.get("profile") == "predio" else None
+    except Exception:  # noqa: BLE001
+        plan = None
+    if plan and plan.get("geo"):
+        g = plan["geo"]
+        return (g["y0"] / g["ky"], (plan["h"] + g["y0"]) / g["ky"],
+                g["x0"] / g["kx"], (plan["w"] + g["x0"]) / g["kx"])
+    rows = a.db.query("SELECT MIN(latitude) a, MAX(latitude) b, MIN(longitude) c, MAX(longitude) d "
+                      "FROM observations WHERE latitude IS NOT NULL AND longitude IS NOT NULL")
+    r = rows[0] if rows else None
+    if r and r["a"] is not None:
+        return r["a"], r["b"], r["c"], r["d"]
+    return None
+
+
+def fit_bounds(bounds, max_zoom: float = 18) -> tuple[float, float, float]:
+    """(lat, lon, zoom) que muestra todo el recuadro en la pantalla."""
+    if not bounds:
+        return geo.DEFAULT_CENTER[0], geo.DEFAULT_CENTER[1], 12
+    la0, la1, lo0, lo1 = bounds
+    lat, lon = (la0 + la1) / 2, (lo0 + lo1) / 2
+    (x0, y0), (x1, y1) = geo.latlon_to_tile(la1, lo0, 0), geo.latlon_to_tile(la0, lo1, 0)
+    span = max((x1 - x0) * tile_px() / dp(300), (y1 - y0) * tile_px() / dp(420), 1e-12)
+    zoom = min(max_zoom, max(MIN_ZOOM, -math.log2(span)))
+    return lat, lon, zoom
+
+
 class HeatMap(MapPicker):
-    """Mapa OpenStreetMap con capa de calor y puntos tocables (sin el pin central)."""
+    """Mapa (satelital o calles) con capa de calor y puntos tocables (sin el pin central)."""
 
     def __init__(self, points: list[dict], on_pick=None, **kw):
         self.points = points            # {lat, lon, weight, ...}
         self.on_pick = on_pick
-        self._heat = None               # (zoom, textura, x0, y0, ancho, alto) en teselas
+        self._heat = None               # (z, textura, x0, y0, ancho, alto) en teselas de nivel z
         self._down = None
         lat, lon, zoom = self.fit(points)
         super().__init__(lat, lon, zoom, **kw)
 
     # ------------------------------------------------------------ encuadre
     @staticmethod
-    def fit(points, max_zoom: int = 18) -> tuple[float, float, int]:
-        if not points:
-            return geo.DEFAULT_CENTER[0], geo.DEFAULT_CENTER[1], 12
-        lats = [p["lat"] for p in points]
-        lons = [p["lon"] for p in points]
-        lat, lon = (min(lats) + max(lats)) / 2, (min(lons) + max(lons)) / 2
-        for z in range(max_zoom, MIN_ZOOM - 1, -1):
-            (x0, y0), (x1, y1) = (geo.latlon_to_tile(max(lats), min(lons), z),
-                                  geo.latlon_to_tile(min(lats), max(lons), z))
-            if (x1 - x0) * tile_px() < dp(300) and (y1 - y0) * tile_px() < dp(420):
-                return lat, lon, z
-        return lat, lon, MIN_ZOOM
+    def fit(points) -> tuple[float, float, float]:
+        if points:
+            lats = [p["lat"] for p in points]
+            lons = [p["lon"] for p in points]
+            return fit_bounds((min(lats), max(lats), min(lons), max(lons)))
+        return fit_bounds(workspace_bounds())     # sin fotos: el predio (no Santiago)
 
-    def set_points(self, points: list[dict]):
+    def set_points(self, points: list[dict], refit: bool = True):
         self.points = points
         self._heat = None
-        lat, lon, zoom = self.fit(points)
-        self.center_on(lat, lon, zoom)
+        if refit:
+            self.center_on(*self.fit(points))
         self._redraw()
 
     # ------------------------------------------------------------- calor
@@ -97,26 +125,22 @@ class HeatMap(MapPicker):
         self._heat = (z, tex, x0 / scale, y0 / scale, gw / scale, gh / scale)
         return self._heat
 
-    def _screen(self, tx: float, ty: float) -> tuple[float, float]:
-        size = tile_px()
-        return (self.x + self.width / 2 + (tx - self.cx) * size,
-                self.y + self.height / 2 - (ty - self.cy) * size)
-
     def _redraw(self, *_):
         super()._redraw()
         if not hasattr(self, "points"):
             return
-        z = int(self.zoom)
+        z = max(0, min(20, int(math.floor(self.zoom + 1e-9))))
         _z, tex, x0, y0, w, h = self._heat_layer(z)
-        size = tile_px()
+        n = 2 ** z
         with self.canvas:
-            if tex is not None:
-                px, py = self._screen(x0, y0 + h)
+            if tex is not None:          # recuadro del calor (teselas de nivel z → mundo → pantalla)
+                left, top = self.world_to_screen(x0 / n, y0 / n)
+                right, bottom = self.world_to_screen((x0 + w) / n, (y0 + h) / n)
                 Color(1, 1, 1, 1)
-                Rectangle(texture=tex, pos=(px, py), size=(w * size, h * size))
-            r = dp(4) if z >= DOTS_FROM else dp(2.5)
+                Rectangle(texture=tex, pos=(left, bottom), size=(right - left, top - bottom))
+            r = dp(4) if self.zoom >= DOTS_FROM else dp(2.5)
             for p in self.points:
-                sx, sy = self._screen(*geo.latlon_to_tile(p["lat"], p["lon"], z))
+                sx, sy = self.latlon_to_screen(p["lat"], p["lon"])
                 Color(1, 1, 1, .95)
                 Ellipse(pos=(sx - r - dp(1.5), sy - r - dp(1.5)), size=(2 * r + dp(3), 2 * r + dp(3)))
                 Color(0.66, 0.09, 0.29, 1)
@@ -124,23 +148,23 @@ class HeatMap(MapPicker):
 
     # ------------------------------------------------------------- toques
     def on_touch_down(self, touch):
-        if self.collide_point(*touch.pos) and not touch.is_double_tap:
+        if self.collide_point(*touch.pos) and not touch.is_double_tap and not self._touches:
             self._down = touch.pos
+        elif self._touches:
+            self._down = None                # segundo dedo: es pellizco, no un toque
         return super().on_touch_down(touch)
 
     def on_touch_up(self, touch):
         down, self._down = self._down, None
         handled = super().on_touch_up(touch)
         if down and self.on_pick and math.dist(down, touch.pos) < dp(8):
-            z = int(self.zoom)
             best, dist = None, dp(26)
             for p in self.points:
-                d = math.dist(self._screen(*geo.latlon_to_tile(p["lat"], p["lon"], z)), touch.pos)
+                d = math.dist(self.latlon_to_screen(p["lat"], p["lon"]), touch.pos)
                 if d < dist:
                     best, dist = p, d
             self.on_pick(best)
         return handled
-
 
 
 # ---------------------------------------------------------------------------- pantalla
@@ -155,7 +179,16 @@ class HeatmapScreen(MDScreen):
     has_pick = BooleanProperty(False)
 
     def on_pre_enter(self, *_):
+        self._fresh = True                   # al entrar, encuadra de nuevo
         self.refresh()
+
+    def on_enter(self, *_):
+        from android_bridge import allow_rotation
+        allow_rotation(True)                 # el mapa se puede ver con el teléfono horizontal
+
+    def on_leave(self, *_):
+        from android_bridge import allow_rotation
+        allow_rotation(False)
 
     def set_scope(self, whole: bool):
         self.whole_season = whole
@@ -184,7 +217,9 @@ class HeatmapScreen(MDScreen):
             stage.add_widget(self._map, index=len(stage.children))   # debajo de botones y tarjetas
             self.ids.layer_btn.icon = "map-outline" if self._map.layer == "sat" else "satellite-variant"
         else:
-            self._map.set_points(rows)
+            # Al cambiar entre temporada y semana se mantiene la vista (el predio).
+            self._map.set_points(rows, refit=getattr(self, "_fresh", False))
+        self._fresh = False
 
     def zoom(self, step: int):
         self._map.zoom_by(step)

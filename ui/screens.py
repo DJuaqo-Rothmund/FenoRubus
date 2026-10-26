@@ -1034,7 +1034,53 @@ def sector_map_block(box, plan, status, selected, on_select):
     holder.add_widget(row)
     box.add_widget(holder)
     box.add_widget(mp)
+    full = AnchorLayout(anchor_x="right", size_hint_y=None, height=dp(34))
+    full_btn = PillButton(text="Pantalla completa", font_size="13sp", size_hint=(None, None), height=dp(32),
+                          width=dp(150), bg_off=c("#FFFFFF", .7), fg_off=c(theme.LEAF_DARK),
+                          edge=c(theme.LEAF_DARK, .4))
+    full_btn.bind(on_release=lambda *_: sector_map_fullscreen(plan, mp, on_select))
+    full.add_widget(full_btn)
+    box.add_widget(full)
     return mp
+
+
+def sector_map_fullscreen(plan, small, on_select):
+    """Plano a pantalla completa: zoom con dos dedos, girar el teléfono (horizontal) y tocar
+    sectores; lo elegido vuelve al plano de la vista previa."""
+    from kivy.uix.modalview import ModalView
+    from kivymd.uix.button import MDIconButton
+    from android_bridge import allow_rotation
+    from ui.sector_map import SectorMap
+    view = ModalView(size_hint=(1, 1), auto_dismiss=True, background_color=(0, 0, 0, .85))
+    root = MDBoxLayout(orientation="vertical", md_bg_color=DIALOG_BG)
+    head = MDBoxLayout(adaptive_height=True, padding=(dp(14), dp(6)), spacing=dp(8))
+    title = MDLabel(text=plan.get("name") or "Plano de sectores", font_style="H6", bold=True,
+                    adaptive_height=True, pos_hint={"center_y": .5})
+    head.add_widget(title)
+    head.add_widget(MDIconButton(icon="close", pos_hint={"center_y": .5}, on_release=lambda *_: view.dismiss()))
+    root.add_widget(head)
+    info = MDLabel(text="Dos dedos para acercar · toque un sector · gire el teléfono para verlo horizontal",
+                   font_style="Caption", adaptive_height=True, padding=(dp(14), dp(2)),
+                   theme_text_color="Custom", text_color=c(theme.MUTED))
+    root.add_widget(info)
+
+    def pick(sid):
+        s = next((x for x in plan["sectors"] if x["id"] == sid), None)
+        if s:
+            info.text = f"{s['nombre']} · {s.get('ha') or '?'} ha · {', '.join(s.get('variedades') or [])}"
+        small.selected = sid
+        if on_select:
+            on_select(sid)
+
+    big = SectorMap(plan, on_select=pick, zoomable=True)
+    big.status, big.selected, big.satellite = small.status, small.selected, small.satellite
+    root.add_widget(big)
+    view.add_widget(root)
+    allow_rotation(True)
+    view.bind(on_dismiss=lambda *_: allow_rotation(False))
+    view.open()
+    if small.selected:
+        Clock.schedule_once(lambda *_: big.focus(small.selected), .2)
 
 
 def no_map_card(box, name: str) -> None:
@@ -1863,6 +1909,9 @@ def map_dialog(start: tuple, zoom: int, on_pick):
         if state["req"] is not None:
             state["req"].cancel()
     view.bind(on_dismiss=stop_gps)
+    from android_bridge import allow_rotation
+    allow_rotation(True)                         # el mapa se puede ver horizontal
+    view.bind(on_dismiss=lambda *_: allow_rotation(False))
 
     def use(*_):
         lat, lon = mp.center_latlon
