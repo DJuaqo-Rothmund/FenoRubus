@@ -41,7 +41,6 @@
       <button data-tab="matrix">Matriz</button>
       <button data-tab="notebook">Cuaderno</button>
       <button data-tab="reports">Informes</button>
-      <button data-tab="train" id="traintab" hidden>Entrenar IA</button>
       <button data-tab="settings">Ajustes</button>
     </nav>
     <div id="tab-sampling">
@@ -102,17 +101,6 @@
       </section>
       <p id="nbempty" class="muted nbempty">Aún no hay páginas. Anote aquí lo que vea en terreno cada día.</p>
       <section id="nblist" class="rows"></section>
-    </div>
-
-    <div id="tab-train" hidden>
-      <section class="card">
-        <div class="row-h"><div class="label">ENTRENAR IA · MARCAR FLORES Y FRUTOS</div>
-          <div class="chips" id="tfilter"><button data-f="todo" class="on">Todas</button><button data-f="sin">Sin marcar</button><button data-f="con">Marcadas</button></div></div>
-        <div id="tstats" class="muted small"></div>
-        <p class="muted small">Abra una foto de detalle y encierre con una caja cada yema, brote, lateral, botón, flor o fruto (teclas 0–9 para la
-          clase). Las marcas se guardan en su Drive, aparte de los registros, y servirán para entrenar el detector.</p>
-      </section>
-      <section id="tgrid" class="tgrid"></section>
     </div>
 
     <div id="tab-reports" hidden>
@@ -355,6 +343,28 @@
       <button type="button" id="nbdsave" class="primary nbbtn">Guardar</button>
     </div>
     <div class="nbdhint small">Mouse, dedo o lápiz dibuja · rueda o dos dedos acercan</div>
+  </dialog>
+
+  <button id="trainfab" class="trainfab" hidden title="Entrenar IA: marcar flores y frutos"><img src="ai.png" alt="Entrenar IA"></button>
+
+  <dialog id="tpage" class="tpage">
+    <div class="tpagebar">
+      <img src="ai.png" alt="" width="40" height="40">
+      <div class="grow"><b>Entrenar IA</b><div class="small">Fotos de detalle de todos los ensayos y predios · una sola meta</div></div>
+      <button type="button" id="treload" class="ghost" title="Volver a leer las fotos de Drive">⟳</button>
+      <button type="button" id="tpageclose" class="round" aria-label="Cerrar">✕</button>
+    </div>
+    <div class="tpagebody">
+      <section class="card">
+        <div class="row-h"><div class="label">MARCAR YEMAS, BROTES, LATERALES, FLORES Y FRUTOS</div>
+          <div class="chips" id="tfilter"><button data-f="todo" class="on">Todas</button><button data-f="sin">Sin marcar</button><button data-f="con">Marcadas</button></div></div>
+        <div class="chips" id="tws"></div>
+        <div id="tstats" class="muted small"></div>
+        <p class="muted small">Abra una foto y encierre con una caja cada yema, brote, lateral, botón, flor o fruto (teclas 0–9
+          para la clase). Las marcas se guardan en su Drive, aparte de los registros.</p>
+      </section>
+      <section id="tgrid" class="tgrid"></section>
+    </div>
   </dialog>
 
   <dialog id="tdialog" class="tdialog">

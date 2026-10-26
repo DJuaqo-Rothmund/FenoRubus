@@ -135,29 +135,69 @@ async function updateFile(id, blob, mime) {
     `multipart/related; boundary=${b}`);
 }
 
-// Marcas para entrenar el detector (web/train.js): un JSON por ensayo/predio en
-// «PhenoRubus · Imágenes de Fenología/Entrenamiento IA/», aparte de los registros.
-const TRAIN_DIR = "Entrenamiento IA";
-async function trainFile(code, create) {
+// Marcas para entrenar el detector (web/train.js): UN archivo para todos los ensayos y
+// predios (es la misma especie), «PhenoRubus · Imágenes de Fenología/Entrenamiento IA/
+// marcas.json», aparte de los registros. Los archivos por ensayo de la primera versión
+// (<código>.json) se suman al leer.
+const TRAIN_DIR = "Entrenamiento IA", TRAIN_FILE = "marcas.json";
+async function trainDir(create) {
   const root = await folder(ROOT, null, create);
-  const dir = root && await folder(TRAIN_DIR, root, create);
-  if (!dir) return [null, null];
-  const f = await list(`'${dir}' in parents and name='${q(code)}.json' and trashed=false`, "files(id,name)");
-  return [dir, f[0]?.id || null];
+  return root && await folder(TRAIN_DIR, root, create);
 }
-async function loadLabels(code) {
-  const [, id] = await trainFile(code, false);
-  if (!id) return (await cacheGet(`train/${code}`)) || null;
-  const got = await (await download(id)).json();
-  cachePut(`train/${code}`, got);
-  return got;
+async function loadLabels() {
+  const dir = await trainDir(false);
+  if (!dir) return (await cacheGet("train/all")) || null;
+  const files = (await list(`'${dir}' in parents and trashed=false`, "files(id,name)")).filter((f) => f.name.endsWith(".json"));
+  const main = files.find((f) => f.name === TRAIN_FILE);
+  const out = main ? await (await download(main.id)).json() : { version: 1, photos: {} };
+  out.photos ||= {};
+  for (const f of files) {
+    if (f === main) continue;
+    const old = await (await download(f.id)).json().catch(() => null);
+    for (const [k, v] of Object.entries(old?.photos || {})) if (!out.photos[k] || (v.ts || "") > (out.photos[k].ts || "")) out.photos[k] = v;
+  }
+  cachePut("train/all", out);
+  return out;
 }
-async function saveLabels(code, data) {
-  cachePut(`train/${code}`, data);
+async function saveLabels(data) {
+  cachePut("train/all", data);
   const blob = new Blob([JSON.stringify(data)], { type: "application/json" });
-  const [dir, id] = await trainFile(code, true);
-  if (id) await updateFile(id, blob, "application/json");
-  else await upload(dir, `${code}.json`, blob, "application/json");
+  const dir = await trainDir(true);
+  const f = await list(`'${dir}' in parents and name='${TRAIN_FILE}' and trashed=false`, "files(id,name)");
+  if (f[0]) await updateFile(f[0].id, blob, "application/json");
+  else await upload(dir, TRAIN_FILE, blob, "application/json");
+}
+
+// Registros de TODOS los ensayos y predios (para entrenar con las fotos de todos): lo
+// guardado en el navegador y, si hay conexión, lo nuevo de Drive.
+async function allStates(progress = () => {}) {
+  const out = [];
+  let i = 0;
+  for (const ws of S.workspaces) {
+    progress(`Leyendo ${ws.name || ws.code} (${++i}/${S.workspaces.length})…`);
+    if (S.ws && ws.code === S.ws.code) { out.push({ ws, state: S.state }); continue; }
+    const st = C.emptyState();
+    const names = (await cacheGet(`${ws.code}/__index`)) || [];
+    for (const n of names) { const b = await cacheGet(`${ws.code}/${n}`); if (b) C.applyBundle(st, n, b); }
+    try {
+      const dir = S.sync && await folder(ws.code, S.sync, false);
+      if (dir) {
+        const files = (await list(`'${dir}' in parents and trashed=false`))
+          .filter((f) => f.name.endsWith(".json")).sort((a, b) => a.name.localeCompare(b.name));
+        const todo = files.filter((f) => !st.seen.has(f.name));
+        const got = new Array(todo.length);
+        await pool(todo, 8, async (f, k) => {
+          let b = await cacheGet(`${ws.code}/${f.name}`);
+          if (!b) { b = await (await download(f.id)).json(); cachePut(`${ws.code}/${f.name}`, b); }
+          got[k] = b;
+        });
+        todo.forEach((f, k) => C.applyBundle(st, f.name, got[k]));
+        cachePut(`${ws.code}/__index`, files.map((f) => f.name));
+      }
+    } catch { /* sin conexión: lo guardado */ }
+    out.push({ ws, state: st });
+  }
+  return out;
 }
 
 async function download(id) {
@@ -461,7 +501,7 @@ function render() {
   if (S.tab === "reports") renderReports();
   if (S.tab === "settings") renderSettings();
   if (S.tab === "notebook") NB.renderNotebook();
-  if (S.tab === "train") TR.renderTrain();
+
   renderSampling();
 }
 
@@ -1512,7 +1552,7 @@ async function boot() {
   document.querySelectorAll(".tabs button").forEach((b) => (b.onclick = () => {
     S.tab = b.dataset.tab;
     document.querySelectorAll(".tabs button").forEach((x) => x.classList.toggle("on", x === b));
-    for (const t of ["sampling", "matrix", "notebook", "train", "reports", "settings"]) $(`tab-${t}`).hidden = t !== S.tab;
+    for (const t of ["sampling", "matrix", "notebook", "reports", "settings"]) $(`tab-${t}`).hidden = t !== S.tab;
     if (S.tab === "reports") warmPdf().catch(() => {});     // el generador de PDF se precarga
     render();
   }));
@@ -1526,8 +1566,8 @@ async function boot() {
   $("next").onclick = () => shift(7);
   $("today").onclick = () => { S.week = C.iso(C.mondayOf(C.todayUTC())); render(); };
   NB.init({ S, send, photoUrl, resize, uploadPhoto: uploadNotePhoto });
-  $("traintab").hidden = !TR.enabled();      // se activa abriendo la web con «#lab» una vez
-  TR.init({ S, photoUrl, loadLabels, saveLabels, email: () => store.get("pr_email") });
+  $("trainfab").hidden = !TR.enabled();      // se activa abriendo la web con «#lab» una vez
+  TR.init({ S, photoUrl, loadLabels, saveLabels, allStates, email: () => store.get("pr_email") });
   $("dsave").onclick = saveDetail;
   $("msave").onclick = saveMeasure;
   $("vadd").onclick = () => openVariety(null);

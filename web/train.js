@@ -1,8 +1,8 @@
 // PhenoRubus Web · «Entrenar IA»: marcar con cajas las estructuras de la planta (brotes,
 // botones, flores, frutos…) en las fotos de detalle, para entrenar el detector que contará
-// flores y frutos y estimará la etapa BBCH. Las marcas de cada ensayo/predio se guardan en
-// Drive («PhenoRubus · Imágenes de Fenología/Entrenamiento IA/<código>.json»), aparte de los
-// registros: no cambian nada de lo que usa la app.
+// flores y frutos y estimará la etapa BBCH. Es una sola especie: se trabaja con las fotos de
+// TODOS los ensayos y predios y las marcas van a un solo archivo en Drive («PhenoRubus ·
+// Imágenes de Fenología/Entrenamiento IA/marcas.json»), aparte de los registros.
 import * as C from "./core.js";
 
 export const CLASSES = [            // la tecla de cada clase es su posición (0–9)
@@ -23,10 +23,11 @@ const GOAL = 300;
 const $ = (id) => document.getElementById(id);
 const base = (p) => (p || "").split(/[\\/]/).pop();
 
-let X = null;              // {S, photoUrl, loadLabels(code), saveLabels(code, data), email()}
+let X = null;              // {S, photoUrl, loadLabels(), saveLabels(data), allStates(progress), email()}
 let data = null;           // {version, classes, photos: {nombre: {w, h, boxes, empty, by, ts}}}
-let dataCode = null;
+let photos = null;         // fotos de detalle de todos los ensayos (se leen al abrir)
 let filter = "todo";       // «todo» | «sin» | «con»
+let wsFilter = "";         // código del ensayo/predio o «» (todos)
 let list = [];             // fotos de detalle visibles (orden de la lista)
 let saveTimer = null;
 
@@ -44,22 +45,27 @@ export function init(ctx) {
     document.querySelectorAll("#tfilter button").forEach((x) => x.classList.toggle("on", x === b));
     renderList();
   }));
+  $("trainfab").onclick = () => { $("tpage").showModal(); load(false); };
+  $("tpageclose").onclick = () => $("tpage").close();
+  $("treload").onclick = () => load(true);
   Ed.init();
 }
 
-async function ensureData() {
-  const code = X.S.ws?.code;
-  if (!code) return;
-  if (dataCode === code && data) return;
-  dataCode = code;
-  data = { version: 1, classes: CLASSES.map(([k]) => k), photos: {} };
-  $("tstats").textContent = "Cargando marcas…";
-  try {
-    const got = await X.loadLabels(code);
-    if (got && got.photos) data = { ...data, ...got, classes: data.classes };
-  } catch (e) { $("tstats").textContent = `No se pudieron leer las marcas: ${e.message}`; }
+async function load(fresh) {
+  $("tgrid").innerHTML = "";
+  const say = (t) => { $("tstats").textContent = t; };
+  if (!data || fresh) {
+    say("Cargando marcas…");
+    data = { version: 1, classes: CLASSES.map(([k]) => k), photos: {} };
+    try {
+      const got = await X.loadLabels();
+      if (got && got.photos) data = { ...data, ...got, classes: data.classes };
+    } catch (e) { say(`No se pudieron leer las marcas: ${e.message}`); }
+  }
+  if (!photos || fresh) photos = detailPhotos(await X.allStates(say));
+  renderWs();
+  renderList();
 }
-
 function scheduleSave() {
   clearTimeout(saveTimer);
   $("tsaved").textContent = "Sin guardar…";
@@ -68,24 +74,43 @@ function scheduleSave() {
 
 async function saveNow() {
   clearTimeout(saveTimer);
-  if (!data || !dataCode) return;
+  if (!data) return;
   try {
-    await X.saveLabels(dataCode, data);
+    await X.saveLabels(data);
     $("tsaved").textContent = "Guardado en Drive";
   } catch (e) { $("tsaved").textContent = `No se guardó: ${e.message}`; }
 }
 
-function detailPhotos() {
-  const S = X.S;
-  const obs = new Map(C.rows(S.state, "observations").map((o) => [o.uid, o]));
-  const vars = new Map(C.rows(S.state, "varieties").map((v) => [v.uid, v]));
-  return C.rows(S.state, "photos").filter((p) => p.kind === "detail" && p.path)
-    .map((p) => {
+function detailPhotos(states) {
+  const out = [];
+  for (const { ws, state } of states) {
+    const obs = new Map(C.rows(state, "observations").map((o) => [o.uid, o]));
+    const vars = new Map(C.rows(state, "varieties").map((v) => [v.uid, v]));
+    for (const p of C.rows(state, "photos")) {
+      if (p.kind !== "detail" || !p.path) continue;
       const o = obs.get(p.observation_id) || {};
       const v = vars.get(o.variety_id) || {};
-      return { ...p, name: base(p.path), week: o.week_id || "", variety: C.unitMain ? C.unitMain(v) : (v.name || "") };
-    })
+      out.push({ ...p, name: base(p.path), code: ws.code, wsName: ws.name || ws.code, week: o.week_id || "",
+        variety: C.unitMain(v) || v.name || "" });
+    }
+  }
+  const seen = new Set();        // la misma foto no se repite (mismo nombre de archivo)
+  return out.filter((p) => !seen.has(p.name) && seen.add(p.name))
     .sort((a, b) => (b.week || "").localeCompare(a.week || "") || a.name.localeCompare(b.name));
+}
+
+function renderWs() {
+  const box = $("tws");
+  const codes = [...new Map(photos.map((p) => [p.code, p.wsName])).entries()];
+  box.innerHTML = "";
+  box.hidden = codes.length < 2;
+  for (const [code, name] of [["", "Todos"], ...codes]) {
+    const b = document.createElement("button");
+    b.textContent = code ? `${name} (${photos.filter((p) => p.code === code).length})` : `Todos (${photos.length})`;
+    b.className = code === wsFilter ? "on" : "";
+    b.onclick = () => { wsFilter = code; renderWs(); renderList(); };
+    box.appendChild(b);
+  }
 }
 
 function marked(name) {
@@ -93,23 +118,19 @@ function marked(name) {
   return !!(r && (r.empty || (r.boxes || []).length));
 }
 
-export async function renderTrain() {
-  await ensureData();
-  renderList();
-}
-
 function renderList() {
-  const all = detailPhotos();
+  if (!photos) return;
+  const all = photos;
   const done = all.filter((p) => marked(p.name));
   const totals = Object.fromEntries(CLASSES.map(([k]) => [k, 0]));
   for (const r of Object.values(data?.photos || {})) for (const b of r.boxes || []) totals[b.c] = (totals[b.c] || 0) + 1;
-  $("tstats").innerHTML = `<b>${done.length}</b> de ${all.length} fotos de detalle marcadas · meta ${GOAL}
+  $("tstats").innerHTML = `<b>${done.length}</b> fotos marcadas de ${all.length} (todos los ensayos y predios) · meta ${GOAL}
     <div class="tbar"><i style="width:${Math.min(100, done.length / GOAL * 100)}%"></i></div>
     <div class="tclasses">${CLASSES.map(([k, n, c]) => `<span><i style="background:${c}"></i>${n} <b>${totals[k] || 0}</b></span>`).join("")}</div>`;
-  list = all.filter((p) => filter === "todo" || (filter === "con") === marked(p.name));
+  list = all.filter((p) => (!wsFilter || p.code === wsFilter) && (filter === "todo" || (filter === "con") === marked(p.name)));
   const grid = $("tgrid");
   grid.innerHTML = "";
-  if (!list.length) grid.innerHTML = `<p class="muted">${all.length ? "No hay fotos en este filtro." : "Este ensayo o predio aún no tiene fotos de detalle."}</p>`;
+  if (!list.length) grid.innerHTML = `<p class="muted">${all.length ? "No hay fotos en este filtro." : "Aún no hay fotos de detalle en los ensayos y predios."}</p>`;
   const io = new IntersectionObserver((ents) => ents.forEach((en) => {
     if (!en.isIntersecting) return;
     io.unobserve(en.target);
@@ -123,7 +144,7 @@ function renderList() {
     d.className = "tthumb";
     d.dataset.i = i;
     d.title = p.name;
-    d.innerHTML = `<span class="tw">${p.week ? C.weekTitle(p.week).replace(", año", " ·") : ""}</span>
+    d.innerHTML = `<span class="tc">${p.code}</span><span class="tw">${p.week ? C.weekTitle(p.week).replace(", año", " ·") : ""}</span>
       <span class="tv">${p.variety || ""}</span>${marked(p.name) ? `<span class="tn">${r.empty && !n ? "vacía" : n}</span>` : ""}`;
     d.onclick = () => Ed.open(i);
     grid.appendChild(d);
@@ -172,7 +193,7 @@ const Ed = {
     this.photo = p;
     this.sel = null;
     this.rec = data.photos[p.name] ||= { w: 0, h: 0, boxes: [], empty: false };
-    $("ttitle").textContent = `${p.variety || "Foto"} · ${p.week ? C.weekLabel(p.week) : ""}`;
+    $("ttitle").textContent = `${p.wsName} · ${p.variety || "Foto"} · ${p.week ? C.weekLabel(p.week) : ""}`;
     $("tname").textContent = p.name;
     $("tsaved").textContent = "";
     if (!$("tdialog").open) $("tdialog").showModal();
