@@ -39,6 +39,7 @@ from platform_utils import IS_ANDROID, app_version, data_subdir
 from ui import theme
 from ui.arcade import MindSky  # noqa: F401 - registra la clase para el KV
 from ui.splash_anim import LogoAnim  # noqa: F401 - logo animado de la apertura
+from ui.pending import PostIt  # noqa: F401 - post-it de pendientes del inicio (KV)
 from ui.theme import c
 
 
@@ -896,6 +897,7 @@ class StartScreen(MDScreen):
         except Exception:  # noqa: BLE001 - nunca bloquear el inicio
             self.ids.week_lbl.text = ""
         self._pills()
+        self._postit()
         drive = a.drive
         st = drive.status()
         if st["enabled"]:
@@ -949,6 +951,24 @@ class StartScreen(MDScreen):
 
     def open_profile(self, profile: str):
         app().open_workspaces(profile)
+
+    # ------------------------------------------------------------ pendientes de hoy
+    def _postit(self):
+        from ui.pending import today_tasks
+        try:
+            self._tasks = today_tasks()
+        except Exception:  # noqa: BLE001 - nunca bloquear el inicio
+            self._tasks = []
+        post = self.ids.postit
+        lines = [t["short"] for t in self._tasks if not t["done"]]
+        was = bool(post.lines)
+        post.lines = lines
+        if lines and not was:
+            post.wobble()
+
+    def open_tasks(self):
+        from ui.pending import TasksSheet, today_tasks
+        TasksSheet(today_tasks(), on_close=self._postit).open()
 
     def open_ai(self):
         app().open_ai_lab()
@@ -1632,11 +1652,13 @@ class WorkspacesScreen(MDScreen):
 
 
 class SettingsScreen(MDScreen):
-    """Ajustes con dos pestañas: «General» y «Registros»."""
+    """Ajustes con dos pestañas: «General» y «Registros». Desde la pantalla de inicio se
+    abre solo «General» (general_only), sin entrar a un ensayo o predio."""
+    general_only = BooleanProperty(False)
 
     def on_pre_enter(self, *_):
         self.ids.var_seg.text = "Registros"
-        self.show(self.ids.pages.current or "general", defer=False)
+        self.show("general" if self.general_only else (self.ids.pages.current or "general"), defer=False)
 
     def on_enter(self, *_):
         # La lista de variedades se arma en un momento libre, no al tocar la pestaña.

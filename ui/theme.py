@@ -194,3 +194,12 @@ def purge_theme_observers(theme_cls) -> int:
                 theme_cls.unbind_uid(name, uid)
                 removed += 1
     return removed
+
+# Hoja de tareas pendientes (inicio): dibujos de frambueso estilo cuaderno de Da Vinci y
+# letra manuscrita Caveat (SIL Open Font License, assets/fonts/Caveat-OFL.txt).
+DV_CANE = resource_path("assets", "ui", "dv_cane.png")
+DV_CLUSTER = resource_path("assets", "ui", "dv_cluster.png")
+DV_FLOWER = resource_path("assets", "ui", "dv_flower.png")
+DV_CUT = resource_path("assets", "ui", "dv_cut.png")
+DV_BRANCH = resource_path("assets", "ui", "dv_branch.png")
+HAND_FONT = resource_path("assets", "fonts", "Caveat.ttf")

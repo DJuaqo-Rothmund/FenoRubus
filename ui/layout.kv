@@ -655,12 +655,30 @@
         Widget:
         AnchorLayout:
             size_hint_y: None
-            height: dp(26)
+            height: dp(30)
             BoxLayout:
-                id: pills
                 size_hint: None, None
-                height: dp(24)
-                spacing: dp(6)
+                height: dp(30)
+                width: self.minimum_width
+                spacing: dp(8)
+                MDIconButton:
+                    id: gear
+                    icon: "cog-outline"
+                    icon_size: "17sp"
+                    theme_icon_color: "Custom"
+                    icon_color: c(theme.LEAF_DARK)
+                    md_bg_color: 1, 1, 1, .78
+                    size_hint: None, None
+                    size: dp(30), dp(30)
+                    padding: 0
+                    pos_hint: {"center_y": .5}
+                    on_release: app.open_settings(general_only=True)
+                BoxLayout:
+                    id: pills
+                    size_hint: None, None
+                    height: dp(24)
+                    pos_hint: {"center_y": .5}
+                    spacing: dp(6)
         Widget:
             size_hint_y: None
             height: dp(4)
@@ -671,6 +689,14 @@
             text: "Continuar de forma local"
             height: dp(50)
             on_release: root.continue_local()
+    PostIt:
+        id: postit
+        size_hint: None, None
+        size: dp(112), dp(94)
+        pos_hint: {"right": .96, "top": .975}
+        opacity: 1 if self.lines else 0
+        disabled: not self.lines
+        on_release: root.open_tasks()
 
 # ---------------------------------------------------------------------------
 # Home + pestañas
@@ -727,11 +753,13 @@
     MDBoxLayout:
         orientation: "vertical"
         TopBar:
-            title: "Ajustes"
+            title: "Ajustes generales" if root.general_only else "Ajustes"
             left_action_items: [["arrow-left", lambda x: app.back()]]
         MDBoxLayout:
             size_hint_y: None
-            height: dp(52)
+            height: 0 if root.general_only else dp(52)
+            opacity: 0 if root.general_only else 1
+            disabled: root.general_only
             padding: dp(16), dp(6), dp(16), dp(4)
             spacing: dp(8)
             SegButton:

@@ -588,7 +588,10 @@ class FenoRubusApp(MDApp):
         self.variety.load(variety_id)
         self.go("variety")
 
-    def open_settings(self):
+    def open_settings(self, general_only: bool = False):
+        """general_only: desde el inicio, solo los ajustes generales (sin la pestaña de
+        registros del ensayo)."""
+        self.settings.general_only = general_only
         self.go("settings")
 
     def open_ai_lab(self):
