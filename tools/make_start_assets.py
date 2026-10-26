@@ -29,7 +29,7 @@ def background(w=824, h=1720):
     # sin sus textos (tools/start_bg/floricana.png), grande, centrada y en sepia tenue.
     plant = Image.open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "start_bg", "floricana.png"))
     plant = plant.convert("RGBA").resize((int(plant.width * 1650 / plant.height), 1650), Image.LANCZOS)
-    plant = tint(plant, (92, 70, 48), .22)
+    plant = tint(plant, (92, 70, 48), .17)
     bg.alpha_composite(plant, ((w - plant.width) // 2, h - plant.height + 60))
     bg.convert("RGB").save(os.path.join(UI, "start_bg.jpg"), quality=86)
 
