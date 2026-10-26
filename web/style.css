@@ -233,3 +233,53 @@ table.hm td.c.na { color: #c4c9c0; font-weight: 400; background: #f6f7f3; }
 .hpop b { color: var(--leaf-dark); } .hpop button { margin-top: 6px; }
 #map.leaf { height: 460px; border-radius: 16px; overflow: hidden; z-index: 0; }
 .seclabel { color: #fff; font: 700 12px system-ui, sans-serif; text-align: center; text-shadow: 0 0 3px #000, 0 1px 2px #000; }
+
+/* Cuaderno de campo: café y ocre, como el ícono de la app */
+.nbtop { display: flex; align-items: center; gap: 12px; }
+.nbtop .label { margin: 0 0 2px; color: #6B4423; }
+.nbbtn { background: #6B4423; }
+.nbbtn:hover { background: #553419; }
+.nbempty { text-align: center; padding: 30px 10px; }
+#nblist { margin-top: 12px; }
+.nbcard { display: grid; grid-template-columns: 62px 1fr; gap: 14px; text-align: left; width: 100%; cursor: pointer;
+  background: rgba(251, 246, 236, .95); border-color: rgba(200, 150, 62, .45); }
+.nbcard:hover { border-color: #C8963E; }
+.nbdate { background: #EEDAB8; border-radius: 14px; display: grid; place-items: center; align-self: start; padding: 6px 0; }
+.nbdate b { font-size: 26px; color: #6B4423; line-height: 1.1; }
+.nbdate span { font-size: 11px; font-weight: 700; color: #C8963E; }
+.nbhead { display: flex; justify-content: space-between; font-size: 12px; font-weight: 700; color: #C8963E; }
+.nbtxt { margin: 3px 0 6px; white-space: pre-line; }
+.nbstrip { display: flex; gap: 6px; flex-wrap: wrap; }
+.nbstrip i { width: 58px; height: 58px; border-radius: 10px; background: #EEDAB8 center/cover; }
+dialog.nbpage { width: min(1100px, 96vw); background: #FBF6EC; }
+.nbpage h2 { color: #6B4423; }
+#nbsaved { margin-left: 8px; }
+.nbbody { display: grid; gap: 14px; }
+.nbpaper { min-height: 42vh; resize: vertical; border: 1px solid rgba(200, 150, 62, .5); border-radius: 16px; padding: 0 14px;
+  font-size: 17px; line-height: 30px; color: var(--ink); width: 100%;
+  background: #fff repeating-linear-gradient(transparent 0 29px, rgba(200, 150, 62, .18) 29px 30px) 0 0 / 100% 30px local; }
+.nbpaper:focus { outline: 2px solid rgba(200, 150, 62, .6); }
+.drop.nbdrop { border-color: rgba(200, 150, 62, .55); }
+.drop.nbdrop.over { background: #F6EBD6; border-color: #C8963E; }
+.nbdrop .ph { cursor: crosshair; }
+.nbpen { position: absolute; left: 6px; bottom: 6px; width: 24px; height: 24px; border-radius: 50%; display: grid; place-items: center;
+  font-size: 13px; color: #fff; background: rgba(0, 0, 0, .35); }
+.nbpen.on { background: #6B4423; }
+@media (min-width: 820px) {
+  .nbbody { grid-template-columns: 1.6fr 1fr; }
+  .nbpaper { min-height: 60vh; }
+}
+dialog.nbdraw { width: 100vw; height: 100vh; max-width: none; max-height: none; border-radius: 0; background: #14110d; color: #fff;
+  display: none; flex-direction: column; }
+dialog.nbdraw[open] { display: flex; }
+.nbdbar { display: flex; align-items: center; gap: 8px; padding: 8px 12px; flex-wrap: wrap; }
+.nbdbar .ghost { color: #fff; border-color: rgba(255, 255, 255, .3); }
+.nbdbar .round { background: transparent; color: #fff; border-color: rgba(255, 255, 255, .3); }
+#nbcanvas { flex: 1; min-height: 0; width: 100%; touch-action: none; cursor: crosshair; display: block; }
+.swatches, .widths { display: flex; gap: 8px; }
+.swatch { width: 34px; height: 34px; border-radius: 50%; border: 3px solid rgba(255, 255, 255, .25); cursor: pointer; }
+.swatch.on { border-color: #fff; }
+.widths button { border: 1px solid rgba(255, 255, 255, .3); background: rgba(255, 255, 255, .1); color: #fff; border-radius: 999px;
+  padding: 6px 14px; cursor: pointer; }
+.widths button.on { background: #C8963E; border-color: #C8963E; }
+.nbdhint { text-align: center; opacity: .6; padding: 0 0 8px; }

@@ -568,3 +568,58 @@ export function numEs(v, digits = 1) {    // = ReportGenerator._num: «23,5», �
   if (Number.isNaN(f)) return String(v);
   return Number.isInteger(f) ? String(f) : f.toFixed(digits).replace(".", ",");
 }
+
+// ------------------------------------------------------------------ cuaderno de campo (= Database.note_*)
+// Una página por día (notebook_entries) con sus fotos (notebook_photos, path relativo).
+// Si dos equipos crearon el mismo día por separado, se muestran juntas (la app las une por día).
+export function noteDays(state) {
+  const photos = rows(state, "notebook_photos");
+  const byDay = new Map();
+  for (const e of rows(state, "notebook_entries")) {
+    const d = byDay.get(e.day);
+    if (!d) byDay.set(e.day, { ...e, uids: [e.uid] });
+    else {
+      d.uids.push(e.uid);
+      if ((e.updated_at || "") > (d.updated_at || "")) Object.assign(d, { ...e, uid: e.uid, uids: d.uids });
+    }
+  }
+  return [...byDay.values()].map((d) => ({ ...d,
+    photos: photos.filter((p) => d.uids.includes(p.entry_id)).sort((a, b) => (a.created_at || "").localeCompare(b.created_at || "")) }))
+    .sort((a, b) => b.day.localeCompare(a.day));
+}
+export function noteFor(state, day) {
+  return noteDays(state).find((d) => d.day === day) || null;
+}
+// Cambio de la página (crear, texto o día). Devuelve {uid, change}.
+export function noteChange(state, day, fields = {}) {
+  const cur = noteFor(state, day);
+  const ts = nowTs();
+  const data = cur ? { day: cur.day, text: cur.text || "", created_at: cur.created_at || ts }
+    : { day, text: "", created_at: ts };
+  const uid = cur ? cur.uid : newUid();
+  return { uid, change: { entity: "notebook_entries", uid, ts, deleted: 0, data: { ...data, ...fields, updated_at: ts } } };
+}
+export function noteDeleteChanges(state, day) {
+  const cur = noteFor(state, day);
+  if (!cur) return [];
+  const ts = nowTs();
+  return [...cur.photos.map((p) => ({ entity: "notebook_photos", uid: p.uid, ts, deleted: 1 })),
+    ...cur.uids.map((uid) => ({ entity: "notebook_entries", uid, ts, deleted: 1 }))];
+}
+export function notePhotoChange(entryUid, relPath) {
+  const ts = nowTs();
+  return { entity: "notebook_photos", uid: newUid(), ts, deleted: 0,
+    data: { entry_id: entryUid, path: relPath, caption: "", annotated: 0, created_at: ts } };
+}
+export function notePhotoUpdate(photo, fields) {
+  const { uid, ...data } = photo;
+  return { entity: "notebook_photos", uid, ts: nowTs(), deleted: 0, data: { ...data, ...fields } };
+}
+// «…-cuaderno.jpg» -> «…-cuaderno-a1.jpg», «-a2»… (= ui.notebook.annotated_name)
+export function annotatedName(name, taken) {
+  const m = name.match(/^(.*?)(?:-a(\d+))?(\.\w+)?$/);
+  const stem = m[1], ext = m[3] || ".jpg";
+  let n = m[2] ? Number(m[2]) + 1 : 1;
+  while (taken.has(`${stem}-a${n}${ext}`)) n++;
+  return `${stem}-a${n}${ext}`;
+}

@@ -1,6 +1,7 @@
 // PhenoRubus Web: inicio de sesión con Google, lectura/escritura de los paquetes de
 // sincronización en Drive (los mismos de la app) y pantallas de muestreo semanal.
 import * as C from "./core.js";
+import * as NB from "./notebook.js";
 import { CLIENT_ID } from "./config.js";
 import { makeReports } from "./reports.js";
 import { warm as warmPdf, makePdf } from "./pdf.js";
@@ -327,11 +328,20 @@ async function resize(file) {
   return new Promise((res) => cv.toBlob(res, "image/jpeg", 0.78));
 }
 
-async function weekFolderId() {
+async function weekFolderId(week = S.week, sub = "") {
   const prefix = `${PROFILES[S.ws.profile] || "Otros"}/${(S.ws.name || S.ws.code).replace(/\//g, "-").trim()}`;
   let parent = await folder(ROOT, null, true);
-  for (const part of `${prefix}/${C.weekFolder(S.week)}`.split("/")) parent = await folder(part, parent, true);
+  for (const part of `${prefix}/${C.weekFolder(week)}${sub ? `/${sub}` : ""}`.split("/")) parent = await folder(part, parent, true);
   return parent;
+}
+
+// Foto del cuaderno: a la carpeta de la semana del día, «…/Cuaderno de campo» (= backup_extra).
+async function uploadNotePhoto(day, name, blob) {
+  const dir = await weekFolderId(C.iso(C.mondayOf(C.parseDate(day))), "Cuaderno de campo");
+  const id = await upload(dir, name, blob, "image/jpeg");
+  S.photoIds.set(name, id);
+  S.photoUrls.set(name, URL.createObjectURL(blob));
+  cachePut(name, blob, "photos");
 }
 
 async function addPhotos(v, files, kind) {
@@ -416,6 +426,7 @@ function render() {
   if (S.tab === "matrix") renderMatrix();
   if (S.tab === "reports") renderReports();
   if (S.tab === "settings") renderSettings();
+  if (S.tab === "notebook") NB.renderNotebook();
   renderSampling();
 }
 
@@ -1466,7 +1477,7 @@ async function boot() {
   document.querySelectorAll(".tabs button").forEach((b) => (b.onclick = () => {
     S.tab = b.dataset.tab;
     document.querySelectorAll(".tabs button").forEach((x) => x.classList.toggle("on", x === b));
-    for (const t of ["sampling", "matrix", "reports", "settings"]) $(`tab-${t}`).hidden = t !== S.tab;
+    for (const t of ["sampling", "matrix", "notebook", "reports", "settings"]) $(`tab-${t}`).hidden = t !== S.tab;
     if (S.tab === "reports") warmPdf().catch(() => {});     // el generador de PDF se precarga
     render();
   }));
@@ -1479,6 +1490,7 @@ async function boot() {
   $("prev").onclick = () => shift(-7);
   $("next").onclick = () => shift(7);
   $("today").onclick = () => { S.week = C.iso(C.mondayOf(C.todayUTC())); render(); };
+  NB.init({ S, send, photoUrl, resize, uploadPhoto: uploadNotePhoto });
   $("dsave").onclick = saveDetail;
   $("msave").onclick = saveMeasure;
   $("vadd").onclick = () => openVariety(null);

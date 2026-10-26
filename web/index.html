@@ -39,6 +39,7 @@
     <nav class="tabs">
       <button data-tab="sampling" class="on">Muestreo</button>
       <button data-tab="matrix">Matriz</button>
+      <button data-tab="notebook">Cuaderno</button>
       <button data-tab="reports">Informes</button>
       <button data-tab="settings">Ajustes</button>
     </nav>
@@ -89,6 +90,17 @@
         <div id="map"></div>
         <div id="mapinfo"></div>
       </section>
+    </div>
+
+    <div id="tab-notebook" hidden>
+      <section class="card nbtop">
+        <img src="nb.png" alt="" width="54" height="54">
+        <div class="grow"><div class="label">CUADERNO DE CAMPO</div>
+          <div class="muted small">Una página por día con notas y fotos; se comparte con la app del celular.</div></div>
+        <button id="nbnew" class="primary nbbtn">＋ Página de hoy</button>
+      </section>
+      <p id="nbempty" class="muted nbempty">Aún no hay páginas. Anote aquí lo que vea en terreno cada día.</p>
+      <section id="nblist" class="rows"></section>
     </div>
 
     <div id="tab-reports" hidden>
@@ -271,6 +283,50 @@
         <button id="ncreate" value="default" class="primary">Crear</button>
       </div>
     </form>
+  </dialog>
+
+  <dialog id="nbpage" class="nbpage">
+    <form method="dialog" class="detail">
+      <div class="dhead">
+        <div class="grow"><h2 id="nbtitle"></h2>
+          <div class="muted small">Fecha <input type="date" id="nbdate" class="pill"> <span id="nbsaved"></span></div></div>
+        <button value="cancel" class="round" aria-label="Cerrar">✕</button>
+      </div>
+      <div class="nbbody">
+        <textarea id="nbtext" class="nbpaper" placeholder="¿Qué se vio hoy en terreno? Clima, labores, plagas, ideas…"></textarea>
+        <div id="nbdrop" class="drop nbdrop">
+          <div class="drophead"><b>Fotos</b><span class="muted small">clic en una foto para dibujar</span></div>
+          <div id="nbphotos" class="photos"></div>
+          <div class="drophint">＋ Arrastre fotos aquí o haga clic</div>
+          <input type="file" accept="image/*" multiple hidden>
+        </div>
+      </div>
+      <p id="nbmsg" class="muted small"></p>
+      <div class="actions">
+        <button type="button" id="nbdel" class="ghost danger-ghost">Borrar página</button>
+        <span class="spacer"></span>
+        <button value="cancel" class="primary">Listo</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog id="nbdraw" class="nbdraw">
+    <div class="nbdbar">
+      <button type="button" id="nbdclose" class="round" aria-label="Cerrar">✕</button>
+      <b>Dibujar</b><span class="spacer"></span>
+      <button type="button" id="nbundo" class="ghost" title="Deshacer">↶ Deshacer</button>
+      <button type="button" id="nbclear" class="ghost" title="Borrar todos los trazos">Borrar trazos</button>
+      <button type="button" id="nbfit" class="ghost" title="Ver la foto completa">Encuadrar</button>
+    </div>
+    <canvas id="nbcanvas"></canvas>
+    <div class="nbdbar">
+      <span id="nbswatches" class="swatches"></span>
+      <span id="nbwidths" class="widths"></span>
+      <span class="spacer"></span>
+      <span id="nbdmsg" class="small"></span>
+      <button type="button" id="nbdsave" class="primary nbbtn">Guardar</button>
+    </div>
+    <div class="nbdhint small">Mouse, dedo o lápiz dibuja · rueda o dos dedos acercan</div>
   </dialog>
 
   <dialog id="viewer"><img id="vimg" alt=""><form method="dialog"><button class="round">✕</button></form></dialog>

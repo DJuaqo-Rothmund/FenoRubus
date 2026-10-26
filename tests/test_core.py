@@ -2097,3 +2097,32 @@ def test_notebook_pages_photos_and_sync(tmp_path):
     pc.run()
     p2 = pam.note_for_day("2026-10-20")["photos"][0]
     assert p2["annotated"] == 1 and open(p2["path"], "rb").read() == b"JPEG2"
+
+
+def test_notebook_page_from_web_reaches_phone(tmp_path):
+    """Página y foto anotada creadas en la web (paquete como los de web/notebook.js) llegan
+    al celular: se unen por día y la foto se baja de Drive por su nombre."""
+    import json
+    fake = FakeDrive()
+    cel, cws, copen, cdir = _device(tmp_path, "cel", fake)
+    cel.run()                                           # crea las carpetas de sincronización
+    folder = next(k for k, f in fake.files.items() if f["name"] == "AM" and f["folder"])
+    ts = "2026-10-26T12:00:00.000"
+    changes = [
+        {"entity": "notebook_entries", "uid": "w1", "ts": ts, "deleted": 0,
+         "data": {"day": "2026-10-26", "text": "Desde el PC", "created_at": ts, "updated_at": ts}},
+        {"entity": "notebook_photos", "uid": "wp1", "ts": ts, "deleted": 0,
+         "data": {"entry_id": "w1", "path": "photos/cuaderno/20261026-AM-cuaderno-w1-a1.jpg", "caption": "",
+                  "annotated": 1, "created_at": ts}},
+    ]
+    bundle = {"format": 1, "device": "webx", "workspace": "AM", "created": ts, "upto": ts,
+              "changes": changes, "settings": {}}
+    fake.files["wb"] = {"name": "20261026T120000000-webx.json", "parents": [folder],
+                        "data": json.dumps(bundle).encode(), "folder": False}
+    fake.files["wj"] = {"name": "20261026-AM-cuaderno-w1-a1.jpg", "parents": ["x"], "data": b"DRAWN", "folder": False}
+    cel.run()
+    page = copen(cws.by_code("AM")).note_for_day("2026-10-26")
+    assert page["text"] == "Desde el PC"
+    p = page["photos"][0]
+    assert p["annotated"] == 1 and p["path"].startswith(cdir)
+    assert open(p["path"], "rb").read() == b"DRAWN"
