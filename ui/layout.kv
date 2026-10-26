@@ -689,7 +689,8 @@
     PostIt:
         id: postit
         size_hint: None, None
-        size: dp(112), dp(94)
+        # Sin pendientes: tamaño 0 (oculto y desactivado igual tomaría los toques)
+        size: (dp(112), dp(94)) if self.lines else (0, 0)
         pos_hint: {"right": .96, "top": .975}
         opacity: 1 if self.lines else 0
         disabled: not self.lines
@@ -753,10 +754,9 @@
             title: "Ajustes generales" if root.general_only else "Ajustes"
             left_action_items: [["arrow-left", lambda x: app.back()]]
         MDBoxLayout:
+            id: tabs
             size_hint_y: None
-            height: 0 if root.general_only else dp(52)
-            opacity: 0 if root.general_only else 1
-            disabled: root.general_only
+            height: dp(52)
             padding: dp(16), dp(6), dp(16), dp(4)
             spacing: dp(8)
             SegButton:

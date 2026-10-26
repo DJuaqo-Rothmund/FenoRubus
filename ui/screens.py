@@ -1656,6 +1656,16 @@ class SettingsScreen(MDScreen):
     abre solo «General» (general_only), sin entrar a un ensayo o predio."""
     general_only = BooleanProperty(False)
 
+    def on_general_only(self, _w, only):
+        """Solo «General»: la fila de pestañas se SACA (oculta y desactivada seguía tomando
+        los toques junto a la flecha de volver)."""
+        row = self.ids.tabs
+        if only and row.parent:
+            self._tabs_box = row.parent
+            row.parent.remove_widget(row)
+        elif not only and not row.parent and getattr(self, "_tabs_box", None):
+            self._tabs_box.add_widget(row, index=len(self._tabs_box.children) - 1)
+
     def on_pre_enter(self, *_):
         self.ids.var_seg.text = "Registros"
         self.show("general" if self.general_only else (self.ids.pages.current or "general"), defer=False)
