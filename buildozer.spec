@@ -12,7 +12,7 @@ package.domain = org.rubus
 source.dir = .
 
 # (list) Source files to include
-source.include_exts = py,png,jpg,kv,atlas,html,json,tflite,txt
+source.include_exts = py,png,jpg,kv,atlas,html,json,tflite,txt,ttf
 
 # (list) Directories / files to exclude
 source.exclude_dirs = tests, bin, .buildozer, .git, __pycache__, .pytest_cache, web, tools/web
