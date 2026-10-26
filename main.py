@@ -548,6 +548,21 @@ class FenoRubusApp(MDApp):
         self.sm.current = name
 
     def back(self):
+        if self.sm.current == "settings" and getattr(self, "_settings_return", None):
+            # Ajustes vuelve siempre a donde se abrió (inicio o el ensayo).
+            target = self._settings_return
+            self._settings_return = None
+            while self._history and self._history[-1] != target:
+                self._history.pop()
+            if self._history:
+                self._history.pop()
+            if target == "start":
+                self.open_start()
+                return
+            self.sm.current = target
+            if target == "home":
+                self.refresh_home()
+            return
         target = self._history.pop() if self._history else "home"
         self.sm.current = target
         if target == "home":
@@ -592,6 +607,7 @@ class FenoRubusApp(MDApp):
         """general_only: desde el inicio, solo los ajustes generales (sin la pestaña de
         registros del ensayo)."""
         self.settings.general_only = general_only
+        self._settings_return = self.sm.current
         self.go("settings")
 
     def open_ai_lab(self):
