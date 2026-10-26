@@ -31,7 +31,7 @@ from dataclasses import asdict, dataclass
 import phenology as ph
 from platform_utils import IS_ANDROID, android_api_level, android_context
 
-SERVICE_CLASS = "org.rubus.fenorubus.ServiceReminder"
+SERVICE_CLASS = "org.rubus.fenorubus.ServiceReminder"   # en la app Lab el paquete cambia (ver _service_class)
 CHANNEL_ID = "fenorubus_muestreo"
 CHANNEL_NAME = "Recordatorios de muestreo"
 REQUEST_CODE = 7091
@@ -162,10 +162,18 @@ def notify(title: str, message: str) -> None:
         print(f"[recordatorio] {title}: {message}")
 
 
+def _service_class(ctx) -> str:
+    """Clase del servicio según el paquete instalado (org.rubus.fenorubus o …fenorubuslab)."""
+    try:
+        return f"{ctx.getPackageName()}.ServiceReminder"
+    except Exception:  # noqa: BLE001
+        return SERVICE_CLASS
+
+
 def _pending_intent(ctx):
     from jnius import autoclass  # type: ignore
     PendingIntent = autoclass("android.app.PendingIntent")
-    Service = autoclass(SERVICE_CLASS)
+    Service = autoclass(_service_class(ctx))
     intent = Service.getDefaultIntent(ctx, "", "PhenoRubus", "Recordatorio de muestreo", "alarm")
     flags = PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE
     if android_api_level() >= 26:

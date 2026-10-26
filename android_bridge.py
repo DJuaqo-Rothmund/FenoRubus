@@ -114,6 +114,17 @@ def allow_rotation(on: bool) -> None:
         pass
 
 
+def package_name() -> str:
+    """Paquete instalado: org.rubus.fenorubus (estable) u org.rubus.fenorubuslab (Lab)."""
+    if not IS_ANDROID:
+        return "org.rubus.fenorubus"
+    try:
+        from jnius import autoclass  # type: ignore
+        return str(autoclass("org.kivy.android.PythonActivity").mActivity.getPackageName())
+    except Exception:  # noqa: BLE001
+        return "org.rubus.fenorubus"
+
+
 def keyboard_height() -> int:
     """Cuánto (px) tapa el teclado del teléfono la parte de abajo de la ventana de la app;
     0 si está cerrado, si Android ya achicó la ventana o fuera de Android. Kivy con SDL2 no

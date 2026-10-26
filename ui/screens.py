@@ -3976,7 +3976,8 @@ class SettingsTab(MDScreen):
     def drive_diagnostics(self):
         from platform_utils import app_version
         lines = app().drive.diagnostics()
-        head = f"PhenoRubus {app_version()} · paquete org.rubus.fenorubus"
+        from android_bridge import package_name
+        head = f"PhenoRubus {app_version()} · paquete {package_name()}"
         text_dialog("Diagnóstico de Google Drive",
                     [head] + (lines or ["Sin registros: toque «Conectar Google Drive» y vuelva aquí."]),
                     highlight="✗")

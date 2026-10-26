@@ -54,14 +54,19 @@ jobs:
           mkdir -p ~/.android
           cp android/debug.keystore ~/.android/debug.keystore
           keytool -list -v -keystore ~/.android/debug.keystore -storepass android | grep -E "SHA1|SHA256"
-      # Versión creciente en cada compilación (1.1.<n.º de ejecución>): Android la
-      # instala como ACTUALIZACIÓN encima de la anterior, conservando los datos.
-      - name: Número de versión
+      # Versión creciente en cada compilación (<serie>.<n.º de ejecución>): Android la
+      # instala como ACTUALIZACIÓN encima de la anterior, conservando los datos. La serie,
+      # el paquete y el nombre salen de release.env (1.1 estable; 1.2 «PhenoRubus Lab»).
+      - name: Número de versión y canal
         run: |
-          VERSION="1.1.${{ github.run_number }}"
+          source release.env
+          VERSION="$SERIES.${{ github.run_number }}"
           sed -i "s/^version = .*/version = $VERSION/" buildozer.spec
+          sed -i "s/^package.name = .*/package.name = $PACKAGE/" buildozer.spec
+          sed -i "s/^title = .*/title = $TITLE/" buildozer.spec
+          sed -i "s#^icon.filename = .*#icon.filename = %(source.dir)s/$ICON#" buildozer.spec
           echo "$VERSION" > version.txt
-          echo "Versión: $VERSION"
+          echo "Versión: $VERSION · paquete org.rubus.$PACKAGE · $TITLE"
       # freetype se descarga de download.savannah.gnu.org, que a veces no responde desde
       # GitHub («Network is unreachable»). Se deja el archivo ya descargado (de un espejo
       # si hace falta) donde python-for-android lo busca, con su marca de «descargado».
@@ -113,6 +118,7 @@ jobs:
   # «App de escritorio») sale de los secretos del repositorio y NO queda en el código.
   windows:
     needs: tests
+    if: github.ref_name != 'claude/lab-1.2'      # la Lab es solo para Android
     runs-on: windows-latest
     timeout-minutes: 60
     steps:

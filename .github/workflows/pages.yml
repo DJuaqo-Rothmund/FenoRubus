@@ -4,7 +4,7 @@ name: Web (GitHub Pages)
 # se genera desde phenology.py en cada publicación, así nunca difiere de la app.
 on:
   push:
-    branches: ["main", "master", "claude/**"]
+    branches: ["main", "master", "claude/**", "!claude/lab-1.2"]   # la web publicada es la estable
     paths: ["web/**", "*.py", "templates/**", "assets/ui/**", "tools/make_web_data.py", "tools/web/**",
             ".github/workflows/pages.yml"]
   workflow_dispatch:
