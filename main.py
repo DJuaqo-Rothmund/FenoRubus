@@ -268,6 +268,20 @@ class FenoRubusApp(MDApp):
         self.go("heatmap")
 
     @property
+    def notebook(self):
+        from ui.notebook import NotebookScreen
+        return self._screen(NotebookScreen, "notebook")
+
+    @property
+    def note_page(self):
+        from ui.notebook import NoteScreen
+        return self._screen(NoteScreen, "note_page")
+
+    def open_notebook(self):
+        """Cuaderno de campo (bitácora diaria del ensayo o predio)."""
+        self.go("notebook")
+
+    @property
     def sectors(self):
         return self._screen(SectorsScreen, "sectors")
 

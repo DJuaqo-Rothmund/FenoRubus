@@ -627,16 +627,28 @@
                 color: c("#2F5643")
                 diameter: dp(112)
                 on_release: root.open_profile("predio")
-        StartIcon:
-            id: ic_ai
-            source: theme.START_AI_NIGHT
-            bubble: theme.BLOB_AI
-            glow: theme.AI_GLOW
-            label: "Entrenador IA"
-            color: c("#3A5AE6")
-            diameter: dp(118)
+        MDBoxLayout:
+            size_hint: None, None
+            size: dp(150) * 2 + dp(16), dp(170)
             pos_hint: {"center_x": .5}
-            on_release: root.open_ai()
+            spacing: dp(16)
+            StartIcon:
+                id: ic_ai
+                source: theme.START_AI_NIGHT
+                bubble: theme.BLOB_AI
+                glow: theme.AI_GLOW
+                label: "Entrenador IA"
+                color: c("#3A5AE6")
+                diameter: dp(112)
+                on_release: root.open_ai()
+            StartIcon:
+                id: ic_nb
+                source: theme.START_NOTEBOOK
+                bubble: theme.BLOB_NOTEBOOK
+                label: "Cuaderno de campo"
+                color: c("#6B4423")
+                diameter: dp(112)
+                on_release: app.open_notebook()
         Widget:
         AnchorLayout:
             size_hint_y: None
@@ -3387,3 +3399,351 @@
             size_hint_x: None
             width: self.texture_size[0]
         Widget:
+
+# ---------------------------------------------------------------------------
+# Cuaderno de campo (ui/notebook.py): línea de tiempo, página del día y lápiz
+# ---------------------------------------------------------------------------
+#:set NB_BROWN "#6B4423"
+#:set NB_OCHRE "#C8963E"
+#:set NB_SOFT "#EEDAB8"
+#:set NB_PAPER "#FBF6EC"
+
+<NotebookScreen>:
+    md_bg_color: 0, 0, 0, 0
+    MDBoxLayout:
+        orientation: "vertical"
+        TopBar:
+            title: "Cuaderno de campo"
+            left_action_items: [["arrow-left", lambda x: app.back()]]
+            right_action_items: [["calendar-plus", lambda x: root.new_today()]]
+        AnchorLayout:
+            size_hint_y: None
+            height: dp(48)
+            Button:
+                id: ws_chip
+                text: root.ws_title
+                background_normal: ""
+                background_down: ""
+                background_color: 0, 0, 0, 0
+                color: c(NB_BROWN)
+                bold: True
+                font_size: "13sp"
+                size_hint: None, None
+                height: dp(34)
+                width: min(self.texture_size[0] + dp(28), root.width - dp(32))
+                text_size: None, None
+                on_release: root.pick_workspace(self)
+                canvas.before:
+                    Color:
+                        rgba: c(NB_SOFT, .85 if self.state == "normal" else 1)
+                    RoundedRectangle:
+                        pos: self.pos
+                        size: self.size
+                        radius: [dp(17)]
+                    Color:
+                        rgba: c(NB_OCHRE, .7)
+                    Line:
+                        rounded_rectangle: (self.x, self.y, self.width, self.height, dp(17))
+                        width: dp(1)
+        FloatLayout:
+            MDScrollView:
+                do_scroll_x: False
+                pos_hint: {"x": 0, "y": 0}
+                MDBoxLayout:
+                    id: timeline
+                    orientation: "vertical"
+                    adaptive_height: True
+                    padding: dp(14), dp(4), dp(14), dp(110)
+                    spacing: dp(12)
+            MDBoxLayout:
+                orientation: "vertical"
+                adaptive_height: True
+                spacing: dp(10)
+                padding: dp(40), 0
+                pos_hint: {"center_x": .5, "center_y": .58}
+                opacity: 1 if root.empty else 0
+                Image:
+                    source: theme.START_NOTEBOOK
+                    size_hint_y: None
+                    height: dp(120)
+                    fit_mode: "contain"
+                    mipmap: True
+                MDLabel:
+                    text: "Aún no hay páginas.\nAnote aquí lo que vea en terreno cada día."
+                    halign: "center"
+                    adaptive_height: True
+                    theme_text_color: "Custom"
+                    text_color: c(NB_BROWN)
+            PillButton:
+                text: "+  Página de hoy"
+                font_size: "15sp"
+                bold: True
+                size_hint: None, None
+                size: dp(200), dp(50)
+                pos_hint: {"center_x": .5, "y": .03}
+                bg_off: c(NB_BROWN)
+                fg_off: 1, 1, 1, 1
+                on_release: root.new_today()
+
+<NoteCard>:
+    size_hint_y: None
+    height: max(dp(96), info.minimum_height + dp(24))
+    padding: dp(12)
+    spacing: dp(12)
+    canvas.before:
+        Color:
+            rgba: c(NB_PAPER, .96)
+        RoundedRectangle:
+            pos: self.pos
+            size: self.size
+            radius: [dp(20)]
+        Color:
+            rgba: c(NB_OCHRE, .45 if self.state == "normal" else .9)
+        Line:
+            rounded_rectangle: (self.x, self.y, self.width, self.height, dp(20))
+            width: dp(1.1)
+    MDBoxLayout:
+        orientation: "vertical"
+        size_hint: None, None
+        size: dp(58), dp(66)
+        pos_hint: {"top": 1}
+        padding: 0, dp(6)
+        canvas.before:
+            Color:
+                rgba: c(NB_SOFT)
+            RoundedRectangle:
+                pos: self.pos
+                size: self.size
+                radius: [dp(14)]
+        MDLabel:
+            text: root.day_num
+            halign: "center"
+            font_size: "26sp"
+            bold: True
+            theme_text_color: "Custom"
+            text_color: c(NB_BROWN)
+        MDLabel:
+            text: root.month
+            halign: "center"
+            font_size: "11sp"
+            bold: True
+            size_hint_y: None
+            height: dp(16)
+            theme_text_color: "Custom"
+            text_color: c(NB_OCHRE)
+    MDBoxLayout:
+        id: info
+        orientation: "vertical"
+        adaptive_height: True
+        spacing: dp(5)
+        pos_hint: {"top": 1}
+        MDBoxLayout:
+            adaptive_height: True
+            MDLabel:
+                text: root.weekday
+                font_style: "Caption"
+                bold: True
+                adaptive_height: True
+                theme_text_color: "Custom"
+                text_color: c(NB_OCHRE)
+            MDLabel:
+                text: root.count
+                font_style: "Caption"
+                halign: "right"
+                adaptive_height: True
+                theme_text_color: "Custom"
+                text_color: c(theme.MUTED)
+        MDLabel:
+            text: root.text
+            font_style: "Body2"
+            adaptive_height: True
+            theme_text_color: "Custom"
+            text_color: c(theme.INK)
+        BoxLayout:
+            id: strip
+            size_hint: None, None
+            height: dp(56) if root.thumbs else 0
+            width: len(root.thumbs) * dp(62)
+            spacing: dp(6)
+
+<NoteThumb>:
+    canvas.before:
+        Color:
+            rgba: c(NB_SOFT)
+        RoundedRectangle:
+            pos: self.pos
+            size: self.size
+            radius: [dp(14)]
+    canvas.after:
+        Color:
+            rgba: c(NB_OCHRE, .9 if self.state == "down" else .4)
+        Line:
+            rounded_rectangle: (self.x, self.y, self.width, self.height, dp(14))
+            width: dp(1.2)
+    FitImage:
+        source: root.source
+        radius: [dp(14)]
+        opacity: 1 if root.source else 0
+        pos: root.pos
+        size: root.size
+        size_hint: None, None
+    MDIcon:
+        icon: "draw" if root.annotated else "pencil-plus-outline"
+        font_size: "18sp"
+        theme_text_color: "Custom"
+        text_color: 1, 1, 1, 1
+        size_hint: None, None
+        size: dp(30), dp(30)
+        halign: "center"
+        pos: root.right - dp(36), root.top - dp(36)
+        canvas.before:
+            Color:
+                rgba: c(NB_BROWN, .78) if root.annotated else (0, 0, 0, .35)
+            Ellipse:
+                pos: self.pos
+                size: self.size
+
+<PenSwatch>:
+    size_hint: None, None
+    size: dp(38), dp(38)
+    canvas:
+        Color:
+            rgba: (1, 1, 1, 1) if root.selected else (1, 1, 1, .25)
+        Ellipse:
+            pos: self.x, self.y
+            size: self.size
+        Color:
+            rgba: root.swatch
+        Ellipse:
+            pos: self.x + dp(4), self.y + dp(4)
+            size: self.width - dp(8), self.height - dp(8)
+
+<NoteScreen>:
+    md_bg_color: 0, 0, 0, 0
+    MDBoxLayout:
+        orientation: "vertical"
+        TopBar:
+            title: "Cuaderno de campo"
+            left_action_items: [["arrow-left", lambda x: app.back()]]
+            right_action_items: [["calendar-edit", lambda x: root.pick_date()], ["trash-can-outline", lambda x: root.delete_page()]]
+        BoxLayout:
+            orientation: "horizontal" if root.wide else "vertical"
+            padding: dp(12), dp(6), dp(12), dp(12)
+            spacing: dp(12)
+            # ---- hoja de texto
+            BoxLayout:
+                orientation: "vertical"
+                padding: dp(14), dp(10), dp(14), dp(10)
+                spacing: dp(4)
+                canvas.before:
+                    Color:
+                        rgba: c(NB_PAPER)
+                    RoundedRectangle:
+                        pos: self.pos
+                        size: self.size
+                        radius: [dp(20)]
+                    Color:
+                        rgba: c(NB_OCHRE, .5)
+                    Line:
+                        rounded_rectangle: (self.x, self.y, self.width, self.height, dp(20))
+                        width: dp(1.1)
+                    Color:
+                        rgba: c(NB_OCHRE, .55)
+                    Rectangle:
+                        pos: self.x + dp(14), self.top - dp(56)
+                        size: dp(4), dp(36)
+                BoxLayout:
+                    size_hint_y: None
+                    height: dp(42)
+                    MDLabel:
+                        text: "   " + root.title
+                        bold: True
+                        font_size: "17sp"
+                        theme_text_color: "Custom"
+                        text_color: c(NB_BROWN)
+                        on_touch_down: root.pick_date() if self.collide_point(*args[1].pos) else None
+                    MDLabel:
+                        text: root.saved_text
+                        font_style: "Caption"
+                        halign: "right"
+                        size_hint_x: None
+                        width: dp(90)
+                        theme_text_color: "Custom"
+                        text_color: c(theme.MUTED)
+                TextInput:
+                    id: text
+                    multiline: True
+                    hint_text: "¿Qué se vio hoy en terreno? Clima, labores, plagas, ideas…"
+                    font_size: "17sp"
+                    line_spacing: dp(4)
+                    background_normal: ""
+                    background_active: ""
+                    background_color: 0, 0, 0, 0
+                    foreground_color: c(theme.INK)
+                    hint_text_color: c(theme.MUTED, .8)
+                    cursor_color: c(NB_BROWN)
+                    selection_color: c(NB_OCHRE, .35)
+                    padding: dp(4), dp(8)
+                    on_text: root.on_text()
+            # ---- fotos
+            BoxLayout:
+                orientation: "vertical"
+                size_hint: (.42, 1) if root.wide else (1, None)
+                height: dp(250)
+                padding: dp(12), dp(10)
+                spacing: dp(8)
+                canvas.before:
+                    Color:
+                        rgba: c(NB_PAPER, .9)
+                    RoundedRectangle:
+                        pos: self.pos
+                        size: self.size
+                        radius: [dp(20)]
+                    Color:
+                        rgba: c(NB_OCHRE, .5)
+                    Line:
+                        rounded_rectangle: (self.x, self.y, self.width, self.height, dp(20))
+                        width: dp(1.1)
+                BoxLayout:
+                    size_hint_y: None
+                    height: dp(40)
+                    spacing: dp(8)
+                    MDLabel:
+                        text: "Fotos"
+                        bold: True
+                        theme_text_color: "Custom"
+                        text_color: c(NB_BROWN)
+                    PillButton:
+                        text: "Cámara"
+                        size_hint: None, None
+                        size: dp(92), dp(38)
+                        bg_off: c(NB_BROWN)
+                        fg_off: 1, 1, 1, 1
+                        on_release: root.add_photos("camera")
+                    PillButton:
+                        text: "Galería"
+                        size_hint: None, None
+                        size: dp(92), dp(38)
+                        bg_off: c(NB_SOFT)
+                        fg_off: c(NB_BROWN)
+                        on_release: root.add_photos("gallery")
+                FloatLayout:
+                    ScrollView:
+                        do_scroll_x: False
+                        pos_hint: {"x": 0, "y": 0}
+                        GridLayout:
+                            id: photos
+                            cols: 2 if root.wide else 3
+                            spacing: dp(8)
+                            size_hint_y: None
+                            height: self.minimum_height
+                            row_force_default: True
+                            row_default_height: (self.width - dp(8) * (self.cols - 1)) / self.cols * .82
+                    MDLabel:
+                        id: no_photos
+                        text: "Sin fotos. Toque una foto para dibujar sobre ella con el dedo o el lápiz."
+                        halign: "center"
+                        font_style: "Caption"
+                        pos_hint: {"center_x": .5, "center_y": .5}
+                        theme_text_color: "Custom"
+                        text_color: c(theme.MUTED)

@@ -79,6 +79,13 @@ class NoteCard(ButtonBehavior, BoxLayout):
     count = StringProperty("")
     thumbs = ListProperty([])
 
+    def on_thumbs(self, *_):
+        from kivymd.uix.fitimage import FitImage
+        strip = self.ids.strip
+        strip.clear_widgets()
+        for src in self.thumbs:
+            strip.add_widget(FitImage(source=src, radius=[dp(10)], size_hint=(None, None), size=(dp(56), dp(56))))
+
 
 class NoteThumb(ButtonBehavior, FloatLayout):
     """Miniatura de una foto de la página (tocar: anotar; ✕: quitar)."""
@@ -459,7 +466,7 @@ class AnnotateView(ModalView):
         head = BoxLayout(size_hint_y=None, height=dp(52), padding=(dp(6), 0), spacing=dp(4))
         head.add_widget(MDIconButton(icon="close", theme_icon_color="Custom", icon_color=(1, 1, 1, 1),
                                      on_release=lambda *_: self.dismiss()))
-        head.add_widget(MDLabel(text="Dibujar sobre la foto", bold=True, theme_text_color="Custom",
+        head.add_widget(MDLabel(text="Dibujar", bold=True, theme_text_color="Custom",
                                 text_color=(1, 1, 1, 1)))
         for icon, fn in (("undo-variant", lambda *_: self.canvas_w.undo()),
                          ("eraser", lambda *_: self.canvas_w.clear()),
@@ -477,19 +484,19 @@ class AnnotateView(ModalView):
             sw.bind(on_release=lambda w, col=col: self._color(col))
             self._swatches.append((col, sw))
             tools.add_widget(sw)
-        tools.add_widget(Widget())
+        tools.add_widget(MDLabel(text="Un dedo o el lápiz dibuja · dos dedos acercan", font_style="Caption",
+                                 theme_text_color="Custom", text_color=(1, 1, 1, .7)))
+        root.add_widget(tools)
+        save = BoxLayout(size_hint_y=None, height=dp(60), padding=(dp(10), dp(6)), spacing=dp(8))
         self._widths = []
         for label, wv in PEN_WIDTHS:
-            b = PillButton(text=label, font_size="13sp", size_hint=(None, None), height=dp(38), width=dp(70),
+            b = PillButton(text=label, font_size="13sp", size_hint=(None, None), height=dp(38), width=dp(66),
                            bg_on=c(OCHRE), fg_on=c("#FFFFFF"), bg_off=c("#FFFFFF", .15), fg_off=c("#FFFFFF"))
             b.bind(on_release=lambda w, wv=wv: self._width(wv))
             self._widths.append((wv, b))
-            tools.add_widget(b)
-        root.add_widget(tools)
-        save = BoxLayout(size_hint_y=None, height=dp(60), padding=(dp(12), dp(6)), spacing=dp(10))
-        save.add_widget(MDLabel(text="Un dedo o el lápiz dibuja · dos dedos acercan", font_style="Caption",
-                                theme_text_color="Custom", text_color=(1, 1, 1, .7)))
-        btn = PillButton(text="Guardar", size_hint=(None, None), width=dp(130), height=dp(44),
+            save.add_widget(b)
+        save.add_widget(Widget())
+        btn = PillButton(text="Guardar", size_hint=(None, None), width=dp(100), height=dp(44),
                          bg_off=c(BROWN), fg_off=c("#FFFFFF"))
         btn.bind(on_release=lambda *_: self._save())
         save.add_widget(btn)

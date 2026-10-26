@@ -820,7 +820,7 @@ class StartScreen(MDScreen):
         self._t0 = time.monotonic()
         self._float_ev = Clock.schedule_interval(self._float, 1 / 30)
 
-    FLOAT = ((0.0, "ic_id"), (2.1, "ic_predio"), (4.2, "ic_ai"))   # desfase de cada ícono
+    FLOAT = ((0.0, "ic_id"), (1.6, "ic_predio"), (3.2, "ic_ai"), (4.8, "ic_nb"))   # desfase de cada ícono
 
     def _float(self, *_):
         """Flotación suave y continua de los íconos (30 cuadros por segundo: liviano)."""
@@ -842,7 +842,7 @@ class StartScreen(MDScreen):
 
     # ------------------------------------------------------------ animación
     def _prepare_intro(self):
-        for w in (self.ids.ic_id, self.ids.ic_predio, self.ids.ic_ai):
+        for w in (self.ids.ic_id, self.ids.ic_predio, self.ids.ic_ai, self.ids.ic_nb):
             w.reveal, w.lift = 0, dp(46)
         self.ids.logo.opacity = 0
         self._intro_ready = True
@@ -854,7 +854,7 @@ class StartScreen(MDScreen):
         logo.height = h * .7
         (Animation(opacity=1, height=h * 1.06, d=.32, t="out_cubic")
          + Animation(height=h, d=.16, t="in_out_sine")).start(logo)
-        for i, w in enumerate((self.ids.ic_id, self.ids.ic_predio, self.ids.ic_ai)):
+        for i, w in enumerate((self.ids.ic_id, self.ids.ic_predio, self.ids.ic_ai, self.ids.ic_nb)):
             anim = Animation(d=.12 + .11 * i) + Animation(reveal=1, lift=0, d=.38, t="out_back")
             anim.start(w)
 
