@@ -181,7 +181,9 @@ def notebook_icon():
     # destellos
     for x, y, r in ((44, 36, 16), (316, 44, 13), (326, 168, 10), (40, 318, 12)):
         star(x, y, r)
-    im.resize((360, 360), Image.LANCZOS).save(os.path.join(UI, "start_notebook.png"))
+    # start_notebook.png es ahora el ícono dibujado aparte (estilo de I+D y Predio): no se pisa.
+    if not os.path.exists(os.path.join(UI, "start_notebook.png")):
+        im.resize((360, 360), Image.LANCZOS).save(os.path.join(UI, "start_notebook.png"))
     blob(420, (238, 218, 184), 811).save(os.path.join(UI, "blob_notebook.png"))   # ocre claro
 
 
