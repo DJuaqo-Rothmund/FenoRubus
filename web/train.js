@@ -5,8 +5,10 @@
 // registros: no cambian nada de lo que usa la app.
 import * as C from "./core.js";
 
-export const CLASSES = [
+export const CLASSES = [            // la tecla de cada clase es su posición (0–9)
+  ["yema", "Yema", "#A1887F"],
   ["brote", "Brote", "#8BC34A"],
+  ["lateral", "Lateral", "#5C6BC0"],
   ["boton", "Botón", "#00897B"],
   ["boton_blanco", "Botón blanco", "#78909C"],
   ["flor", "Flor", "#F9A825"],
@@ -138,7 +140,7 @@ const Ed = {
     CLASSES.forEach(([k, n, c], i) => {
       const b = document.createElement("button");
       b.type = "button"; b.dataset.k = k;
-      b.innerHTML = `<i style="background:${c}"></i>${i + 1} · ${n}`;
+      b.innerHTML = `<i style="background:${c}"></i>${i} · ${n}`;
       b.onclick = () => this.setClass(k);
       bar.appendChild(b);
     });
@@ -240,7 +242,7 @@ const Ed = {
   },
   key(e) {
     if (!$("tdialog").open || e.target.tagName === "INPUT") return;
-    if (e.key >= "1" && e.key <= String(CLASSES.length)) { this.setClass(CLASSES[Number(e.key) - 1][0]); e.preventDefault(); }
+    if (/^[0-9]$/.test(e.key) && CLASSES[Number(e.key)]) { this.setClass(CLASSES[Number(e.key)][0]); e.preventDefault(); }
     else if (e.key === "Delete" || e.key === "Backspace") { this.deleteSel(); e.preventDefault(); }
     else if (e.key === "ArrowRight" || e.key === "Enter") { this.go(1); e.preventDefault(); }
     else if (e.key === "ArrowLeft") { this.go(-1); e.preventDefault(); }
