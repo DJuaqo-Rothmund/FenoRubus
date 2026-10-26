@@ -324,3 +324,16 @@ dialog.tdialog[open] { display: flex; }
 #tcanvas { flex: 1; min-height: 0; width: 100%; display: block; touch-action: none; cursor: crosshair; }
 .tcount { display: flex; flex-wrap: wrap; gap: 4px 12px; font-size: 13px; }
 .thint { text-align: center; opacity: .55; padding: 0 0 8px; }
+
+.trainfab { position: fixed; right: 20px; bottom: 20px; z-index: 6; width: 66px; height: 66px; border-radius: 50%; border: 0; padding: 0;
+  background: #fff; box-shadow: 0 8px 24px rgba(30, 40, 90, .3); cursor: pointer; display: grid; place-items: center; transition: transform .15s; }
+.trainfab:hover { transform: scale(1.07); }
+.trainfab img { width: 62px; height: 62px; }
+dialog.tpage { width: 100vw; height: 100vh; max-width: none; max-height: none; border-radius: 0; padding: 0;
+  background: linear-gradient(160deg, #E8ECFA 0%, var(--bg) 50%, #F7E6EC 100%); display: none; flex-direction: column; }
+dialog.tpage[open] { display: flex; }
+.tpagebar { display: flex; align-items: center; gap: 12px; padding: 10px 16px; background: #1F2A5C; color: #fff; }
+.tpagebar .ghost { color: #fff; border-color: rgba(255,255,255,.35); }
+.tpagebar .round { background: transparent; color: #fff; border-color: rgba(255,255,255,.35); }
+.tpagebody { overflow: auto; flex: 1; padding: 16px; max-width: 1100px; width: 100%; margin: 0 auto; }
+.tthumb .tc { position: absolute; top: 6px; left: 6px; background: rgba(0,0,0,.55); color: #fff; font-size: 11px; font-weight: 700; border-radius: 8px; padding: 1px 7px; }
