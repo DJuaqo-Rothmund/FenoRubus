@@ -131,14 +131,15 @@ class NotebookScreen(MDScreen):
                 if os.path.exists(p["path"]):
                     a.thumb_async(p["path"], 200, lambda src, card=card: card.thumbs.append(src))
 
-    def pick_workspace(self, caller):
+    def pick_workspace(self, caller=None):
         """Elegir de qué ensayo o predio es el cuaderno."""
-        from ui.screens import open_menu
+        from ui.screens import pick_dialog
         from workspaces import Workspaces
         a = app()
-        items = [(f"{Workspaces.title(w)} · {w['code']}", lambda w=w: self._switch(w))
-                 for w in a.workspaces.list()]
-        open_menu(caller, items, width_mult=6)
+        cur = (a.workspace or {}).get("id")
+        items = [(f"{Workspaces.title(w)} · {w['code']}", "Actual" if w["id"] == cur else "",
+                  lambda w=w: self._switch(w)) for w in a.workspaces.list()]
+        pick_dialog("Cuaderno de campo de…", items)
 
     def _switch(self, ws):
         app().open_workspace(ws["id"], target=None)
@@ -160,6 +161,32 @@ class NoteScreen(MDScreen):
     wide = BooleanProperty(False)
     saved_text = StringProperty("")
 
+    def on_kv_post(self, *_):
+        # Se escribe directo en la hoja, sin el cuadro de texto nativo de Android (native_input).
+        ti = self.ids.text
+        ti.native_edit = False
+        ti.bind(pos=self._rule, size=self._rule, scroll_y=self._rule, line_height=self._rule)
+        self._rule()
+
+    def _rule(self, *_):
+        """Renglones de cuaderno bajo el texto (siguen al texto al desplazarlo)."""
+        from kivy.graphics import InstructionGroup
+        ti = self.ids.text
+        group = getattr(self, "_rules", None)
+        if group is None:
+            group = self._rules = InstructionGroup()
+            ti.canvas.before.insert(0, group)     # debajo de todo (el color no se hereda al texto)
+        group.clear()
+        step = ti.line_height + ti.line_spacing
+        if step <= 0:
+            return
+        group.add(Color(*c(OCHRE, .28)))
+        y = ti.top - ti.padding[1] + ti.scroll_y - step
+        while y > ti.y:
+            if y < ti.top:
+                group.add(Rectangle(pos=(ti.x, y - dp(2)), size=(ti.width, dp(1))))
+            y -= step
+
     def load(self, day: str):
         self.day = day[:10]
         self.entry = notebook_db().note_for_day(self.day, create=True)
@@ -171,13 +198,36 @@ class NoteScreen(MDScreen):
         self._layout()
         self.refresh_photos()
 
+    kb_pad = NumericProperty(0)           # espacio del teclado del teléfono bajo la hoja
+
     def on_pre_enter(self, *_):
         Window.bind(size=self._layout)
         self._layout()
+        self.ids.text.bind(focus=self._on_focus)
 
     def on_leave(self, *_):
         Window.unbind(size=self._layout)
+        self.ids.text.unbind(focus=self._on_focus)
+        self._kb_watch(False)
         self.save_now()
+
+    # La hoja se acorta sobre el teclado (así lo escrito nunca queda tapado).
+    def _on_focus(self, _w, focused):
+        self._kb_watch(focused)
+
+    def _kb_watch(self, on: bool):
+        ev = getattr(self, "_kb_ev", None)
+        if ev:
+            ev.cancel()
+            self._kb_ev = None
+        if on:
+            self._kb_ev = Clock.schedule_interval(self._kb_poll, .25)
+        else:
+            self.kb_pad = 0
+
+    def _kb_poll(self, *_):
+        from android_bridge import keyboard_height
+        self.kb_pad = keyboard_height()
 
     def _layout(self, *_):
         """Tablet u horizontal: texto y fotos lado a lado; teléfono: uno sobre otro."""

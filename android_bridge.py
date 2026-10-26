@@ -114,6 +114,24 @@ def allow_rotation(on: bool) -> None:
         pass
 
 
+def keyboard_height() -> int:
+    """Cuánto (px) tapa el teclado del teléfono la parte de abajo de la ventana de la app;
+    0 si está cerrado, si Android ya achicó la ventana o fuera de Android. Kivy con SDL2 no
+    lo informa: se compara el área visible con el alto de la ventana de Kivy."""
+    if not IS_ANDROID:
+        return 0
+    try:
+        from jnius import autoclass  # type: ignore
+        from kivy.core.window import Window
+        activity = autoclass("org.kivy.android.PythonActivity").mActivity
+        rect = autoclass("android.graphics.Rect")()
+        activity.getWindow().getDecorView().getWindowVisibleDisplayFrame(rect)
+        covered = rect.top + Window.system_size[1] - rect.bottom
+        return covered if covered > 80 else 0
+    except Exception:  # noqa: BLE001
+        return 0
+
+
 def request_runtime_permissions(callback: Callable[[bool], None] | None = None) -> None:
     if not IS_ANDROID:
         if callback:

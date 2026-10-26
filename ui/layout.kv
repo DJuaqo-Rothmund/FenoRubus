@@ -155,7 +155,10 @@
         MDLabel:
             text: root.subtitle
             font_style: "Caption"
-            adaptive_height: True
+            # Sin subtítulo, alto 0 (un MDLabel vacío con adaptive_height descuadra la fila).
+            size_hint_y: None
+            text_size: self.width, None
+            height: self.texture_size[1] if self.text else 0
             opacity: 1 if root.subtitle else 0
             theme_text_color: "Custom"
             text_color: c(theme.MUTED)
@@ -3628,7 +3631,7 @@
             right_action_items: [["calendar-edit", lambda x: root.pick_date()], ["trash-can-outline", lambda x: root.delete_page()]]
         BoxLayout:
             orientation: "horizontal" if root.wide else "vertical"
-            padding: dp(12), dp(6), dp(12), dp(12)
+            padding: dp(12), dp(6), dp(12), dp(12) + root.kb_pad
             spacing: dp(12)
             # ---- hoja de texto
             BoxLayout:
@@ -3673,6 +3676,9 @@
                 TextInput:
                     id: text
                     multiline: True
+                    keyboard_suggestions: True
+                    use_bubble: True
+                    use_handles: True
                     hint_text: "¿Qué se vio hoy en terreno? Clima, labores, plagas, ideas…"
                     font_size: "17sp"
                     line_spacing: dp(4)
@@ -3689,7 +3695,9 @@
             BoxLayout:
                 orientation: "vertical"
                 size_hint: (.42, 1) if root.wide else (1, None)
-                height: dp(250)
+                height: 0 if (root.kb_pad and not root.wide) else dp(250)
+                opacity: 0 if (root.kb_pad and not root.wide) else 1
+                disabled: bool(root.kb_pad and not root.wide)
                 padding: dp(12), dp(10)
                 spacing: dp(8)
                 canvas.before:
