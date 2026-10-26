@@ -298,3 +298,29 @@ dialog.nbdraw[open] { display: flex; }
 .nbpentools .ink { width: 28px; height: 28px; border-radius: 50%; border: 3px solid #fff; box-shadow: 0 0 0 1px rgba(0,0,0,.15); cursor: pointer; }
 .nbpentools .ink.on { box-shadow: 0 0 0 2px #C8963E; }
 .nbpentools .ghost.on { background: #EEDAB8; }
+
+/* Entrenar IA: marcar estructuras con cajas */
+.tbar { height: 6px; border-radius: 3px; background: var(--leaf-soft); overflow: hidden; margin: 6px 0; }
+.tbar i { display: block; height: 100%; background: var(--leaf); }
+.tclasses { display: flex; flex-wrap: wrap; gap: 4px 12px; margin-top: 6px; }
+.tclasses span, .tcount span { display: inline-flex; align-items: center; gap: 5px; }
+.tclasses i, .tcount i, .tclassbar i { width: 10px; height: 10px; border-radius: 3px; display: inline-block; }
+.tgrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(130px, 1fr)); gap: 10px; margin-top: 12px; }
+.tthumb { position: relative; aspect-ratio: 1; border: 0; border-radius: 14px; background: var(--leaf-soft) center/cover; cursor: pointer; overflow: hidden; }
+.tthumb .tw, .tthumb .tv { position: absolute; left: 6px; right: 6px; font-size: 11px; color: #fff; text-shadow: 0 1px 3px #000; text-align: left;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.tthumb .tw { bottom: 22px; } .tthumb .tv { bottom: 6px; font-weight: 700; }
+.tthumb .tn { position: absolute; top: 6px; right: 6px; background: var(--leaf); color: #fff; font-size: 12px; font-weight: 700; border-radius: 10px; padding: 1px 8px; }
+dialog.tdialog { width: 100vw; height: 100vh; max-width: none; max-height: none; border-radius: 0; background: #15130f; color: #fff; display: none; flex-direction: column; }
+dialog.tdialog[open] { display: flex; }
+.tbarx { display: flex; align-items: center; gap: 8px; padding: 8px 12px; flex-wrap: wrap; }
+.tbarx .ghost { color: #fff; border-color: rgba(255,255,255,.3); }
+.tbarx .ghost.on { background: rgba(255,255,255,.2); }
+.tbarx .round { background: transparent; color: #fff; border-color: rgba(255,255,255,.3); }
+#tname { opacity: .6; }
+.tclassbar { display: flex; flex-wrap: wrap; gap: 6px; padding: 0 12px 8px; }
+.tclassbar button { border: 1px solid rgba(255,255,255,.25); background: rgba(255,255,255,.06); color: #fff; border-radius: 999px; padding: 5px 12px; cursor: pointer; display: inline-flex; align-items: center; gap: 6px; font-size: 13px; }
+.tclassbar button.on { background: #fff; color: #15130f; font-weight: 700; }
+#tcanvas { flex: 1; min-height: 0; width: 100%; display: block; touch-action: none; cursor: crosshair; }
+.tcount { display: flex; flex-wrap: wrap; gap: 4px 12px; font-size: 13px; }
+.thint { text-align: center; opacity: .55; padding: 0 0 8px; }
