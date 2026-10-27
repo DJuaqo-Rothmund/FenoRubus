@@ -70,7 +70,9 @@ def test_web_reads_app_bundle_and_app_applies_web_changes(tmp_path):
     res = _node("roundtrip", bundle, tmp_path)
     assert res["had"] == 61 and res["varieties"] == len(db.list_varieties())
     stats = sync.apply_changes(db, res["bundle"], data, week_for_date=db.week_for_date)
-    assert stats["applied"] == 4
+    # 4 cambios de la web + la semana del 12/10, que la web también manda porque las
+    # semanas creadas solas en la app no viajan.
+    assert stats["applied"] == 5
     obs = db.get_observation(vid, w["id"])
     assert obs["bbch_code"] == 65 and obs["notes"] == "desde la web" and obs["bbch_label"] == "Final de la floración"
     nov = db.query_one("SELECT * FROM sampling_weeks WHERE start_date='2026-11-02'")

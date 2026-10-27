@@ -1099,6 +1099,9 @@ class Database:
         self.execute(
             "INSERT OR IGNORE INTO sampling_weeks(season, week_number, start_date, label) "
             "VALUES (?,?,?,?)", (season, number, start.isoformat(), ph.week_label(start)))
+        # Una semana creada sola (al navegar o en un equipo recién instalado) no viaja: así
+        # no pisa en los otros equipos la marca «no muestreada». Si se cambia, sí viaja.
+        self.execute("DELETE FROM sync_dirty WHERE entity='sampling_weeks' AND uid=?", (start.isoformat(),))
         return self.query_one(
             "SELECT * FROM sampling_weeks WHERE season=? AND week_number=?", (season, number))
 

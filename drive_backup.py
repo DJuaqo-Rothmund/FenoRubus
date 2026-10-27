@@ -727,6 +727,30 @@ class DriveBackup:
                 self.db.set_setting("drive_folders", {})
             raise
 
+    def put_file(self, path: str, remote: str) -> str:
+        """Sube `path` a «PhenoRubus · …/<remote>» REEMPLAZANDO el archivo del mismo nombre si
+        ya existe (p. ej. la página del cuaderno al editarla de nuevo). Devuelve su id."""
+        *dirs, fname = remote.split("/")
+        parent = self._folder(ROOT_FOLDER, None)
+        for d in dirs:
+            parent = self._folder(d, parent)
+        esc = fname.replace("\\", "\\\\").replace("'", "\\'")
+        found = self._call("GET", f"{API}?" + urllib.parse.urlencode(
+            {"q": f"name='{esc}' and '{parent}' in parents and trashed=false",
+             "fields": "files(id)", "spaces": "drive"})).get("files", [])
+        with open(path, "rb") as f:
+            data = f.read()
+        mime = "application/pdf" if fname.lower().endswith(".pdf") else "image/jpeg"
+        boundary = uuid.uuid4().hex
+        meta = json.dumps({"name": fname} if found else {"name": fname, "parents": [parent]}).encode()
+        body = (f"--{boundary}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n".encode()
+                + meta + f"\r\n--{boundary}\r\nContent-Type: {mime}\r\n\r\n".encode()
+                + data + f"\r\n--{boundary}--\r\n".encode())
+        ctype = f"multipart/related; boundary={boundary}"
+        if found:
+            return self._call("PATCH", UPLOAD.replace("/files?", f"/files/{found[0]['id']}?"), body, ctype)["id"]
+        return self._call("POST", UPLOAD, body, ctype)["id"]
+
     LEGACY_TOP = ("Año ", "Temporada ", "Respaldos")
 
     def relocate_legacy(self) -> int:

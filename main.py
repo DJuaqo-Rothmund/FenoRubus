@@ -181,6 +181,7 @@ class FenoRubusApp(MDApp):
                     try:
                         res = self.sync.run(manual=manual)
                         msg = summary(res)
+                        self._export_notebooks()
                         break
                     except Offline as exc:
                         if wait is None:
@@ -195,6 +196,23 @@ class FenoRubusApp(MDApp):
             self.workspaces.shared.set_setting("sync_last", f"{stamp} · {msg}")
             Clock.schedule_once(lambda *_: self._after_sync(res, msg, manual))
         self.workers.submit(work)
+
+    def _export_notebooks(self) -> None:
+        """Páginas del cuaderno que cambiaron (aquí o en otro equipo) → PDF en Drive, carpeta
+        «Cuaderno de campo» (notebook_export.py). Un error aquí no frena la sincronización."""
+        try:
+            from notebook_export import export_pending
+            for db in self.all_dbs():
+                export_pending(db, self.drive, data_subdir("cuaderno_pdf"))
+        except Exception as exc:  # noqa: BLE001
+            print("cuaderno → Drive:", exc)
+
+    def backup_notebook(self, path: str) -> None:
+        """Foto del cuaderno → Drive, carpeta exclusiva «Cuaderno de campo»."""
+        if not self.db.get_setting("drive_enabled", False):
+            return
+        from notebook_export import photo_remote
+        self.drive.enqueue(None, path, remote=photo_remote(path))
 
     def _after_sync(self, res, msg, manual):
         if manual:
