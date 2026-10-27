@@ -417,9 +417,9 @@ async function weekFolderId(week = S.week, sub = "") {
   return parent;
 }
 
-// Foto del cuaderno: a la carpeta de la semana del día, «…/Cuaderno de campo» (= backup_extra).
+// Foto del cuaderno: carpeta exclusiva «PhenoRubus · …/Cuaderno de campo» (= notebook_export).
 async function uploadNotePhoto(day, name, blob) {
-  const dir = await weekFolderId(C.iso(C.mondayOf(C.parseDate(day))), "Cuaderno de campo");
+  const dir = await folder("Cuaderno de campo", await folder(ROOT, null, true), true);
   const id = await upload(dir, name, blob, "image/jpeg");
   S.photoIds.set(name, id);
   S.photoUrls.set(name, URL.createObjectURL(blob));

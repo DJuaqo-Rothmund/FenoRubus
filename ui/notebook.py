@@ -358,6 +358,9 @@ class NoteScreen(MDScreen):
         self.ids.text.unbind(focus=self._on_focus)
         self._kb_watch(False)
         self.save_now()
+        # Lo escrito viaja enseguida a los otros equipos y su PDF queda en Drive
+        # («Cuaderno de campo»), sin esperar a la próxima sincronización.
+        app().run_sync()
 
     # La hoja se acorta sobre el teclado (así lo escrito nunca queda tapado).
     def _on_focus(self, _w, focused):
@@ -452,7 +455,7 @@ class NoteScreen(MDScreen):
                     for tmp in paths:
                         path = store_photo(tmp, dest, base, exact=True)
                         notebook_db().add_note_photo(entry_id, path)
-                        a.backup_extra(path, monday(day), "Cuaderno de campo")
+                        a.backup_notebook(path)
                 except Exception as exc:  # noqa: BLE001
                     error = exc
                 Clock.schedule_once(lambda *_: (self.refresh_photos(),
@@ -766,7 +769,7 @@ class AnnotateView(ModalView):
             row = db.query_one("SELECT e.day FROM notebook_photos p JOIN notebook_entries e ON e.id = p.entry_id "
                                "WHERE p.id=?", (photo_id,))
             day = row["day"] if row else _dt.date.today().isoformat()
-            a.backup_extra(dest, monday(day), "Cuaderno de campo")
+            a.backup_notebook(dest)
         except Exception as exc:  # noqa: BLE001
             a.toast(f"No se pudo guardar el dibujo: {exc}")
             return

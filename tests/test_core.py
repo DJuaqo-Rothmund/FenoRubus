@@ -2154,3 +2154,43 @@ def test_training_labels_merge_with_web(tmp_path):
     assert LabelStore(cdir).get("a.jpg") and not LabelStore(cdir).dirty     # quedó guardado aquí
     assert store.totals()["flor"] == 1 and store.totals()["fruto_verde"] == 1
     assert isinstance(detail_photos([copen(w) for w in cws.list()]), list)
+
+
+def test_notebook_pages_to_drive_folder(tmp_path):
+    """Cada página con contenido se sube como PDF a «Cuaderno de campo» con fecha y código;
+    al editarla se REEMPLAZA (mismo nombre) y lo que no cambió no se vuelve a subir."""
+    import json
+    from notebook_export import export_pending
+    fake = FakeDrive()
+    cel, cws, copen, cdir = _device(tmp_path, "cel", fake)
+    db = copen(cws.by_code("NV"))
+    e = db.note_for_day("2026-10-26", create=True)
+    db.save_note_text(e["id"], "Se marcaron las variedades en el mulch.\\nSe seleccionan primocañas.")
+    db.save_note_ink(e["id"], json.dumps([{"c": "#1E3A8A", "w": .06, "p": [1, 3, 4, 3.5, 6, 3]}]))
+    db.note_for_day("2026-10-25", create=True)                    # vacía: no se sube
+    out = str(tmp_path / "pdf")
+    assert export_pending(db, cel.drive, out) == 1
+    pdfs = [f for f in fake.files.values() if f["name"].endswith(".pdf")]
+    assert [f["name"] for f in pdfs] == ["20261026-NV-cuaderno.pdf"] and pdfs[0]["data"].startswith(b"%PDF")
+    folder = next(k for k, f in fake.files.items() if f["name"] == "Cuaderno de campo" and f["folder"])
+    assert pdfs[0]["parents"] == [folder]
+    assert export_pending(db, cel.drive, out) == 0                # sin cambios
+    db.save_note_text(e["id"], "Texto corregido")
+    assert export_pending(db, cel.drive, out) == 1
+    assert len([f for f in fake.files.values() if f["name"].endswith(".pdf")]) == 1   # reemplazada
+
+
+def test_auto_created_weeks_do_not_travel(tmp_path):
+    """Las semanas que la app crea sola no viajan (no pisan «no muestreada» en otro equipo)."""
+    import sync
+    fake = FakeDrive()
+    cel, cws, copen, cdir = _device(tmp_path, "cel", fake)
+    db = copen(cws.by_code("NV"))
+    db.query("SELECT 1")
+    w = db.ensure_week(2026, 40)
+    pending = {d["uid"] for d in db.query("SELECT uid FROM sync_dirty WHERE entity='sampling_weeks'")}
+    assert w["start_date"] not in pending
+    db.execute("UPDATE sampling_weeks SET skipped=1 WHERE id=?", (w["id"],))
+    pending = {d["uid"] for d in db.query("SELECT uid FROM sync_dirty WHERE entity='sampling_weeks'")}
+    assert w["start_date"] in pending
+    _ = sync
