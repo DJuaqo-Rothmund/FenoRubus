@@ -397,7 +397,7 @@ const Ed = {
       const [sx0, sy0] = this.toScr(b.x, b.y), [sx1, sy1] = this.toScr(b.x + b.w, b.y + b.h);
       if (sx1 - sx0 < 6 || sy1 - sy0 < 6) { this.draw(); return; }     // un clic suelto no crea caja
       this.rec.boxes.push(b);
-      this.sel = this.rec.boxes.length - 1;
+      this.sel = null;          // la nueva no queda elegida: otra clase es para la próxima caja
     }
     const r4 = (v) => Math.round(v * 10000) / 10000;
     for (const b of this.rec.boxes) { b.x = r4(b.x); b.y = r4(b.y); b.w = r4(b.w); b.h = r4(b.h); }
