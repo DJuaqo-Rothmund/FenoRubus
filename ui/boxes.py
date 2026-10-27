@@ -131,6 +131,7 @@ class BoxThumb(ButtonBehavior, FloatLayout):
 class Panel:
     """Contenido de la pestaña (se arma dentro de ids.boxes_box del AILabScreen)."""
     filter = "todo"
+    ws = ""               # código del ensayo/predio elegido («» = todos)
     shown = PAGE
 
     def __init__(self, screen):
@@ -170,12 +171,37 @@ class Panel:
             b.bind(on_release=lambda _w, key=key: self._filter(key))
             row.add_widget(b)
         card.add_widget(row)
+        # Cuántas fotos de detalle tiene cada ensayo/predio (y cuántas ya están en el teléfono).
+        card.add_widget(Factory.MindSection(text="FOTOS DE DETALLE POR ENSAYO O PREDIO"))
+        sv = ScrollView(size_hint_y=None, height=dp(44), do_scroll_y=False, bar_width=0)
+        chips = BoxLayout(size_hint_x=None, spacing=dp(6), padding=(0, dp(2)))
+        chips.bind(minimum_width=chips.setter("width"))
+        counts = {}
+        for p in self.photos:
+            counts.setdefault(p["code"], [0, 0])
+            counts[p["code"]][0] += 1
+            counts[p["code"]][1] += 1 if p["exists"] else 0
+        entries = [("", f"Todos ({len(self.photos)})")]
+        for w in a.workspaces.list():
+            n, here = counts.get(w["code"], [0, 0])
+            entries.append((w["code"], f"{w['code']} ({n})" + (f" · {here} aquí" if here < n else "")))
+        for code, label in entries:
+            b = Factory.MindSeg(text=label, selected=self.ws == code, size_hint_x=None)
+            b.width = max(dp(70), len(label) * dp(8) + dp(24))
+            b.bind(on_release=lambda _w, code=code: self._ws(code))
+            chips.add_widget(b)
+        sv.add_widget(chips)
+        card.add_widget(sv)
+        missing = sum(1 for p in self.photos if not p["exists"])
+        if missing:
+            card.add_widget(Factory.MindMuted(
+                text=f"{missing} foto(s) aún no están en este teléfono: se bajan al sincronizar (Drive)."))
         sync_btn = Factory.MindGhost(icon="cloud-sync-outline", text="Sincronizar marcas con el PC")
         sync_btn.bind(on_release=lambda *_: sync_now(lambda: self.refresh(sync=False), quiet=False))
         card.add_widget(sync_btn)
         box.add_widget(card)
-        shown = [p for p in self.photos if self.filter == "todo"
-                 or (self.filter == "con") == is_marked(st.get(p["name"]))]
+        shown = [p for p in self.photos if (not self.ws or p["code"] == self.ws) and (
+                 self.filter == "todo" or (self.filter == "con") == is_marked(st.get(p["name"])))]
         self.list = shown
         grid = GridLayout(cols=3, spacing=dp(6), size_hint_y=None)
         grid.bind(minimum_height=grid.setter("height"))
@@ -197,6 +223,10 @@ class Panel:
 
     def _filter(self, key):
         self.filter, self.shown = key, PAGE
+        self.refresh(sync=False)
+
+    def _ws(self, code):
+        self.ws, self.shown = code, PAGE
         self.refresh(sync=False)
 
     def _more(self):
