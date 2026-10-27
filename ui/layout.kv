@@ -2852,18 +2852,27 @@
             spacing: dp(6)
             MindSeg:
                 text: "Desafío"
+                font_size: "12.5sp"
                 selected: seg.current == "challenge"
                 on_release: root.show("challenge")
             MindSeg:
                 text: "Etiquetar"
+                font_size: "12.5sp"
                 selected: seg.current == "label"
                 on_release: root.show("label")
             MindSeg:
+                text: "Cajas"
+                font_size: "12.5sp"
+                selected: seg.current == "boxes"
+                on_release: root.show("boxes")
+            MindSeg:
                 text: "Modelo"
+                font_size: "12.5sp"
                 selected: seg.current == "model"
                 on_release: root.show("model")
             MindSeg:
                 text: "Datos"
+                font_size: "12.5sp"
                 selected: seg.current == "data"
                 on_release: root.show("data")
         MDScreenManager:
@@ -2951,6 +2960,17 @@
                             orientation: "vertical"
                             adaptive_height: True
                             spacing: dp(10)
+            MDScreen:
+                name: "boxes"
+                md_bg_color: 0, 0, 0, 0
+                MDScrollView:
+                    do_scroll_x: False
+                    MDBoxLayout:
+                        id: boxes_box
+                        orientation: "vertical"
+                        adaptive_height: True
+                        padding: dp(14), dp(8), dp(14), dp(24)
+                        spacing: dp(10)
             MDScreen:
                 name: "label"
                 md_bg_color: 0, 0, 0, 0

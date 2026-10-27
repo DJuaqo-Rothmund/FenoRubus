@@ -4654,6 +4654,11 @@ class AILabScreen(MDScreen):
             self.ids.task_box.add_widget(card)
 
     # ============================================================ etiquetado
+    def refresh_boxes(self):
+        """Cajas para el detector (yemas, brotes, laterales, flores, frutos): ui/boxes.py."""
+        from ui import boxes
+        boxes.build(self)
+
     def refresh_label(self):
         a = app()
         self.ids.auto_learn.active = bool(a.db.get_setting("ai_auto_learn", True))

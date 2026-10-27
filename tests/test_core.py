@@ -2127,3 +2127,30 @@ def test_notebook_page_from_web_reaches_phone(tmp_path):
     p = page["photos"][0]
     assert p["annotated"] == 1 and p["path"].startswith(cdir)
     assert open(p["path"], "rb").read() == b"DRAWN"
+
+
+def test_training_labels_merge_with_web(tmp_path):
+    """Marcas de cajas: el teléfono suma las del PC (web) y sube las suyas; por foto gana la
+    más reciente."""
+    import json
+    from training_labels import LabelStore, detail_photos
+    fake = FakeDrive()
+    cel, cws, copen, cdir = _device(tmp_path, "cel", fake)
+    cel.run()
+    # La web ya guardó marcas de una foto (y una más antigua de la que se marcará aquí).
+    root = next(k for k, f in fake.files.items() if f["name"] == "PhenoRubus · Imágenes de Fenología" and f["folder"])
+    fake.files["td"] = {"name": "Entrenamiento IA", "parents": [root], "data": b"", "folder": True}
+    web = {"version": 1, "photos": {
+        "a.jpg": {"w": 10, "h": 10, "boxes": [{"c": "flor", "x": .1, "y": .1, "w": .2, "h": .2}], "ts": "2026-10-26T10:00:00.000"},
+        "b.jpg": {"w": 10, "h": 10, "boxes": [], "empty": True, "ts": "2020-01-01T00:00:00.000"}}}
+    fake.files["tm"] = {"name": "marcas.json", "parents": ["td"], "data": json.dumps(web).encode(), "folder": False}
+    store = LabelStore(cdir)
+    store.put("b.jpg", {"w": 10, "h": 10, "boxes": [{"c": "fruto_verde", "x": .5, "y": .5, "w": .1, "h": .1}]}, "cel")
+    assert store.sync(cel) == 1                       # llegó a.jpg; b.jpg de aquí es más nueva
+    assert store.get("a.jpg")["boxes"][0]["c"] == "flor"
+    assert store.get("b.jpg")["boxes"][0]["c"] == "fruto_verde"
+    up = json.loads(fake.files["tm"]["data"])
+    assert set(up["photos"]) == {"a.jpg", "b.jpg"} and up["photos"]["b.jpg"]["boxes"]
+    assert LabelStore(cdir).get("a.jpg") and not LabelStore(cdir).dirty     # quedó guardado aquí
+    assert store.totals()["flor"] == 1 and store.totals()["fruto_verde"] == 1
+    assert isinstance(detail_photos([copen(w) for w in cws.list()]), list)
