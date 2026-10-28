@@ -102,6 +102,28 @@ def preload():
     sync_now()
 
 
+EXTRA_CODE = "IA+"
+
+
+def extra_items(index: list | None = None) -> list[dict]:
+    """Fotos extra («IA+ Conocimiento ampliado») con la forma de las fotos de detalle."""
+    import extra_photos as ex
+    out = []
+    for e in (index if index is not None else ex.load_index()):
+        path = ex.local_path(e)
+        out.append({"name": e["key"], "path": path, "code": EXTRA_CODE, "ws": "Conocimiento ampliado",
+                    "variety": e["folder"] or e["name"], "week": "", "exists": os.path.exists(path), "extra": e})
+    return out
+
+
+def release(p: dict) -> None:
+    """Foto extra: al dejar de verla se borra del teléfono (sigue en Drive)."""
+    if p.get("extra"):
+        import extra_photos as ex
+        ex.release(p["extra"])
+        p["exists"] = False
+
+
 def fetch_photos(items: list, progress=None, done=None):
     """Baja de Drive las fotos de la lista que no están en el teléfono (de a varias a la
     vez), sin esperar la sincronización general. progress(bajadas, total); done(bajadas,
@@ -119,11 +141,17 @@ def fetch_photos(items: list, progress=None, done=None):
     def work():
         got, missing = 0, 0
         try:
-            sync = a.sync
-            ids = sync._find(sorted({p["name"] for p in items}))
+            import extra_photos as ex
+            for p in [p for p in items if p.get("extra")]:      # fotos extra: por su id de Drive
+                ex.fetch_full(a.drive, p["extra"])
+                p["exists"] = True
+                got += 1
+            items_ = [p for p in items if not p.get("extra")]
+            sync = a.sync if items_ else None
+            ids = sync._find(sorted({p["name"] for p in items_})) if items_ else {}
             dbs = {ws["code"]: a.open_db(ws) for ws in a.workspaces.list()}
-            todo = [(p, ids[p["name"]]) for p in items if p["name"] in ids]
-            missing = len(items) - len(todo)
+            todo = [(p, ids[p["name"]]) for p in items_ if p["name"] in ids]
+            missing = len(items_) - len(todo)
             for i in range(0, len(todo), 8):
                 chunk = todo[i:i + 8]
                 datas = sync._parallel(lambda t: sync._get(t[1]), chunk)
@@ -195,7 +223,8 @@ class BoxThumb(ButtonBehavior, Widget):
         self._set_text(self._code, self.photo["code"])
         self._set_text(self._count, (str(n) if n else "vacía") if marked else "")
         self._set_text(self._variety, (self.photo["variety"] or "")[:22], bold=False)
-        self._set_text(self._cloud, "" if self.photo["exists"] else "En Drive", bold=False, size=12)
+        self._set_text(self._cloud, "" if self.photo["exists"] or self.photo.get("extra") else "En Drive",
+                       bold=False, size=12)
         self._place()
 
     def _set_text(self, rect, text, bold=True, size=11):
@@ -228,11 +257,16 @@ class BoxThumb(ButtonBehavior, Widget):
         self._img.texture = tex.get_region((tw - cw) / 2, (th - ch) / 2, cw, ch)
 
     def load(self):
-        if self.photo["exists"]:
+        if self.photo.get("extra"):                 # miniatura de Drive (sin bajar la foto)
+            from ui.extra import _loader
+            _loader.add(self.photo["extra"], self._set)
+        elif self.photo["exists"]:
             app().thumb_async(self.photo["path"], 240, self._set)
 
     def _set(self, src):
         from kivy.core.image import Image as CoreImage
+        if not src:
+            return
         try:
             self._tex = CoreImage(src).texture
         except Exception:  # noqa: BLE001
@@ -288,13 +322,31 @@ class BoxesScreen(MDScreen):
     def on_pre_enter(self, *_):
         self.refresh()
         self.sync()
+        self._refresh_extra()
+
+    def _refresh_extra(self):
+        """Lista de fotos extra de Drive en segundo plano (se muestra la guardada mientras)."""
+        if not drive_ready():
+            return
+        import extra_photos as ex
+        a = app()
+
+        def work():
+            try:
+                old = {p["key"] for p in ex.load_index()}
+                new = ex.refresh(a.drive)
+            except Exception:  # noqa: BLE001
+                return
+            if {p["key"] for p in new} != old:
+                Clock.schedule_once(lambda *_: self.refresh())
+        threading.Thread(target=work, daemon=True).start()
 
     def sync(self, quiet: bool = True):
         sync_now(lambda got: self.refresh() if got else self._update_marks(), quiet=quiet)
 
     # ------------------------------------------------------------ datos
     def refresh(self):
-        self.photos = detail_photos(app().all_dbs())
+        self.photos = detail_photos(app().all_dbs()) + extra_items()
         self._header()
         self._grid()
 
@@ -350,6 +402,7 @@ class BoxesScreen(MDScreen):
         for w in a.workspaces.list():
             n, here = counts.get(w["code"], [0, 0])
             entries.append((w["code"], f"{w['code']} ({n})" + (f" · {here} aquí" if here < n else "")))
+        entries.append((EXTRA_CODE, f"Ampliado ({counts.get(EXTRA_CODE, [0])[0]})"))
         for code, label in entries:
             b = Factory.MindSeg(text=label, selected=self.ws == code, size_hint_x=None)
             b.width = max(dp(70), len(label) * dp(8) + dp(24))
@@ -357,7 +410,7 @@ class BoxesScreen(MDScreen):
             chips.add_widget(b)
         sv.add_widget(chips)
         card.add_widget(sv)
-        missing = [p for p in self._visible() if not p["exists"]]
+        missing = [p for p in self._visible() if not p["exists"] and not p.get("extra")]
         if missing:
             self._dl = Factory.MindGhost(icon="cloud-download-outline",
                                          text=f"Bajar de Drive {len(missing)} foto(s) de este filtro")
@@ -436,6 +489,17 @@ class BoxesScreen(MDScreen):
 
 
 Builder.load_string(KV)
+
+
+def open_extra(photos: list, index: int, on_close=None):
+    """Desde la pestaña «Fotos extra»: esas fotos en el editor de IA+."""
+    items = extra_items(photos)
+
+    def closed():
+        if on_close:
+            on_close()
+        sync_now()
+    BoxEditor(items, index, on_close=closed).open()
 
 
 def open_screen():
@@ -773,6 +837,7 @@ class BoxEditor(ModalView):
         from android_bridge import allow_rotation
         allow_rotation(False)
         self._commit()
+        release(self.photo)
         if self.on_close:
             self.on_close()
 
@@ -804,7 +869,7 @@ class BoxEditor(ModalView):
             def done(got, _missing):
                 if got and self.i == i and self.photos[i] is p:
                     self.show(i)
-                elif not got:
+                elif not got and not p.get("extra"):
                     app().toast("La foto aún no está en Drive (el otro equipo no la ha subido).")
             fetch_photos([p], done=done)
             return
@@ -820,6 +885,7 @@ class BoxEditor(ModalView):
         j = self.i + d
         if 0 <= j < len(self.photos):
             self._commit()
+            release(self.photo)
             self.show(j)
 
     def _commit(self):
