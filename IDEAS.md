@@ -53,6 +53,19 @@ que cada usuario ya guarda en su propio Drive.
    ensayo, última copia, espacio usado, y la posibilidad de reunir todo para entrenar IA+
    con las fotos de todas las cuentas.
 
+**Uso principal: una base mayor para entrenar IA+.** Con la cuenta central («usuario
+maestro») se reúnen en un solo lugar:
+
+- las fotos de detalle de los ensayos y predios de **todas** las cuentas;
+- las fotos extra («IA+ Conocimiento ampliado») de todas las cuentas;
+- las marcas de cajas (`marcas.json`) de cada cuenta, que el script junta en una sola
+  (por foto gana la marca más reciente, igual que hoy entre teléfono y PC).
+
+El entrenamiento del detector (en el PC o en Colab) lee directo de la carpeta central:
+más fotos, más variedades, más lugares y más años, y el modelo resultante (un archivo de
+pocos MB) se entrega a todas las apps. Desde la cuenta maestra también se podrían marcar
+fotos de cualquier usuario en la web («Entrenar IA»), sumando al mismo conjunto.
+
 **A considerar:**
 
 - *Espacio:* la cuenta gratuita trae 15 GB (unas 40 mil fotos de ~350 KB); para más,
