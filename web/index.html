@@ -373,6 +373,20 @@
         <p class="muted small">Abra una foto y encierre con una caja cada yema, brote, lateral, botón, flor o fruto (teclas 0–9
           para la clase). Las marcas se guardan en su Drive, aparte de los registros.</p>
       </section>
+      <section class="card">
+        <div class="label">SUBIR FOTOS EXTRA · IA+ CONOCIMIENTO AMPLIADO</div>
+        <p class="muted small">Fotos que no son de un ensayo ni de un predio (de otros años o lugares), solo para
+          entrenar. Se guardan en su Drive, carpeta «IA+ Conocimiento ampliado»; si elige una carpeta, se respetan sus
+          subcarpetas (aparecen como filtro en el teléfono). Las que ya están se saltan.</p>
+        <div class="txrow">
+          <button type="button" id="txfiles" class="ghost">＋ Elegir fotos</button>
+          <button type="button" id="txfolder" class="ghost">＋ Elegir carpeta</button>
+          <label class="small"><input type="checkbox" id="txreduce" checked> Reducir a 2400 px (recomendado: más liviano)</label>
+        </div>
+        <input type="file" id="txin" accept="image/*" multiple hidden>
+        <input type="file" id="txdir" webkitdirectory multiple hidden>
+        <div id="txprog" class="muted small"></div>
+      </section>
       <section id="tgrid" class="tgrid"></section>
     </div>
   </dialog>

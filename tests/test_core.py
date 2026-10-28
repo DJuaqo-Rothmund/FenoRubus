@@ -2201,3 +2201,35 @@ def test_week_one_from_other_device_renumbers_weeks(tmp_path):
     assert dst.query_one("SELECT bbch_code FROM observations WHERE week_id=?", (got["id"],))["bbch_code"] == 61
     dst.close()
     Database(os.path.join(dst_dir, "a.sqlite3")).close()   # se vuelve a abrir sin errores
+
+
+def test_extra_photos_list_recursive_and_keys(tmp_path, monkeypatch):
+    """Fotos extra: la carpeta «IA+ Conocimiento ampliado» con subcarpetas (subidas desde la
+    web) se lista completa; la clave en marcas.json lleva la ruta («ext/2024/Regina/x.jpg»)."""
+    import urllib.parse
+    monkeypatch.setenv("FENORUBUS_DATA", str(tmp_path))
+    import extra_photos as ex
+    tree = {
+        "F": [{"id": "s1", "name": "2024", "mimeType": ex.FOLDER_MIME},
+              {"id": "a", "name": "20261028-101010-extra.jpg", "mimeType": "image/jpeg", "thumbnailLink": "t"}],
+        "s1": [{"id": "s2", "name": "Regina", "mimeType": ex.FOLDER_MIME},
+               {"id": "nota", "name": "leeme.txt", "mimeType": "text/plain"}],
+        "s2": [{"id": "b", "name": "IMG_1.jpg", "mimeType": "image/jpeg",
+                "imageMediaMetadata": {"width": 4000, "height": 3000}}],
+    }
+
+    class FakeDrive:
+        def _folder(self, name, parent):
+            return "F" if name == ex.FOLDER else "ROOT"
+
+        def _call(self, method, url):
+            q = urllib.parse.parse_qs(urllib.parse.urlparse(url).query)["q"][0]
+            return {"files": tree[q.split("'")[1]]}
+
+    photos = ex.refresh(FakeDrive())
+    assert [p["key"] for p in photos] == ["ext/20261028-101010-extra.jpg", "ext/2024/Regina/IMG_1.jpg"]
+    assert photos[1]["folder"] == "2024/Regina" and photos[1]["w"] == 4000
+    assert ex.load_index() == photos
+    full = ex.local_path(photos[1])
+    open(full, "wb").write(b"x")
+    assert ex.release(photos[1]) and not os.path.exists(full)

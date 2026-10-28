@@ -4330,13 +4330,6 @@ class PinForm(MDBoxLayout):
     autofocus = True
 
 
-class LabelPhotoRow(GlassButton):
-    title = StringProperty()
-    subtitle = StringProperty()
-    in_reference = BooleanProperty(False)
-    photo = ObjectProperty()
-
-
 class MindSeg(PillButton):
     pass
 
@@ -4701,58 +4694,8 @@ class AILabScreen(MDScreen):
             self.ids.task_box.add_widget(card)
 
     # ============================================================ etiquetado
-    def refresh_label(self):
-        a = app()
-        self.ids.auto_learn.active = bool(a.db.get_setting("ai_auto_learn", True))
-        box = self.ids.photos
-        fast_clear(box)
-        from ai_game import detail_photos
-        photos = detail_photos(a.all_dbs(), a.season)   # de todos los ensayos y predios
-        several = len({p["ws"] for p in photos}) > 1
-        limit = getattr(self, "_label_limit", 12)
-        for p in photos[:limit]:
-            code = p["bbch_code"]
-            row = LabelPhotoRow(
-                title=(f"{p['ws']} · " if several else "") + f"{p['variety_name']} · {ph.week_short(p)}",
-                subtitle=(f"BBCH {ph.code_str(code)}" if code is not None else "Sin estado")
-                + f" · {p['week_label']}", in_reference=bool(p["in_reference"]), photo=p)
-            row.ids.thumb_box.add_widget(thumb_widget(p["path"]))
-            row.bind(on_release=lambda w: self.label_dialog(w, w.photo))
-            box.add_widget(row)
-        if len(photos) > limit:
-            box.add_widget(MDFlatButton(
-                text=f"MOSTRAR MÁS ({len(photos) - limit} restantes)", pos_hint={"center_x": .5},
-                theme_text_color="Custom", text_color=c(theme.MIND_ACCENT),
-                on_release=lambda *_: self._more_labels()))
-        if not photos:
-            box.add_widget(self._mind_note("No hay fotos de detalle en la temporada."))
-
-    def _more_labels(self):
-        self._label_limit = getattr(self, "_label_limit", 12) + 12
-        self.refresh_label()
-
     def set_auto_learn(self, active: bool):
         app().db.set_setting("ai_auto_learn", bool(active))
-
-    def label_dialog(self, caller, photo):
-        a = app()
-
-        src = photo.get("db") or a.db     # el ensayo o predio dueño de la foto
-
-        def assign(code):
-            a.classifier.add_reference(photo["path"], code, photo_id=photo["id"], db=src)
-            obs = src.query_one("SELECT * FROM observations WHERE id=?", (photo["observation_id"],))
-            if obs and obs["bbch_code"] is None:
-                src.update_observation(obs["id"], bbch_code=code,
-                                       bbch_label=ph.bbch_label(code, src.bbch_names()))
-            a.toast(f"Referencia agregada: BBCH {ph.code_str(code)}")
-            self.refresh_label()
-
-        extra = []
-        if photo["bbch_code"] is not None:
-            extra.append((f"✓ Usar el registro: BBCH {ph.code_str(photo['bbch_code'])}",
-                          "Estado ya asignado en el muestreo", lambda: assign(photo["bbch_code"])))
-        bbch_dialog("¿Qué estado muestra la foto?", a.db, assign, extra, current=photo["bbch_code"])
 
     def add_all_labeled(self):
         a = app()
@@ -4767,7 +4710,7 @@ class AILabScreen(MDScreen):
             for p in todo:
                 a.classifier.add_reference(p["path"], p["bbch_code"], photo_id=p["id"], db=p["db"])
             Clock.schedule_once(lambda *_: (a.toast(f"{len(todo)} referencias agregadas"),
-                                            self.refresh_label()))
+                                            self.refresh_model()))
 
         a.workers.submit(work)
         a.toast(f"Procesando {len(todo)} fotos…")
@@ -4787,6 +4730,13 @@ class AILabScreen(MDScreen):
                                    value=str(counts[code])))
         if not counts:
             box.add_widget(_mind("MindMuted", text="Sin referencias: la IA usa solo los priors agronómicos."))
+        self.ids.auto_learn.active = bool(a.db.get_setting("ai_auto_learn", True))
+        self.refresh_data()      # «Modelo y datos»: documentos y temporadas anteriores
+
+    def refresh_extra(self):
+        """Fotos extra para IA+ (carpeta «IA+ Conocimiento ampliado»): ui/extra.py."""
+        from ui import extra
+        extra.build(self)
 
     def evaluate(self):
         ev = app().classifier.evaluate()
