@@ -546,6 +546,8 @@ class FenoRubusApp(MDApp):
         # y respalda la base en Drive una vez al día (las fotos ya se suben solas).
         if self.db.get_setting("drive_enabled", False):
             Clock.schedule_once(lambda *_: self.workers.submit(self._drive_daily), 6)
+            # IA+ (Lab): las marcas de Drive se precargan apenas se conoce la cuenta.
+            Clock.schedule_once(lambda *_: self._preload_iaplus(), 3)
         # Sincronización con el PC: al abrir y luego cada 10 minutos.
         Clock.schedule_once(lambda *_: self.run_sync(), 10)
         Clock.schedule_interval(lambda *_: self.run_sync(), 600)
@@ -851,6 +853,10 @@ class FenoRubusApp(MDApp):
                                   "navegador del teléfono o del computador.")
         except Exception as exc:  # noqa: BLE001
             self.toast(f"No se pudo compartir: {exc}")
+
+    def _preload_iaplus(self):
+        from ui import boxes
+        boxes.preload()
 
     def _drive_daily(self):
         _step("respaldo diario")

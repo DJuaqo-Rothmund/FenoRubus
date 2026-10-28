@@ -1,12 +1,18 @@
 """
 ui/boxes.py
 ===========
-Pestaña «Cajas» del Entrenador de IA: marcar con cajas las yemas, brotes, laterales,
-botones, flores y frutos en las fotos de detalle de todos los ensayos y predios, para
-entrenar el detector. Usa el mismo archivo de Drive que la web («Entrenar IA»), así se
+IA+ (botón junto al candado del Entrenador de IA): marcar con cajas las yemas, brotes,
+laterales, botones, flores y frutos en las fotos de detalle de todos los ensayos y predios,
+para entrenar el detector. Usa el mismo archivo de Drive que la web («Entrenar IA»), así se
 puede marcar en el teléfono o en el PC (ver training_labels.py).
 
-* `build(screen)`: avance (meta común), totales por clase, filtro y miniaturas.
+Pantalla casi independiente del resto de la app, para que abra rápido:
+* las marcas se leen del archivo local al instante y se suman con Drive en segundo plano
+  (también al abrir la app, apenas se sabe la cuenta: `preload`);
+* las fotos que aún no están en el teléfono se bajan directo de Drive desde aquí
+  (`fetch_photos`), sin esperar la sincronización general;
+* miniaturas livianas (dibujadas en el canvas, sin widgets por texto) y creadas por tandas.
+
 * `BoxEditor`: la foto a pantalla completa. Un dedo crea una caja (o mueve la que toca;
   las esquinas de la elegida la ajustan), dos dedos acercan y mueven.
 """
@@ -14,28 +20,30 @@ from __future__ import annotations
 
 import math
 import os
+import threading
 
 from kivy.clock import Clock
 from kivy.core.text import Label as CoreLabel
 from kivy.graphics import Color, Line, Rectangle
 from kivy.graphics.texture import Texture
+from kivy.lang import Builder
 from kivy.metrics import dp, sp
 from kivy.uix.behaviors import ButtonBehavior
 from kivy.uix.boxlayout import BoxLayout
-from kivy.uix.floatlayout import FloatLayout
 from kivy.uix.gridlayout import GridLayout
-from kivy.uix.image import Image
 from kivy.uix.label import Label
 from kivy.uix.modalview import ModalView
 from kivy.uix.scrollview import ScrollView
 from kivy.uix.stencilview import StencilView
 from kivy.uix.widget import Widget
 from kivymd.app import MDApp
+from kivymd.uix.screen import MDScreen
 
 from training_labels import CLASSES, COLORS, GOAL, NAMES, LabelStore, detail_photos, is_marked
 from ui.theme import c
 
 PAGE = 60                     # miniaturas por tanda («Ver más» agrega otras tantas)
+CHUNK = 12                    # miniaturas creadas por cuadro (la lista aparece de inmediato)
 _store: LabelStore | None = None
 
 
@@ -51,10 +59,16 @@ def store() -> LabelStore:
     return _store
 
 
-def sync_now(done=None, quiet=True):
-    """Suma las marcas de Drive (PC u otro teléfono) y sube las de aquí, en segundo plano."""
+def drive_ready() -> bool:
     a = app()
-    if not (a.db.get_setting("drive_enabled", False) and a.drive.available):
+    return bool(a.db.get_setting("drive_enabled", False) and a.drive.available)
+
+
+def sync_now(done=None, quiet=True):
+    """Suma las marcas de Drive (PC u otro teléfono) y sube las de aquí, en segundo plano.
+    done(llegaron) se llama al terminar (en el hilo de la interfaz)."""
+    a = app()
+    if not drive_ready():
         if not quiet:
             a.toast("Conecte Google Drive para compartir las marcas con el PC.")
         return
@@ -63,7 +77,7 @@ def sync_now(done=None, quiet=True):
     a._boxes_syncing = True
 
     def work():
-        msg = None
+        msg, got = None, 0
         try:
             got = store().sync(a.sync)
             msg = f"Marcas al día ({got} foto(s) nuevas desde Drive)" if got else "Marcas al día con Drive"
@@ -75,74 +89,225 @@ def sync_now(done=None, quiet=True):
             if not quiet or "No se pudieron" in msg:
                 a.toast(msg)
             if done:
-                done()
+                done(got)
         Clock.schedule_once(end)
 
-    a.workers.submit(work)
+    threading.Thread(target=work, daemon=True).start()
+
+
+def preload():
+    """Al abrir la app (con la cuenta de Google ya conocida): marcas de Drive a la memoria
+    local, para que IA+ abra al día sin esperar."""
+    store()
+    sync_now()
+
+
+def fetch_photos(items: list, progress=None, done=None):
+    """Baja de Drive las fotos de la lista que no están en el teléfono (de a varias a la
+    vez), sin esperar la sincronización general. progress(bajadas, total); done(bajadas,
+    no_encontradas)."""
+    a = app()
+    items = [p for p in items if not os.path.exists(p["path"])]
+    if not items:
+        if done:
+            done(0, 0)
+        return
+    if not drive_ready():
+        a.toast("Conecte Google Drive para bajar las fotos.")
+        return
+
+    def work():
+        got, missing = 0, 0
+        try:
+            sync = a.sync
+            ids = sync._find(sorted({p["name"] for p in items}))
+            dbs = {ws["code"]: a.open_db(ws) for ws in a.workspaces.list()}
+            todo = [(p, ids[p["name"]]) for p in items if p["name"] in ids]
+            missing = len(items) - len(todo)
+            for i in range(0, len(todo), 8):
+                chunk = todo[i:i + 8]
+                datas = sync._parallel(lambda t: sync._get(t[1]), chunk)
+                for (p, fid), data in zip(chunk, datas):
+                    db = dbs.get(p["code"])
+                    if db is not None:
+                        sync._store(db, p["path"], fid, data)
+                    else:
+                        os.makedirs(os.path.dirname(p["path"]), exist_ok=True)
+                        with open(p["path"], "wb") as f:
+                            f.write(data)
+                    p["exists"] = True
+                    got += 1
+                if progress:
+                    Clock.schedule_once(lambda *_, g=got, n=len(todo): progress(g, n))
+        except Exception as exc:  # noqa: BLE001
+            Clock.schedule_once(lambda *_: a.toast(f"No se pudieron bajar las fotos: {exc}"))
+        if done:
+            Clock.schedule_once(lambda *_: done(got, missing))
+
+    threading.Thread(target=work, daemon=True).start()
 
 
 # --------------------------------------------------------------------------- lista
-class BoxThumb(ButtonBehavior, FloatLayout):
+_TEXT: dict = {}
+
+
+def text_texture(text: str, size: float = 11, bold: bool = True):
+    """Textura de un texto corto (se guarda: códigos y cantidades se repiten mucho)."""
+    key = (text, size, bold)
+    tex = _TEXT.get(key)
+    if tex is None:
+        lab = CoreLabel(text=text, font_size=sp(size), bold=bold, color=(1, 1, 1, 1))
+        lab.refresh()
+        tex = _TEXT[key] = lab.texture
+    return tex
+
+
+class BoxThumb(ButtonBehavior, Widget):
+    """Miniatura liviana: todo en el canvas (foto recortada, código, cantidad y variedad)."""
+
     def __init__(self, photo: dict, **kw):
         super().__init__(size_hint_y=None, height=dp(112), **kw)
         self.photo = photo
-        self.img = Image(fit_mode="cover", pos_hint={"x": 0, "y": 0}, size_hint=(1, 1), opacity=0)
-        self.add_widget(self.img)
-        rec = store().get(photo["name"])
-        n = len((rec or {}).get("boxes") or [])
-        top = Label(text=f"[b]{photo['code']}[/b]", markup=True, font_size=sp(11), size_hint=(None, None),
-                    size=(dp(40), dp(18)), pos_hint={"x": .04, "top": .97}, color=(1, 1, 1, 1))
-        self.add_widget(top)
-        if is_marked(rec):
-            self.add_widget(Label(text=f"[b]{n if n else 'vacía'}[/b]", markup=True, font_size=sp(12),
-                                  size_hint=(None, None), size=(dp(44), dp(20)), pos_hint={"right": .97, "top": .97},
-                                  color=(1, 1, 1, 1)))
-        bottom = Label(text=photo["variety"] or "", font_size=sp(11), bold=True, color=(1, 1, 1, 1),
-                       size_hint=(1, None), height=dp(18), pos_hint={"x": .04, "y": .02}, halign="left",
-                       shorten=True, shorten_from="right")
-        bottom.bind(size=lambda w, s: setattr(w, "text_size", s))
-        self.add_widget(bottom)
-        self._marked = is_marked(rec)
-        self.bind(pos=self._bg, size=self._bg)
-
-    def _bg(self, *_):
-        self.canvas.before.clear()
-        with self.canvas.before:
+        self._tex = None
+        with self.canvas:
             Color(*c("#1F2A5C"))
-            Rectangle(pos=self.pos, size=self.size)
-        self.canvas.after.clear()
-        with self.canvas.after:
+            self._bg = Rectangle()
+            self._img_col = Color(1, 1, 1, 0)
+            self._img = Rectangle()
             Color(0, 0, 0, .35)
-            Rectangle(pos=self.pos, size=(self.width, dp(22)))
-            Rectangle(pos=(self.x, self.top - dp(22)), size=(self.width, dp(22)))
-            if self._marked:
-                Color(*c("#7CF2B0"))
-                Line(rectangle=(self.x + 1, self.y + 1, self.width - 2, self.height - 2), width=dp(1.4))
+            self._bar_top = Rectangle()
+            self._bar_bottom = Rectangle()
+            Color(1, 1, 1, 1)
+            self._code = Rectangle()
+            self._count = Rectangle()
+            self._variety = Rectangle()
+            self._cloud = Rectangle()
+            self._mark_col = Color(*c("#7CF2B0", 0))
+            self._mark = Line(width=dp(1.4))
+        self.update_marks()
+        self.bind(pos=self._place, size=self._place)
+
+    def update_marks(self):
+        rec = store().get(self.photo["name"])
+        n = len((rec or {}).get("boxes") or [])
+        marked = is_marked(rec)
+        self._mark_col.a = 1 if marked else 0
+        self._set_text(self._code, self.photo["code"])
+        self._set_text(self._count, (str(n) if n else "vacía") if marked else "")
+        self._set_text(self._variety, (self.photo["variety"] or "")[:22], bold=False)
+        self._set_text(self._cloud, "" if self.photo["exists"] else "En Drive", bold=False, size=12)
+        self._place()
+
+    def _set_text(self, rect, text, bold=True, size=11):
+        tex = text_texture(text, size, bold) if text else None
+        rect.texture = tex
+        rect.size = tex.size if tex else (0, 0)
+
+    def _place(self, *_):
+        x, y, w, h = self.x, self.y, self.width, self.height
+        self._bg.pos, self._bg.size = (x, y), (w, h)
+        self._img.pos, self._img.size = (x, y), (w, h)
+        self._fit_image()
+        bh = dp(22)
+        self._bar_top.pos, self._bar_top.size = (x, y + h - bh), (w, bh)
+        self._bar_bottom.pos, self._bar_bottom.size = (x, y), (w, bh)
+        self._code.pos = (x + dp(6), y + h - bh + (bh - self._code.size[1]) / 2)
+        self._count.pos = (x + w - dp(6) - self._count.size[0], y + h - bh + (bh - self._count.size[1]) / 2)
+        self._variety.pos = (x + dp(6), y + (bh - self._variety.size[1]) / 2)
+        self._cloud.pos = (x + (w - self._cloud.size[0]) / 2, y + (h - self._cloud.size[1]) / 2)
+        self._mark.rectangle = (x + 1, y + 1, w - 2, h - 2)
+
+    def _fit_image(self):
+        """Recorte tipo «cover» (una región de la textura; sin widget Image)."""
+        tex = self._tex
+        if tex is None or not self.width or not self.height:
+            return
+        tw, th = tex.size
+        k = max(self.width / tw, self.height / th)
+        cw, ch = min(tw, self.width / k), min(th, self.height / k)
+        self._img.texture = tex.get_region((tw - cw) / 2, (th - ch) / 2, cw, ch)
 
     def load(self):
         if self.photo["exists"]:
             app().thumb_async(self.photo["path"], 240, self._set)
 
     def _set(self, src):
-        self.img.source = src
-        self.img.opacity = 1
+        from kivy.core.image import Image as CoreImage
+        try:
+            self._tex = CoreImage(src).texture
+        except Exception:  # noqa: BLE001
+            return
+        self._img_col.a = 1
+        self._fit_image()
 
 
-class Panel:
-    """Contenido de la pestaña (se arma dentro de ids.boxes_box del AILabScreen)."""
+KV = """
+#:import c ui.theme.c
+<BoxesScreen>:
+    md_bg_color: c("#0B1630")
+    MDBoxLayout:
+        orientation: "vertical"
+        MindTopBar:
+            title: "IA+ · Cajas"
+            left_action_items: [["arrow-left", lambda x: app.back()]]
+            right_action_items: [["cloud-sync-outline", lambda x: root.sync(quiet=False), "Sincronizar marcas"]]
+        ScrollView:
+            do_scroll_x: False
+            BoxLayout:
+                id: body
+                orientation: "vertical"
+                size_hint_y: None
+                height: self.minimum_height
+                padding: dp(14), dp(8), dp(14), dp(24)
+                spacing: dp(10)
+                BoxLayout:
+                    id: head
+                    orientation: "vertical"
+                    size_hint_y: None
+                    height: self.minimum_height
+                GridLayout:
+                    id: grid
+                    cols: 3
+                    spacing: dp(6)
+                    size_hint_y: None
+                    height: self.minimum_height
+                BoxLayout:
+                    id: foot
+                    orientation: "vertical"
+                    size_hint_y: None
+                    height: self.minimum_height
+"""
+
+
+class BoxesScreen(MDScreen):
+    """IA+: avance, filtros y miniaturas. Abre con lo local y se pone al día en segundo plano."""
     filter = "todo"
     ws = ""               # código del ensayo/predio elegido («» = todos)
     shown = PAGE
 
-    def __init__(self, screen):
-        self.screen = screen
+    def on_pre_enter(self, *_):
+        self.refresh()
+        self.sync()
 
-    def refresh(self, sync: bool = True):
+    def sync(self, quiet: bool = True):
+        sync_now(lambda got: self.refresh() if got else self._update_marks(), quiet=quiet)
+
+    # ------------------------------------------------------------ datos
+    def refresh(self):
+        self.photos = detail_photos(app().all_dbs())
+        self._header()
+        self._grid()
+
+    def _visible(self):
+        st = store()
+        return [p for p in self.photos if (not self.ws or p["code"] == self.ws) and (
+                self.filter == "todo" or (self.filter == "con") == is_marked(st.get(p["name"])))]
+
+    def _header(self):
         from kivy.factory import Factory
-        box = self.screen.ids.boxes_box
-        box.clear_widgets()
         a = app()
-        self.photos = detail_photos(a.all_dbs())
+        head = self.ids.head
+        head.clear_widgets()
         st = store()
         done = [p for p in self.photos if is_marked(st.get(p["name"]))]
         card = Factory.MindCard()
@@ -151,15 +316,16 @@ class Panel:
                                          markup=True))
         bar = Widget(size_hint_y=None, height=dp(6))
         k = min(1.0, len(done) / GOAL)
+        with bar.canvas:
+            Color(1, 1, 1, .1)
+            back = Rectangle()
+            Color(*c("#7CF2B0"))
+            front = Rectangle()
 
-        def draw_bar(*_):
-            bar.canvas.clear()
-            with bar.canvas:
-                Color(1, 1, 1, .1)
-                Rectangle(pos=bar.pos, size=bar.size)
-                Color(*c("#7CF2B0"))
-                Rectangle(pos=bar.pos, size=(bar.width * k, bar.height))
-        bar.bind(pos=draw_bar, size=draw_bar)
+        def place(*_):
+            back.pos, back.size = bar.pos, bar.size
+            front.pos, front.size = bar.pos, (bar.width * k, bar.height)
+        bar.bind(pos=place, size=place)
         card.add_widget(bar)
         tot = st.totals()
         card.add_widget(Factory.MindMuted(
@@ -171,7 +337,6 @@ class Panel:
             b.bind(on_release=lambda _w, key=key: self._filter(key))
             row.add_widget(b)
         card.add_widget(row)
-        # Cuántas fotos de detalle tiene cada ensayo/predio (y cuántas ya están en el teléfono).
         card.add_widget(Factory.MindSection(text="FOTOS DE DETALLE POR ENSAYO O PREDIO"))
         sv = ScrollView(size_hint_y=None, height=dp(44), do_scroll_y=False, bar_width=0)
         chips = BoxLayout(size_hint_x=None, spacing=dp(6), padding=(0, dp(2)))
@@ -192,56 +357,93 @@ class Panel:
             chips.add_widget(b)
         sv.add_widget(chips)
         card.add_widget(sv)
-        missing = sum(1 for p in self.photos if not p["exists"])
+        missing = [p for p in self._visible() if not p["exists"]]
         if missing:
-            card.add_widget(Factory.MindMuted(
-                text=f"{missing} foto(s) aún no están en este teléfono: se bajan al sincronizar (Drive)."))
-        sync_btn = Factory.MindGhost(icon="cloud-sync-outline", text="Sincronizar marcas con el PC")
-        sync_btn.bind(on_release=lambda *_: sync_now(lambda: self.refresh(sync=False), quiet=False))
-        card.add_widget(sync_btn)
-        box.add_widget(card)
-        shown = [p for p in self.photos if (not self.ws or p["code"] == self.ws) and (
-                 self.filter == "todo" or (self.filter == "con") == is_marked(st.get(p["name"])))]
-        self.list = shown
-        grid = GridLayout(cols=3, spacing=dp(6), size_hint_y=None)
-        grid.bind(minimum_height=grid.setter("height"))
-        for i, p in enumerate(shown[:self.shown]):
-            t = BoxThumb(p)
-            t.bind(on_release=lambda _w, i=i: self.open(i))
-            grid.add_widget(t)
-            t.load()
-        box.add_widget(grid)
+            self._dl = Factory.MindGhost(icon="cloud-download-outline",
+                                         text=f"Bajar de Drive {len(missing)} foto(s) de este filtro")
+            self._dl.bind(on_release=lambda *_: self._download(missing))
+            card.add_widget(self._dl)
+        head.add_widget(card)
+
+    def _grid(self):
+        grid, foot = self.ids.grid, self.ids.foot
+        ev = getattr(self, "_chunk_ev", None)
+        if ev:
+            ev.cancel()
+        grid.clear_widgets()
+        foot.clear_widgets()
+        self.list = shown = self._visible()
+        self._thumbs = []
+        todo = list(enumerate(shown[:self.shown]))
+
+        def add_chunk(*_):
+            for i, p in todo[:CHUNK]:
+                t = BoxThumb(p)
+                t.bind(on_release=lambda _w, i=i: self.open(i))
+                grid.add_widget(t)
+                self._thumbs.append(t)
+                t.load()
+            del todo[:CHUNK]
+            self._chunk_ev = Clock.schedule_once(add_chunk, 0) if todo else None
+        add_chunk()
+        from kivy.factory import Factory
         if not shown:
-            box.add_widget(Factory.MindMuted(text="No hay fotos de detalle en este filtro." if self.photos
-                                             else "Aún no hay fotos de detalle en los ensayos y predios."))
+            foot.add_widget(Factory.MindMuted(text="No hay fotos de detalle en este filtro." if self.photos
+                                              else "Aún no hay fotos de detalle en los ensayos y predios."))
         elif len(shown) > self.shown:
             more = Factory.MindGhost(icon="chevron-down", text=f"Ver más ({len(shown) - self.shown})")
             more.bind(on_release=lambda *_: self._more())
-            box.add_widget(more)
-        if sync:
-            sync_now(lambda: self.refresh(sync=False))
+            foot.add_widget(more)
 
+    def _update_marks(self):
+        """Tras guardar o sincronizar sin novedades: solo los bordes y el avance."""
+        for t in getattr(self, "_thumbs", []):
+            t.update_marks()
+        self._header()
+
+    # ------------------------------------------------------------ acciones
     def _filter(self, key):
         self.filter, self.shown = key, PAGE
-        self.refresh(sync=False)
+        self._header()
+        self._grid()
 
     def _ws(self, code):
         self.ws, self.shown = code, PAGE
-        self.refresh(sync=False)
+        self._header()
+        self._grid()
 
     def _more(self):
         self.shown += PAGE
-        self.refresh(sync=False)
+        self._grid()
+
+    def _download(self, items):
+        dl = getattr(self, "_dl", None)
+        if dl is not None:
+            dl.disabled = True
+            dl.text = "Bajando fotos de Drive…"
+
+        def progress(got, total):
+            if dl is not None:
+                dl.text = f"Bajando fotos de Drive… {got} de {total}"
+
+        def done(got, missing):
+            app().toast(f"{got} foto(s) bajadas" + (f" · {missing} aún no están en Drive" if missing else ""))
+            self.refresh()
+        fetch_photos(items, progress, done)
 
     def open(self, i):
-        BoxEditor(self.list, i, on_close=lambda: (self.refresh(sync=False), sync_now())).open()
+        BoxEditor(self.list, i, on_close=lambda: (self._update_marks(), sync_now())).open()
 
 
-def build(screen):
-    panel = getattr(screen, "_boxes_panel", None)
-    if panel is None:
-        panel = screen._boxes_panel = Panel(screen)
-    panel.refresh()
+Builder.load_string(KV)
+
+
+def open_screen():
+    """Botón «IA+» del Entrenador de IA."""
+    a = app()
+    if not a.sm.has_screen("boxes"):
+        a.sm.add_widget(BoxesScreen(name="boxes"))
+    a.go("boxes")
 
 
 # --------------------------------------------------------------------------- editor
@@ -594,7 +796,17 @@ class BoxEditor(ModalView):
         if not p["exists"] or not os.path.exists(p["path"]):
             self.canvas_w.tex = None
             self.canvas_w.redraw()
-            app().toast("Esta foto aún no está en el teléfono (se baja al sincronizar).")
+            if not drive_ready():
+                app().toast("Esta foto aún no está en el teléfono: conecte Google Drive para bajarla.")
+                return
+            app().toast("Bajando la foto de Drive…")
+
+            def done(got, _missing):
+                if got and self.i == i and self.photos[i] is p:
+                    self.show(i)
+                elif not got:
+                    app().toast("La foto aún no está en Drive (el otro equipo no la ha subido).")
+            fetch_photos([p], done=done)
             return
         try:
             tex, size = load_texture(p["path"])
