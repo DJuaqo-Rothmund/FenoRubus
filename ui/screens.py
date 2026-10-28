@@ -1348,6 +1348,9 @@ class WorkspaceBanner(GlassButton):
     text = StringProperty()
     icon = StringProperty("flask-outline")
 
+    def open_measures(self):
+        open_measures_menu()
+
 
 class WorkspaceRow(GlassButton):
     title = StringProperty()
@@ -1742,6 +1745,9 @@ def season_dialog(on_done=None):
 
 
 class SamplingTab(MDBoxLayout):
+    extra = BooleanProperty(False)        # se ve el muestreo extra («Semana 44.5»)
+    extra_text = StringProperty("+ Muestreo extra")
+
     def pick_season(self):
         season_dialog(self.refresh)
 
@@ -1750,9 +1756,12 @@ class SamplingTab(MDBoxLayout):
         week = a.week
         self.ids.season_chip.text = ph.season_title(a.season)
         start = _dt.date.fromisoformat(week["start_date"])
-        end = start + _dt.timedelta(days=6)
-        self.ids.week_kicker.text = ph.week_title(week).upper()
-        self.ids.week_title.text = week["label"]
+        end = a.db.week_end(week)
+        self.extra = ph.is_extra(week)
+        self.extra_text = ("Muestreo extra…" if self.extra
+                           else ("Muestreo extra ›" if a.db.extra_week(week) else "+ Muestreo extra"))
+        self.ids.week_kicker.text = ph.week_title(week).upper() + (" · MUESTREO EXTRA" if self.extra else "")
+        self.ids.week_title.text = ph.week_label(start, extra=self.extra)
         self.ids.week_range.text = (f"{start.day} {ph.MESES[start.month - 1][:3]} – "
                                     f"{end.day} {ph.MESES[end.month - 1][:3]} {end.year}")
         rows = a.db.week_overview(week["id"])
@@ -1824,9 +1833,6 @@ class SamplingTab(MDBoxLayout):
             Clock.schedule_once(lambda *_: celebrate.week_completed(
                 str(ph.iso_week(_dt.date.fromisoformat(week["start_date"]))[0])), .25)
         state[key] = done
-        n_meas = sum(1 for m in a.db.list_measures(week["id"]) if m["n"])
-        self.ids.measures_btn.text = ("Mediciones de la semana" if not n_meas
-                                      else f"Mediciones de la semana · {n_meas} con datos")
 
     def set_skipped(self, active: bool):
         """Marca/desmarca la semana como «no muestreada»: se excluye de los informes de
@@ -1846,16 +1852,81 @@ class SamplingTab(MDBoxLayout):
         open_measures_menu()
 
     def shift_week(self, delta: int):
-        """Semana anterior / siguiente sin tope (2020-2050): al cruzar el 1 de abril pasa
-        sola a la temporada que corresponde."""
+        """Semana anterior / siguiente sin tope (2020-2050), pasando por el muestreo extra
+        si lo hay (44 → 44.5 → 45): al cruzar el 1 de abril pasa sola a la temporada que
+        corresponde."""
         a = app()
-        start = _dt.date.fromisoformat(a.week["start_date"]) + _dt.timedelta(days=7 * delta)
+        nxt = a.db.next_week(a.week, delta)
+        start = _dt.date.fromisoformat(nxt["start_date"])
         if start + _dt.timedelta(days=6) < ph.FIRST_BROWSE or start > ph.LAST_BROWSE:
             a.toast("Las semanas van de 2020 a 2050.")
             return
-        a.week = a.db.week_for_date(start)
+        a.week = nxt
         a.season = a.week["season"]
         self.refresh()
+
+    # ------------------------------------------------------- muestreo extra
+    def extra_action(self):
+        a = app()
+        if self.extra:
+            week = a.week
+            pick_dialog(f"Muestreo extra · {ph.format_date_es(_dt.date.fromisoformat(week['start_date']))}", [
+                ("Cambiar la fecha", "Otro día de la misma semana", lambda: self.pick_extra_date(week)),
+                (f"Ir a la {ph.week_title(a.db.regular_week(week)).split(',')[0]}", "El primer muestreo de la semana",
+                 lambda: self._go(a.db.regular_week(week))),
+                ("Quitar el muestreo extra", "Se borra lo registrado en él", self.delete_extra, theme.BERRY),
+            ])
+            return
+        ex = a.db.extra_week(a.week)
+        if ex:
+            self._go(ex)
+        else:
+            self.pick_extra_date(a.week)
+
+    def _go(self, week):
+        a = app()
+        a.week = week
+        a.season = week["season"]
+        self.refresh()
+
+    def pick_extra_date(self, week):
+        """Fecha del segundo muestreo: un día de la misma semana, después del primero."""
+        a = app()
+        from android_bridge import pick_date
+        base = a.db.regular_week(week)
+        first = _dt.date.fromisoformat(base["start_date"]) + _dt.timedelta(days=1)
+        last = first + _dt.timedelta(days=5)
+        today = _dt.date.today()
+        cur = _dt.date.fromisoformat(week["start_date"]) if ph.is_extra(week) else \
+            (today if first <= today <= last else first)
+
+        def done(day):
+            try:
+                ex = a.db.add_extra_week(base, day)
+            except ValueError as exc:
+                a.toast(str(exc))
+                return
+            a.toast(f"{ph.week_title(ex)}: muestreo extra del {ph.format_date_es(day, False)}")
+            self._go(ex)
+        pick_date(cur, done, f"Fecha del muestreo extra ({ph.week_title(base).split(',')[0]})",
+                  min_day=first, max_day=last)
+
+    def delete_extra(self):
+        a = app()
+        week = a.week
+        n = a.db.query_one("SELECT COUNT(*) AS n FROM observations WHERE week_id=? AND "
+                           "(bbch_code IS NOT NULL OR EXISTS (SELECT 1 FROM photos p WHERE p.observation_id=observations.id))",
+                           (week["id"],))["n"]
+
+        def go():
+            base = a.db.regular_week(week)
+            a.db.delete_extra_week(week)
+            a.toast(f"Muestreo extra quitado ({ph.week_title(week).split(',')[0]})")
+            self._go(base)
+        confirm("Quitar el muestreo extra",
+                (f"Tiene {n} registro(s) con estado o fotos: se borran junto con el muestreo extra. "
+                 if n else "") + "¿Quitar el muestreo extra de esta semana?",
+                [("Quitar", go)])
 
     def pick_week_date(self):
         """Tocar «Semana del …»: calendario; cualquier día lleva a la semana que lo contiene
@@ -2923,7 +2994,7 @@ class ObservationScreen(MDScreen):
             def work():
                 ids, error = [], None
                 try:
-                    dest_dir = data_subdir("photos", f"T{week['season']}", f"S{week['week_number']:02d}")
+                    dest_dir = data_subdir("photos", f"T{week['season']}", ph.week_dir(week))
                     for tmp in paths:
                         path = store_photo(tmp, dest_dir, base, exact=True)
                         ids.append(a.db.add_attachment(
@@ -2995,7 +3066,7 @@ class ObservationScreen(MDScreen):
             def work():  # normalizar y guardar fuera del hilo de la interfaz
                 error = None
                 try:
-                    dest_dir = data_subdir("photos", f"T{season}", f"S{n:02d}")
+                    dest_dir = data_subdir("photos", f"T{season}", ph.week_dir(self.week))
                     base = ph.photo_basename(self.variety, self.week["start_date"], kind, trial=a.db.code)
                     for tmp in paths:
                         if self.obs["latitude"] is None:

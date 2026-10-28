@@ -298,7 +298,13 @@ def _upsert_week(db, ch, data, week_for_date) -> bool:
     if row is None:
         if week_for_date is None:
             return False
-        row = week_for_date(_dt.date.fromisoformat(ch["uid"][:10]))
+        day = _dt.date.fromisoformat(ch["uid"][:10])
+        if float(data.get("week_number") or 0) % 1 and hasattr(db, "add_extra_week"):
+            # Muestreo extra («Semana 44.5»): se crea como extra de la semana de su fecha
+            # (si aquí ya había uno con otra fecha, se le pone la de allá).
+            row = db.add_extra_week(week_for_date(day), day)
+        else:
+            row = week_for_date(day)
     db.execute("UPDATE sampling_weeks SET skipped=?, uid=? WHERE id=?",
                (data.get("skipped") or 0, ch["uid"], row["id"]))
     return True

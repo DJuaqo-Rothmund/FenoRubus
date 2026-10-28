@@ -117,9 +117,10 @@ def allow_rotation(on: bool) -> None:
 _date_listener = None     # referencia viva mientras el diálogo de fecha está abierto
 
 
-def pick_date(initial, on_pick, title: str = "") -> None:
+def pick_date(initial, on_pick, title: str = "", min_day=None, max_day=None) -> None:
     """Calendario para elegir un día: en Android, el del sistema (DatePickerDialog); en el
-    computador, el de KivyMD. on_pick(datetime.date) se llama en el hilo de la interfaz."""
+    computador, el de KivyMD. on_pick(datetime.date) se llama en el hilo de la interfaz.
+    min_day/max_day: días permitidos (en Android los demás no se pueden tocar)."""
     import datetime as _dt
     from kivy.clock import Clock
     if IS_ANDROID:
@@ -146,6 +147,11 @@ def pick_date(initial, on_pick, title: str = "") -> None:
                     activity, _date_listener, initial.year, initial.month - 1, initial.day)
                 if title:
                     dlg.setTitle(title)
+                import calendar
+                for day, setter in ((min_day, "setMinDate"), (max_day, "setMaxDate")):
+                    if day is not None:
+                        ms = calendar.timegm(day.timetuple()) * 1000 + 12 * 3600 * 1000
+                        getattr(dlg.getDatePicker(), setter)(ms)
                 dlg.show()
             _open()
             return
@@ -153,9 +159,10 @@ def pick_date(initial, on_pick, title: str = "") -> None:
             print("pick_date nativo:", exc)
     from kivymd.uix.pickers import MDDatePicker
     from ui import theme
+    kw = {"min_date": min_day, "max_date": max_day} if min_day and max_day else {}
     picker = MDDatePicker(year=initial.year, month=initial.month, day=initial.day,
                           title=title.upper() if title else "ELIJA UN DÍA",
-                          primary_color=theme.c(theme.LEAF_DARK), selector_color=theme.c(theme.LEAF))
+                          primary_color=theme.c(theme.LEAF_DARK), selector_color=theme.c(theme.LEAF), **kw)
     picker.bind(on_save=lambda _w, value, _r: on_pick(value))
     picker.open()
 

@@ -4,7 +4,7 @@ import * as C from "./core.js";
 import * as ST from "./stats.js";
 
 const esc = (t) => String(t ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
-const wkShort = (w) => `S${C.isoWeek(C.parseDate(w))[0]}`;
+const wkShort = (w) => C.weekShort(w);
 
 export function makeReports(ctx) {
   // ctx: { state, ws, bbch, photoUrl(path) -> Promise<url|null>, progress(text) }

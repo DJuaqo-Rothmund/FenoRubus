@@ -1082,10 +1082,19 @@ class Database:
     def set_season_start(self, season: int, start: _dt.date) -> None:
         """Redefine la Semana 1. Re-etiqueta las semanas ya creadas."""
         self.set_setting(f"season_start:{season}", start.isoformat())
-        for w in self.query("SELECT * FROM sampling_weeks WHERE season=?", (season,)):
-            ws = ph.week_start(start, w["week_number"])
+        weeks = self.query("SELECT * FROM sampling_weeks WHERE season=?", (season,))
+        old_start = {w["week_number"]: _dt.date.fromisoformat(w["start_date"][:10]) for w in weeks}
+        for w in weeks:
+            n = float(w["week_number"])
+            ws = ph.week_start(start, int(n))
+            if n % 1:     # muestreo extra: el mismo día de la semana, dentro de su semana
+                base = old_start.get(int(n))
+                if base is not None:
+                    ws += min(_dt.timedelta(days=6), max(_dt.timedelta(days=1), old_start[w["week_number"]] - base))
+                else:
+                    ws += _dt.timedelta(days=3)
             self.execute("UPDATE sampling_weeks SET start_date=?, label=? WHERE id=?",
-                         (ws.isoformat(), ph.week_label(ws), w["id"]))
+                         (ws.isoformat(), ph.week_label(ws, extra=bool(n % 1)), w["id"]))
         self.log("update", "season_start", season, start.isoformat())
 
     # ---------------------------------------------------------------- weeks
@@ -1114,8 +1123,9 @@ class Database:
                     fixed += self._dedupe_weeks(s)
                     start = self.season_start(s)
                     rows = self.query("SELECT id, week_number, start_date FROM sampling_weeks WHERE season=?", (s,))
+                    # El muestreo extra (n + 0,5) va con la semana que contiene su fecha.
                     want = {r["id"]: ph.week_number_for(_dt.date.fromisoformat(r["start_date"][:10]), start)
-                            for r in rows}
+                            + (.5 if float(r["week_number"]) % 1 else 0) for r in rows}
                     wrong = [r for r in rows if want[r["id"]] != r["week_number"]]
                     if not wrong:
                         continue
@@ -1154,6 +1164,73 @@ class Database:
                 self._merge_week(r["id"], keep)
                 n += 1
         return n
+
+    # ------------------------------------------------- muestreo extra («Semana 44.5»)
+    def extra_week(self, week: dict) -> dict | None:
+        """Muestreo extra de la semana `week` (None si no tiene)."""
+        n = float(week["week_number"])
+        if n % 1:
+            return week
+        return self.query_one("SELECT * FROM sampling_weeks WHERE season=? AND week_number=?",
+                              (week["season"], n + .5))
+
+    def regular_week(self, week: dict) -> dict:
+        """La semana normal de un muestreo extra (o la misma semana)."""
+        n = float(week["week_number"])
+        if not n % 1:
+            return week
+        return self.ensure_week(week["season"], int(n))
+
+    def add_extra_week(self, week: dict, day: _dt.date) -> dict:
+        """Segundo muestreo de la semana, el día `day` (dentro de la semana, después de su
+        primer día). Uno por semana: si ya existe, le cambia la fecha. Viaja a los otros
+        equipos como cualquier registro."""
+        base = self.regular_week(week)
+        start = _dt.date.fromisoformat(base["start_date"][:10])
+        if not start < day <= start + _dt.timedelta(days=6):
+            raise ValueError("La fecha del muestreo extra debe caer dentro de la semana, después de su primer día.")
+        n = float(base["week_number"]) + .5
+        old = self.extra_week(base)
+        if old:
+            # La fecha es su identidad entre equipos (uid): cambia junto con ella.
+            self.execute("UPDATE sampling_weeks SET start_date=?, label=?, uid=? WHERE id=?",
+                         (day.isoformat(), ph.week_label(day, extra=True), day.isoformat(), old["id"]))
+            self.log("update", "extra_week", old["id"], day.isoformat())
+            return self.get_week(old["id"])
+        self.execute("INSERT INTO sampling_weeks(season, week_number, start_date, label) VALUES (?,?,?,?)",
+                     (base["season"], n, day.isoformat(), ph.week_label(day, extra=True)))
+        row = self.query_one("SELECT * FROM sampling_weeks WHERE season=? AND week_number=?", (base["season"], n))
+        self.log("create", "extra_week", row["id"], day.isoformat())
+        return row
+
+    def delete_extra_week(self, week: dict) -> None:
+        """Quita el muestreo extra con todo lo registrado en él."""
+        if not ph.is_extra(week):
+            raise ValueError("Solo se puede quitar un muestreo extra.")
+        self.execute("DELETE FROM variety_attachments WHERE week_id=?", (week["id"],))
+        self.execute("DELETE FROM sampling_weeks WHERE id=?", (week["id"],))
+        self.log("delete", "extra_week", week["id"], week["start_date"])
+
+    def week_end(self, week: dict) -> _dt.date:
+        """Último día de la semana (también del muestreo extra: el de su semana)."""
+        return _dt.date.fromisoformat(self.regular_week(week)["start_date"][:10]) + _dt.timedelta(days=6)
+
+    def next_week(self, week: dict, delta: int) -> dict:
+        """Semana siguiente (+1) o anterior (-1), pasando por el muestreo extra si lo hay:
+        44 → 44.5 → 45 y al revés."""
+        base = self.regular_week(week)
+        start = _dt.date.fromisoformat(base["start_date"][:10])
+        extra = ph.is_extra(week)
+        if delta > 0:
+            if not extra:
+                ex = self.extra_week(base)
+                if ex:
+                    return ex
+            return self.week_for_date(start + _dt.timedelta(days=7))
+        if extra:
+            return base
+        prev = self.week_for_date(start - _dt.timedelta(days=7))
+        return self.extra_week(prev) or prev
 
     def _week_has_data(self, week_id: int) -> bool:
         return any(self.conn.execute(f"SELECT 1 FROM {t} WHERE week_id=? LIMIT 1", (week_id,)).fetchone()
