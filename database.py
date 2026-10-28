@@ -298,6 +298,7 @@ class Database:
         self.conn.execute("PRAGMA temp_store = MEMORY")
         self.init_schema()
         self._migrate_seasons_apr()
+        self.renumber_weeks()              # repara semanas repetidas o desalineadas (ver ahí)
         with self._lock:
             import sync
             sync.install(self.conn)        # uid común + registro de cambios (celular ↔ PC)
@@ -1088,6 +1089,83 @@ class Database:
         self.log("update", "season_start", season, start.isoformat())
 
     # ---------------------------------------------------------------- weeks
+    WEEK_TABLES = ("observations", "measure_entries", "variety_attachments")
+
+    def renumber_weeks(self, season: int | None = None) -> int:
+        """Pone a cada semana el número que le toca por su fecha de inicio y la Semana 1
+        vigente de su temporada. Hace falta cuando la Semana 1 llega de otro equipo (la
+        sincronización trae el ajuste, pero las semanas ya creadas aquí seguían numeradas
+        desde la fecha anterior: al recorrerlas se saltaba, p. ej., de la 36 a la 14).
+        Si dos semanas quedan con el mismo número, sus registros se juntan. No viaja a los
+        otros equipos. Devuelve cuántas semanas cambió."""
+        seasons = [season] if season is not None else \
+            [r["season"] for r in self.query("SELECT DISTINCT season FROM sampling_weeks")]
+        fixed = 0
+        with self._lock:
+            has_state = self.conn.execute(
+                "SELECT 1 FROM sqlite_master WHERE type='table' AND name='sync_state'").fetchone()
+            row = self.conn.execute("SELECT value FROM sync_state WHERE key='applying'").fetchone() \
+                if has_state else None
+            before = row[0] if row else None
+            if before is not None:
+                self.conn.execute("UPDATE sync_state SET value='1' WHERE key='applying'")
+            try:
+                for s in seasons:
+                    fixed += self._dedupe_weeks(s)
+                    start = self.season_start(s)
+                    rows = self.query("SELECT id, week_number, start_date FROM sampling_weeks WHERE season=?", (s,))
+                    want = {r["id"]: ph.week_number_for(_dt.date.fromisoformat(r["start_date"][:10]), start)
+                            for r in rows}
+                    wrong = [r for r in rows if want[r["id"]] != r["week_number"]]
+                    if not wrong:
+                        continue
+                    # Fuera del camino primero (número único por temporada), luego a su lugar;
+                    # las semanas con registros eligen número antes que las vacías.
+                    self.conn.execute(f"UPDATE sampling_weeks SET week_number = -1000000 - id "
+                                      f"WHERE id IN ({','.join(str(r['id']) for r in wrong)})")
+                    taken = {want[r["id"]]: r["id"] for r in rows if r not in wrong}
+                    for r in sorted(wrong, key=lambda r: not self._week_has_data(r["id"])):
+                        n = want[r["id"]]
+                        if n in taken:
+                            self._merge_week(r["id"], taken[n])
+                        else:
+                            self.conn.execute("UPDATE sampling_weeks SET week_number=? WHERE id=?", (n, r["id"]))
+                            taken[n] = r["id"]
+                        fixed += 1
+            finally:
+                if before is not None:
+                    self.conn.execute("UPDATE sync_state SET value=? WHERE key='applying'", (before,))
+                self.conn.commit()
+        return fixed
+
+    def _dedupe_weeks(self, season: int) -> int:
+        """Semanas repetidas (misma fecha con dos números: quedaban así al llegar otra
+        Semana 1, y la siguiente apertura de la app se caía): se juntan en una. Se queda la
+        que ya viaja (tiene uid) o la que tiene registros."""
+        dup = self.query("SELECT start_date FROM sampling_weeks WHERE season=? "
+                         "GROUP BY start_date HAVING COUNT(*) > 1", (season,))
+        n = 0
+        for d in dup:
+            rows = self.query("SELECT id, uid FROM sampling_weeks WHERE season=? AND start_date=?",
+                              (season, d["start_date"]))
+            rows.sort(key=lambda r: (r["uid"] is None, not self._week_has_data(r["id"]), r["id"]))
+            keep = rows[0]["id"]
+            for r in rows[1:]:
+                self._merge_week(r["id"], keep)
+                n += 1
+        return n
+
+    def _week_has_data(self, week_id: int) -> bool:
+        return any(self.conn.execute(f"SELECT 1 FROM {t} WHERE week_id=? LIMIT 1", (week_id,)).fetchone()
+                   for t in self.WEEK_TABLES)
+
+    def _merge_week(self, src: int, dst: int) -> None:
+        """Registros de la semana `src` a `dst` (lo que ya está en `dst` se conserva) y se
+        borra `src`."""
+        for t in self.WEEK_TABLES:
+            self.conn.execute(f"UPDATE OR IGNORE {t} SET week_id=? WHERE week_id=?", (dst, src))
+        self.conn.execute("DELETE FROM sampling_weeks WHERE id=?", (src,))
+
     def ensure_week(self, season: int, number: int) -> dict:
         """Semana n.º `number` de la temporada (se crea si no existe). Puede ser 0 o negativa:
         semanas anteriores a la semana de referencia (las flechas recorren 2020-2050)."""
@@ -1096,6 +1174,14 @@ class Database:
         if row:
             return row
         start = ph.week_start(self.season_start(season), number)
+        if self.query_one("SELECT 1 FROM sampling_weeks WHERE season=? AND start_date=?",
+                          (season, start.isoformat())):
+            # Ya existe con otro número (cambió la Semana 1): se renumera, no se duplica.
+            self.renumber_weeks(season)
+            row = self.query_one(
+                "SELECT * FROM sampling_weeks WHERE season=? AND week_number=?", (season, number))
+            if row:
+                return row
         self.execute(
             "INSERT OR IGNORE INTO sampling_weeks(season, week_number, start_date, label) "
             "VALUES (?,?,?,?)", (season, number, start.isoformat(), ph.week_label(start)))

@@ -2167,3 +2167,37 @@ def test_auto_created_weeks_do_not_travel(tmp_path):
     pending = {d["uid"] for d in db.query("SELECT uid FROM sync_dirty WHERE entity='sampling_weeks'")}
     assert w["start_date"] in pending
     _ = sync
+
+
+def test_week_one_from_other_device_renumbers_weeks(tmp_path):
+    """La Semana 1 llega por la sincronización después de que este equipo creó sus semanas
+    con la fecha por defecto: al recorrer no se salta (antes: de la 36 a la 14) ni quedan
+    semanas repetidas que impidan abrir la base."""
+    import sync
+    src = Database(str(tmp_path / "pc" / "a.sqlite3"))
+    src.set_season_start(2026, dt.date(2026, 9, 7))
+    v = src.add_variety("Variedad de prueba semana 1")
+    wk = src.week_for_date(dt.date(2026, 10, 12))
+    obs = src.get_or_create_observation(v, wk["id"])
+    src.update_observation(obs["id"], bbch_code=61)
+    bundle = sync.export_changes(src, str(tmp_path / "pc"))
+
+    dst_dir = str(tmp_path / "cel")
+    dst = Database(os.path.join(dst_dir, "a.sqlite3"))
+    dst.current_week(dt.date(2026, 10, 28))           # semanas desde la fecha por defecto
+    sync.apply_changes(dst, bundle, dst_dir, week_for_date=dst.week_for_date)
+
+    wk = dst.week_for_date(dt.date(2026, 6, 1))
+    seen = []
+    for _ in range(40):
+        seen.append((wk["week_number"], wk["start_date"]))
+        wk = dst.week_for_date(dt.date.fromisoformat(wk["start_date"]) + dt.timedelta(days=7))
+    nums = [n for n, _ in seen]
+    assert nums == list(range(nums[0], nums[0] + 40))
+    assert all(dt.date.fromisoformat(d) == ph.week_start(dt.date(2026, 9, 7), n) for n, d in seen)
+    assert not dst.query("SELECT start_date FROM sampling_weeks GROUP BY season, start_date HAVING COUNT(*) > 1")
+    got = dst.week_for_date(dt.date(2026, 10, 14))
+    assert got["week_number"] == 6
+    assert dst.query_one("SELECT bbch_code FROM observations WHERE week_id=?", (got["id"],))["bbch_code"] == 61
+    dst.close()
+    Database(os.path.join(dst_dir, "a.sqlite3")).close()   # se vuelve a abrir sin errores
