@@ -77,6 +77,7 @@ from ui.screens import (AILabScreen, HomeScreen, MeasureScreen, ObservationScree
                         VarietyScreen,
                         WorkspacesScreen, form_dialog)
 from workspaces import Workspaces  # noqa: E402
+from crashguard import PAUSED, step as _step  # noqa: E402
 
 MIME = {".html": "text/html", ".zip": "application/zip", ".sqlite3": "application/x-sqlite3",
         ".xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
@@ -89,7 +90,9 @@ class FenoRubusApp(MDApp):
     # ------------------------------------------------------------ build
     def build(self):
         import crashguard
+        crashguard.begin()     # rastro del arranque: si la vez anterior se cerró, modo seguro
         crashguard.install(notify=lambda text: self.toast(text))
+        self.safe_mode = crashguard.previous_failure() is not None
         import native_input
         native_input.install()   # Android: campos de texto con el teclado real del teléfono
         theme.apply(self.theme_cls)
@@ -101,6 +104,7 @@ class FenoRubusApp(MDApp):
         self.workspaces = Workspaces(get_data_dir())
         self._dbs: dict = {}
         self.workspace = self.workspaces.last()
+        crashguard.step(f"base {self.workspace.get('code')}")
         self.db = self.open_db(self.workspace)
         self.reminders = ReminderManager(self.db)
         self.media = create_media(data_subdir("tmp"), self._desktop_file_chooser)
@@ -110,6 +114,7 @@ class FenoRubusApp(MDApp):
         self.workers = ThreadPoolExecutor(max_workers=2)  # miniaturas y fotos
         self._file_manager = None
 
+        crashguard.step("interfaz")
         Builder.load_file(resource_path("ui", "layout.kv"))
         # Fundido corto: con pantallas translúcidas un deslizamiento superpondría contenidos.
         # Cambio de pantalla instantáneo: un fundido dibuja las DOS pantallas en texturas
@@ -179,9 +184,12 @@ class FenoRubusApp(MDApp):
                 # está listo: «No address associated with hostname»): se reintenta enseguida.
                 for wait in (4, 12, 30, None):
                     try:
+                        _step("sincroniza")
                         res = self.sync.run(manual=manual)
                         msg = summary(res)
+                        _step("cuaderno → PDF")
                         self._export_notebooks()
+                        _step("sincronizado")
                         break
                     except Offline as exc:
                         if wait is None:
@@ -470,6 +478,7 @@ class FenoRubusApp(MDApp):
         late = time.monotonic() - self._t_start > self.SPLASH_MAX_S
         if self._preload and not late:
             step = self._preload.pop(0)
+            _step(f"precarga {len(self._preload)}")
             try:
                 step()
             except Exception as exc:  # noqa: BLE001 (la precarga nunca debe cerrar la app)
@@ -497,6 +506,7 @@ class FenoRubusApp(MDApp):
         Clock.schedule_once(self._leave_splash, self.SPLASH_TAIL_S)
 
     def _leave_splash(self, *_):
+        _step("inicio")
         self.sm.get_screen("splash").ids.logo.stop()
         self.sm.transition = FadeTransition(duration=0.25)   # solo logo -> inicio
         self.start   # la pantalla de inicio es siempre lo primero al abrir la app
@@ -504,9 +514,17 @@ class FenoRubusApp(MDApp):
         Clock.schedule_once(lambda *_: setattr(self.sm, "transition", NoTransition()), 0.3)
         # Libera la pantalla de inicio (y su textura) cuando termina el fundido.
         Clock.schedule_once(lambda *_: self.sm.remove_widget(self.sm.get_screen("splash")), 0.6)
+        _step("permisos")
         request_runtime_permissions()
+        _step("recordatorios")
         self.reminders.apply()
         Clock.schedule_interval(lambda *_: self._check_reminder(), 60)
+        if self.safe_mode:
+            # La apertura anterior se cerró a medias: esta vez nada automático en segundo
+            # plano (Drive, sincronización, renombres) y se muestra dónde se quedó.
+            Clock.schedule_once(lambda *_: self._show_safe_mode(), 1.5)
+            Clock.schedule_once(lambda *_: self._finish_start(), 20)
+            return
         # Nombres de foto «ddmmaaaa-…» (hasta la 1.1.30) -> «aaaammdd-…»: archivos de la app,
         # galería del teléfono y (al respaldar) Google Drive.
         Clock.schedule_once(lambda *_: self.workers.submit(self._rename_photos), 4)
@@ -517,8 +535,28 @@ class FenoRubusApp(MDApp):
         # Sincronización con el PC: al abrir y luego cada 10 minutos.
         Clock.schedule_once(lambda *_: self.run_sync(), 10)
         Clock.schedule_interval(lambda *_: self.run_sync(), 600)
+        # La apertura termina cuando acabó la primera sincronización (o a los 45 s).
+        Clock.schedule_once(lambda *_: self._finish_start(), 45)
+
+    def _finish_start(self):
+        import crashguard
+        if not getattr(self, "_syncing", False):
+            crashguard.finish()
+        else:
+            Clock.schedule_once(lambda *_: self._finish_start(), 15)
+
+    def _show_safe_mode(self):
+        import crashguard
+        from ui.screens import text_dialog
+        steps = crashguard.previous_failure() or []
+        text_dialog("La app se cerró al abrirla la vez anterior",
+                    ["Esta vez abrió en modo seguro: sin sincronizar ni subir a Drive hasta la "
+                     "próxima apertura. Envíe una captura de esta pantalla para encontrar la causa.",
+                     "Últimos pasos:"] + steps[-8:]
+                    + ["Detalle: Ajustes › Registro de errores."], small=True)
 
     def _rename_photos(self):
+        _step("renombra fotos")
         try:
             from photo_rename import migrate_local
             res = migrate_local(self.db)
@@ -545,7 +583,12 @@ class FenoRubusApp(MDApp):
         if self.db.get_setting("drive_enabled", False):
             self.drive.flush_async()   # renombra también las ya subidas a Drive
 
+    def on_pause(self):
+        _step(PAUSED)    # en segundo plano: no cuenta como cierre al abrir
+        return True
+
     def on_resume(self):
+        _step("vuelve")
         self.week = self.db.current_week() if self.week is None else self.week
         if "drive" in self.__dict__:
             self.drive.flush_async()
@@ -599,6 +642,13 @@ class FenoRubusApp(MDApp):
             if self.sm.current not in ("home", "start"):
                 self.back()
                 return True
+            if platform == "android":
+                # En el inicio: la app pasa a segundo plano, como cualquier app de Android.
+                # Cerrarla del todo dejaba el proceso a medio terminar y la siguiente
+                # apertura podía cerrarse sola.
+                from android_bridge import to_background
+                if to_background():
+                    return True
         return False
 
     def refresh_home(self):
@@ -786,6 +836,7 @@ class FenoRubusApp(MDApp):
             self.toast(f"No se pudo compartir: {exc}")
 
     def _drive_daily(self):
+        _step("respaldo diario")
         try:
             if self.drive.backup_database() is None:
                 self.drive.flush_async()

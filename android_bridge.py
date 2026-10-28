@@ -114,6 +114,17 @@ def allow_rotation(on: bool) -> None:
         pass
 
 
+def to_background() -> bool:
+    """Android: deja la app en segundo plano (como el botón de inicio) en vez de cerrarla."""
+    if not IS_ANDROID:
+        return False
+    try:
+        from jnius import autoclass  # type: ignore
+        return bool(autoclass("org.kivy.android.PythonActivity").mActivity.moveTaskToBack(True))
+    except Exception:  # noqa: BLE001
+        return False
+
+
 def package_name() -> str:
     """Paquete instalado: org.rubus.fenorubus (estable) u org.rubus.fenorubuslab (Lab)."""
     if not IS_ANDROID:
