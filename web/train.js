@@ -23,7 +23,8 @@ const GOAL = 300;
 const $ = (id) => document.getElementById(id);
 const base = (p) => (p || "").split(/[\\/]/).pop();
 
-let X = null;              // {S, photoUrl, loadLabels(), saveLabels(data), allStates(progress), email()}
+let X = null;              // {S, photoUrl, loadLabels(), saveLabels(data), allStates(progress), extraList(),
+                           //  extraUrl(p), extraUpload(files, progress, reduce), email()}
 let data = null;           // {version, classes, photos: {nombre: {w, h, boxes, empty, by, ts}}}
 let photos = null;         // fotos de detalle de todos los ensayos (se leen al abrir)
 let filter = "todo";       // «todo» | «sin» | «con»
@@ -48,6 +49,29 @@ export function init(ctx) {
   $("trainfab").onclick = () => { $("tpage").showModal(); load(false); };
   $("tpageclose").onclick = () => $("tpage").close();
   $("treload").onclick = () => load(true);
+  // Fotos extra (IA+ Conocimiento ampliado): fotos sueltas o una carpeta con subcarpetas.
+  $("txfiles").onclick = () => $("txin").click();
+  $("txfolder").onclick = () => $("txdir").click();
+  for (const id of ["txin", "txdir"]) $(id).onchange = async (e) => {
+    const files = [...e.target.files];
+    e.target.value = "";
+    if (!files.length) return;
+    const prog = $("txprog");
+    for (const b of ["txfiles", "txfolder"]) $(b).disabled = true;
+    prog.textContent = `Preparando ${files.length} archivo(s)…`;
+    try {
+      const r = await X.extraUpload(files, (n, total, c) => {
+        prog.textContent = `Subiendo ${n} de ${total}… (${c.done} subidas · ${c.skipped} ya estaban${c.failed ? ` · ${c.failed} con error` : ""})`;
+      }, $("txreduce").checked);
+      prog.textContent = `Listo: ${r.done} foto(s) subidas · ${r.skipped} ya estaban${r.failed ? ` · ${r.failed} con error (vuelva a intentar: se saltan las ya subidas)` : ""}.`;
+      photos = null;
+      load(false);
+    } catch (err) {
+      prog.textContent = `No se pudo subir: ${err.message}`;
+    } finally {
+      for (const b of ["txfiles", "txfolder"]) $(b).disabled = false;
+    }
+  };
   Ed.init();
 }
 
@@ -62,7 +86,16 @@ async function load(fresh) {
       if (got && got.photos) data = { ...data, ...got, classes: data.classes };
     } catch (e) { say(`No se pudieron leer las marcas: ${e.message}`); }
   }
-  if (!photos || fresh) photos = detailPhotos(await X.allStates(say));
+  if (!photos || fresh) {
+    const detail = detailPhotos(await X.allStates(say));
+    let extra = [];
+    try {
+      say("Leyendo fotos extra…");
+      extra = (await X.extraList()).map((p) => ({ ...p, name: p.key, code: "IA+", wsName: "Conocimiento ampliado",
+        week: "", variety: p.folder, extra: true }));
+    } catch (e) { say(`No se pudieron leer las fotos extra: ${e.message}`); }
+    photos = [...detail, ...extra];
+  }
   renderWs();
   renderList();
 }
@@ -135,7 +168,7 @@ function renderList() {
     if (!en.isIntersecting) return;
     io.unobserve(en.target);
     const p = list[Number(en.target.dataset.i)];
-    X.photoUrl(p.path).then((u) => { if (u) en.target.style.backgroundImage = `url(${u})`; });
+    (p.extra ? X.extraUrl(p) : X.photoUrl(p.path)).then((u) => { if (u) en.target.style.backgroundImage = `url(${u})`; });
   }), { rootMargin: "300px" });
   list.forEach((p, i) => {
     const r = data.photos[p.name];
@@ -199,7 +232,7 @@ const Ed = {
     if (!$("tdialog").open) $("tdialog").showModal();
     this.img = null;
     this.draw();
-    const url = await X.photoUrl(p.path);
+    const url = await (p.extra ? X.extraUrl(p) : X.photoUrl(p.path));
     if (this.photo !== p) return;
     if (!url) { $("tname").textContent = `${p.name} · aún no está en Drive`; return; }
     const img = new Image();

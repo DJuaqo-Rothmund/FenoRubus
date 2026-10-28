@@ -176,6 +176,88 @@ async function saveLabels(data) {
   else await upload(dir, TRAIN_FILE, blob, "application/json");
 }
 
+// Fotos extra para IA+ (= extra_photos.py): fotos que no son de un ensayo ni de un predio,
+// solo para entrenar, en «PhenoRubus · …/IA+ Conocimiento ampliado» (con subcarpetas). La
+// clave de cada foto en marcas.json es «ext/<subcarpetas>/<nombre>».
+const EXTRA_DIR = "IA+ Conocimiento ampliado";
+async function extraDir(create) {
+  const root = await folder(ROOT, null, create);
+  return root && await folder(EXTRA_DIR, root, create);
+}
+async function extraList() {
+  const top = await extraDir(false);
+  if (!top) return [];
+  const out = [], todo = [[top, ""]];
+  while (todo.length) {
+    const [id, prefix] = todo.shift();
+    for (const f of await list(`'${id}' in parents and trashed=false`, "files(id,name,mimeType)")) {
+      if (f.mimeType === FOLDER) todo.push([f.id, `${prefix}${f.name}/`]);
+      else if ((f.mimeType || "").startsWith("image/")) {
+        out.push({ id: f.id, name: f.name, rel: prefix + f.name, key: `ext/${prefix}${f.name}`, folder: prefix.replace(/\/$/, "") });
+      }
+    }
+  }
+  return out.sort((a, b) => a.folder.localeCompare(b.folder) || a.name.localeCompare(b.name));
+}
+async function extraUrl(p) {
+  if (S.photoUrls.has(p.key)) return S.photoUrls.get(p.key);
+  let blob = await cacheGet(p.key, "photos");
+  if (!blob) { blob = await (await download(p.id)).blob(); cachePut(p.key, blob, "photos"); }
+  const url = URL.createObjectURL(blob);
+  S.photoUrls.set(p.key, url);
+  return url;
+}
+// Sube fotos (o carpetas enteras, con sus subcarpetas) a la carpeta de fotos extra. Las que
+// ya están (mismo nombre en la misma carpeta) se saltan. reduce: lado mayor ≤ 2400 px.
+async function extraUpload(files, progress = () => {}, reduce = true) {
+  const top = await extraDir(true);
+  const dirs = new Map(), names = new Map();
+  const dirFor = (parts) => {
+    const key = parts.join("/");
+    if (!dirs.has(key)) {
+      dirs.set(key, parts.length ? dirFor(parts.slice(0, -1)).then((parent) => folder(parts[parts.length - 1], parent, true))
+        : Promise.resolve(top));
+    }
+    return dirs.get(key);
+  };
+  const namesIn = (id) => {
+    if (!names.has(id)) names.set(id, list(`'${id}' in parents and trashed=false`).then((fs) => new Set(fs.map((f) => f.name))));
+    return names.get(id);
+  };
+  const imgs = [...files].filter((f) => (f.type || "").startsWith("image/") || /\.(jpe?g|png|heic|webp)$/i.test(f.name));
+  let done = 0, skipped = 0, failed = 0;
+  await pool(imgs, 3, async (file) => {
+    const parts = (file.webkitRelativePath || file.name).split("/");
+    let name = parts.pop();
+    try {
+      const parent = await dirFor(parts);
+      let blob = file, mime = file.type || "image/jpeg";
+      if (reduce) {
+        try {
+          blob = await resizeTo(file, 2400, 0.88);
+          mime = "image/jpeg";
+          name = name.replace(/\.(png|heic|webp|jpeg)$/i, ".jpg");
+        } catch { blob = file; }               // formato que el navegador no abre: tal cual
+      }
+      const have = await namesIn(parent);
+      if (have.has(name)) { skipped++; return; }
+      have.add(name);
+      await upload(parent, name, blob, mime);
+      done++;
+    } catch { failed++; }
+    progress(done + skipped + failed, imgs.length, { done, skipped, failed });
+  });
+  return { total: imgs.length, done, skipped, failed };
+}
+async function resizeTo(file, side, quality) {
+  const bmp = await createImageBitmap(file, { imageOrientation: "from-image" });
+  const k = Math.min(1, side / Math.max(bmp.width, bmp.height));
+  const cv = document.createElement("canvas");
+  cv.width = Math.round(bmp.width * k); cv.height = Math.round(bmp.height * k);
+  cv.getContext("2d").drawImage(bmp, 0, 0, cv.width, cv.height);
+  return new Promise((res, rej) => cv.toBlob((b) => (b ? res(b) : rej(new Error("toBlob"))), "image/jpeg", quality));
+}
+
 // Registros de TODOS los ensayos y predios (para entrenar con las fotos de todos): lo
 // guardado en el navegador y, si hay conexión, lo nuevo de Drive.
 async function allStates(progress = () => {}) {
@@ -1590,7 +1672,8 @@ async function boot() {
   $("today").onclick = () => { S.week = C.iso(C.mondayOf(C.todayUTC())); render(); };
   NB.init({ S, send, photoUrl, resize, uploadPhoto: uploadNotePhoto });
   $("trainfab").hidden = !TR.enabled();      // se activa abriendo la web con «#lab» una vez
-  TR.init({ S, photoUrl, loadLabels, saveLabels, allStates, email: () => store.get("pr_email") });
+  TR.init({ S, photoUrl, loadLabels, saveLabels, allStates, extraList, extraUrl, extraUpload,
+    email: () => store.get("pr_email") });
   $("dsave").onclick = saveDetail;
   $("msave").onclick = saveMeasure;
   $("vadd").onclick = () => openVariety(null);
