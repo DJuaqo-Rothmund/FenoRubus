@@ -10,7 +10,7 @@ años, de otros lugares…), en una carpeta propia de Drive:
 
 La app solo ve los archivos que ella misma (o la web de PhenoRubus) subió: así funciona el
 permiso de Drive que usa (drive.file). Por eso las fotos de afuera se suben desde la web
-(«Entrenar IA» › «Subir fotos extra»), que respeta las subcarpetas.
+(«IA+» › «Subir fotos extra»), que respeta las subcarpetas.
 
 En el teléfono no se guardan las fotos completas: la lista usa las miniaturas de Drive y la
 foto se baja solo al abrirla para marcarla; una vez marcada se borra del teléfono (sigue en

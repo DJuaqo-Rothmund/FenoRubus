@@ -1,4 +1,4 @@
-// PhenoRubus Web · «Entrenar IA»: marcar con cajas las estructuras de la planta (brotes,
+// PhenoRubus Web · «IA+»: marcar con cajas las estructuras de la planta (brotes,
 // botones, flores, frutos…) en las fotos de detalle, para entrenar el detector que contará
 // flores y frutos y estimará la etapa BBCH. Es una sola especie: se trabaja con las fotos de
 // TODOS los ensayos y predios y las marcas van a un solo archivo en Drive («PhenoRubus ·
@@ -46,14 +46,7 @@ export function init(ctx) {
     document.querySelectorAll("#tfilter button").forEach((x) => x.classList.toggle("on", x === b));
     renderList();
   }));
-  $("trainfab").onclick = () => { wsFilter = ""; $("tpage").showModal(); load(false); };
-  // IA+: directo a las fotos extra («IA+ Conocimiento ampliado») y a subir más.
-  $("iaplusfab").onclick = async () => {
-    wsFilter = "IA+";
-    $("tpage").showModal();
-    await load(false);
-    $("txfiles").scrollIntoView({ block: "center" });
-  };
+  $("iaplusfab").onclick = () => { wsFilter = ""; $("tpage").showModal(); load(false); };
   $("tpageclose").onclick = () => $("tpage").close();
   $("treload").onclick = () => load(true);
   // Fotos extra (IA+ Conocimiento ampliado): fotos sueltas o una carpeta con subcarpetas.

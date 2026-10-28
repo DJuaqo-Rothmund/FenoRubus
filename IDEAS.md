@@ -18,7 +18,7 @@ adelante.
 *Conversado el 28/10/2026, al crear «Fotos extra». Se dejó como está por ahora.*
 
 La app usa el permiso `drive.file`: solo ve lo que ella misma (o la web de PhenoRubus)
-subió. Por eso las fotos de afuera se suben con la web («Entrenar IA › Elegir carpeta») o
+subió. Por eso las fotos de afuera se suben con la web («IA+ › Elegir carpeta») o
 desde el teléfono. Si más adelante se quiere subirlas con la página de Google Drive:
 
 1. **Selector de Drive (recomendado):** en la web, botón «Autorizar fotos de Drive» que
@@ -64,7 +64,7 @@ maestro») se reúnen en un solo lugar:
 El entrenamiento del detector (en el PC o en Colab) lee directo de la carpeta central:
 más fotos, más variedades, más lugares y más años, y el modelo resultante (un archivo de
 pocos MB) se entrega a todas las apps. Desde la cuenta maestra también se podrían marcar
-fotos de cualquier usuario en la web («Entrenar IA»), sumando al mismo conjunto.
+fotos de cualquier usuario en la web («IA+»), sumando al mismo conjunto.
 
 **A considerar:**
 
