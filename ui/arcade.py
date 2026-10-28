@@ -633,6 +633,8 @@ class KiButton(ButtonBehavior, Widget):
             self._img_col = Color(1, 1, 1, 1)
             self._img = Rectangle()
         self.bind(source=self._load, pos=self._step0, size=self._step0, state=self._press)
+        self._load()          # la imagen pudo llegar antes de enlazar (KiButton(source=…))
+        self._step0()
 
     def _load(self, *_):
         from kivy.core.image import Image as CoreImage
