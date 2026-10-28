@@ -342,14 +342,47 @@ dialog.tdialog[open] { display: flex; }
 .tcount { display: flex; flex-wrap: wrap; gap: 4px 12px; font-size: 13px; }
 .thint { text-align: center; opacity: .55; padding: 0 0 8px; }
 
-/* Botones de IA (lab): IA (entrenar con las fotos de los ensayos) e IA+ (fotos extra) */
-.aifabs { position: fixed; right: 14px; bottom: 14px; z-index: 6; display: flex; flex-direction: column; align-items: center; gap: 2px; }
+/* Botones de IA (lab): IA (fotos de los ensayos) e IA+ (fotos extra), mismo porte, sobre su
+   burbuja azul oscuro. En el teléfono, chicos y lado a lado para no tapar la lista. */
+.aifabs { position: fixed; right: 14px; bottom: 14px; z-index: 6; display: flex; flex-direction: column; align-items: center; gap: 4px; }
 .aifabs[hidden] { display: none; }
-.aifab { border: 0; padding: 0; background: transparent; cursor: pointer; transition: transform .15s;
-  width: clamp(92px, 17vw, 240px); height: clamp(92px, 17vw, 240px); filter: drop-shadow(0 8px 18px rgba(30, 40, 90, .28)); }
-.aifab.plus { width: clamp(74px, 13vw, 180px); height: clamp(74px, 13vw, 180px); }
-/* En pantallas angostas, espacio al final para que los botones no tapen la lista */
-@media (max-width: 760px) { body.withfabs { padding-bottom: 180px; } }
+.aifab { position: relative; border: 0; padding: 0; background: transparent; cursor: pointer; transition: transform .15s;
+  width: clamp(92px, 13vw, 190px); height: clamp(92px, 13vw, 190px); filter: drop-shadow(0 8px 18px rgba(30, 40, 90, .28)); }
+.aifab:hover { transform: scale(1.06); }
+.aifab img { position: relative; width: 100%; height: 100%; z-index: 1; }
+@media (max-width: 760px) {
+  .aifabs { flex-direction: row; right: 10px; bottom: 10px; gap: 6px; }
+  .aifab { width: 64px; height: 64px; }
+  body.withfabs { padding-bottom: 96px; }
+}
+/* IA+: «ki» rojo que emana del dibujo y se evapora hacia arriba */
+.aifab.plus img { animation: kiglow 2.6s ease-in-out infinite; }
+@keyframes kiglow {
+  0%, 100% { filter: drop-shadow(0 0 3px rgba(255, 40, 70, .35)); }
+  50% { filter: drop-shadow(0 0 10px rgba(255, 40, 70, .6)); }
+}
+.ki { position: absolute; inset: 0; z-index: 0; pointer-events: none; }
+.ki::before { content: ""; position: absolute; inset: 4%; border-radius: 50%;
+  background: radial-gradient(circle, rgba(255, 40, 70, .55) 30%, rgba(255, 40, 70, 0) 70%);
+  filter: blur(8px); animation: kiaura 2.6s ease-in-out infinite; }
+@keyframes kiaura { 0%, 100% { transform: scale(1); opacity: .55; } 50% { transform: scale(1.18); opacity: .95; } }
+.ki i { position: absolute; bottom: 30%; width: 42%; height: 52%; border-radius: 50% 50% 45% 45%;
+  background: radial-gradient(ellipse at 50% 60%, rgba(255, 45, 75, .85) 0%, rgba(255, 45, 75, .35) 40%, rgba(255, 45, 75, 0) 70%);
+  filter: blur(6px); opacity: 0; animation: ki 2.8s ease-out infinite; }
+.ki i:nth-child(1) { left: 2%;  animation-delay: 0s; }
+.ki i:nth-child(2) { left: 26%; animation-delay: .4s; }
+.ki i:nth-child(3) { left: 52%; animation-delay: .8s; }
+.ki i:nth-child(4) { left: 64%; animation-delay: 1.2s; }
+.ki i:nth-child(5) { left: 14%; animation-delay: 1.6s; }
+.ki i:nth-child(6) { left: 40%; animation-delay: 2.0s; }
+.ki i:nth-child(7) { left: 58%; animation-delay: 2.4s; }
+@keyframes ki {
+  0%   { transform: translateY(10%) scale(.5, .6); opacity: 0; }
+  20%  { opacity: .95; }
+  60%  { opacity: .55; }
+  100% { transform: translateY(-120%) scale(1.15, 1.8); opacity: 0; }
+}
+@media (prefers-reduced-motion: reduce) { .ki i, .ki::before, .aifab.plus img { animation: none; } }
 .aifab:hover { transform: scale(1.06); }
 .aifab img { width: 100%; height: 100%; }
 dialog.tpage { width: 100vw; height: 100vh; max-width: none; max-height: none; border-radius: 0; padding: 0;
