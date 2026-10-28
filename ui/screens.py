@@ -802,6 +802,28 @@ class GoogleButton(ButtonBehavior, FloatLayout):
 class StartScreen(MDScreen):
     """Lo primero que se ve al abrir la app: I+D, Predio, Entrenador IA y la cuenta de Google."""
     _animated = False
+    sync_angle = NumericProperty(0)    # giro del botón sincronizar mientras trabaja
+
+    def sync_now(self):
+        """Botón junto al engranaje: trae ya lo de la cuenta de Google (otros equipos)."""
+        a = app()
+        if not (a.db.get_setting("drive_enabled", False) and a.drive.available):
+            a.run_sync(manual=True)        # avisa que falta conectar Google Drive
+            return
+        if not getattr(a, "_syncing", False):
+            a.toast("Sincronizando con Google Drive…")
+        a.run_sync(manual=True)
+        if getattr(self, "_spin_ev", None) is None:
+            self._spin_ev = Clock.schedule_interval(self._spin, 1 / 30)
+
+    def _spin(self, *_):
+        if getattr(app(), "_syncing", False):
+            self.sync_angle = (self.sync_angle - 9) % 360
+            return
+        self.sync_angle = 0
+        self._spin_ev.cancel()
+        self._spin_ev = None
+        self.refresh()
 
     def on_pre_enter(self, *_):
         if not StartScreen._animated:      # animación de entrada: solo la primera vez
@@ -4280,7 +4302,16 @@ class SettingsTab(MDScreen):
 # Calibración IA (protegida por PIN)
 # ===========================================================================
 class PinForm(MDBoxLayout):
-    pass
+    """Campo de PIN que se escribe ahí mismo (sin el cuadro de texto nativo encima: así
+    es un solo diálogo) con el teclado numérico, que se abre solo."""
+
+    def on_kv_post(self, *_):
+        pin = self.ids.pin
+        pin.native_edit = False
+        pin.input_type = "number"
+        Clock.schedule_once(lambda *_: setattr(pin, "focus", self.autofocus), .35)
+
+    autofocus = True
 
 
 class LabelPhotoRow(GlassButton):
@@ -4855,6 +4886,7 @@ class AILabScreen(MDScreen):
         form.ids.pin.hint_text = "PIN actual"
         new = PinForm()
         new.ids.pin.hint_text = "Nuevo PIN (4-8 dígitos)"
+        new.autofocus = False
         box = MDBoxLayout(orientation="vertical", adaptive_height=True)
         box.add_widget(form)
         box.add_widget(new)

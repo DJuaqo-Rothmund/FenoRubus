@@ -381,25 +381,48 @@ function paint(g, strokes) {
 // Igual que la app (ui.notebook.InkLayer): trazos en renglones desde el borde superior
 // izquierdo del texto, así la letra queda en el mismo renglón en el teléfono y en la web.
 const LINE = 30, PAD_X = 14;
+// Plumas (= ui.notebook.PENS): grosor en renglones, opacidad y presión.
+const PENS = { lapiz: { w: .06, a: 1, pressure: true }, pl: { w: .13, a: 1 }, hl: { w: .55, a: .35 } };
+const INKS = ["#1E3A8A", "#212121", "#C62828", "#2E7D32"], HLS = ["#FFEB3B", "#76FF03", "#FF4081", "#40C4FF"];
 const Ink = {
-  strokes: [], cur: null, color: "#1E3A8A", erase: false, pointers: new Map(),
+  strokes: [], cur: null, color: INKS[0], pen: "lapiz", erase: false, pointers: new Map(), colors: {},
   init() {
     this.cv = $("nbink");
     this.g = this.cv.getContext("2d");
     this.ta = $("nbtext");
     this.ta.addEventListener("scroll", () => this.draw());
     new ResizeObserver(() => this.fit()).observe(this.ta);
-    document.querySelectorAll("#nbpentools .ink").forEach((b) => (b.onclick = () => {
-      this.color = b.dataset.c; this.erase = false;
-      document.querySelectorAll("#nbpentools .ink").forEach((x) => x.classList.toggle("on", x === b));
-      $("nberase").classList.remove("on");
-    }));
+    document.querySelectorAll("#nbpentools .penk").forEach((b) => (b.onclick = () => this.setPen(b.dataset.k)));
+    this.swatches();
     $("nberase").onclick = () => { this.erase = !this.erase; $("nberase").classList.toggle("on", this.erase); };
     $("nbinkundo").onclick = () => { if (this.strokes.pop()) { this.draw(); dirty(); } };
     this.cv.addEventListener("pointerdown", (e) => this.down(e));
     this.cv.addEventListener("pointermove", (e) => this.move(e));
     for (const ev of ["pointerup", "pointercancel"]) this.cv.addEventListener(ev, (e) => this.up(e));
+    this.cv.addEventListener("contextmenu", (e) => e.preventDefault());   // botón del lápiz
     this.cv.addEventListener("wheel", (e) => { e.preventDefault(); this.ta.scrollTop += e.deltaY; }, { passive: false });
+  },
+  setPen(k) {
+    this.pen = k; this.erase = false;
+    $("nberase").classList.remove("on");
+    document.querySelectorAll("#nbpentools .penk").forEach((x) => x.classList.toggle("on", x.dataset.k === k));
+    this.color = this.colors[k] || (k === "hl" ? HLS[0] : INKS[0]);
+    this.swatches();
+  },
+  swatches() {
+    const box = $("nbinks");
+    box.innerHTML = "";
+    for (const col of this.pen === "hl" ? HLS : INKS) {
+      const b = document.createElement("button");
+      b.type = "button"; b.className = "ink" + (col === this.color ? " on" : "");
+      b.style.background = col;
+      b.onclick = () => {
+        this.color = this.colors[this.pen] = col; this.erase = false;
+        $("nberase").classList.remove("on");
+        box.querySelectorAll(".ink").forEach((x) => x.classList.toggle("on", x === b));
+      };
+      box.appendChild(b);
+    }
   },
   load(json) {
     try { this.strokes = json ? JSON.parse(json) : []; } catch { this.strokes = []; }
@@ -425,9 +448,12 @@ const Ink = {
     g.setTransform(1, 0, 0, 1, 0, 0);
     g.clearRect(0, 0, this.cv.width, this.cv.height);
     g.setTransform(this.dpr * LINE, 0, 0, this.dpr * LINE, this.dpr * PAD_X, -this.dpr * this.ta.scrollTop);
-    g.lineCap = g.lineJoin = "round";
-    for (const s of this.cur ? [...this.strokes, this.cur] : this.strokes) {
-      const p = s.p;
+    const all = this.cur ? [...this.strokes, this.cur] : this.strokes;
+    // El destacador, translúcido, va debajo de la tinta.
+    for (const s of [...all.filter((s) => s.k === "hl"), ...all.filter((s) => s.k !== "hl")]) {
+      const p = s.p, hl = s.k === "hl";
+      g.globalAlpha = (PENS[s.k] || PENS.lapiz).a;
+      g.lineCap = hl ? "butt" : "round"; g.lineJoin = "round";
       g.strokeStyle = g.fillStyle = s.c;
       g.lineWidth = Math.max(.03, s.w * 2);
       g.beginPath();
@@ -436,14 +462,20 @@ const Ink = {
       for (let i = 2; i < p.length; i += 2) g.lineTo(p[i], p[i + 1]);
       g.stroke();
     }
+    g.globalAlpha = 1;
   },
+  // Botón del lápiz (barril, 2) o punta de goma (32): borra mientras se aprieta.
+  penErasing(e) { return e.pointerType === "pen" && (e.buttons & 34) !== 0; },
   down(e) {
     this.cv.setPointerCapture(e.pointerId);
     this.pointers.set(e.pointerId, e.clientY);
     if (this.pointers.size > 1) { this.cur = null; this.draw(); return; }      // dos dedos: desplazar
-    if (this.erase) { this.eraseAt(e); return; }
-    const k = e.pointerType === "pen" && e.pressure > 0 ? .55 + e.pressure * .9 : 1;
-    this.cur = { c: this.color, w: Math.round(.06 * k * 1000) / 1000, p: this.toLines(e) };
+    this.erasing = this.erase || this.penErasing(e);
+    if (this.erasing) { this.eraseAt(e); return; }
+    const pen = PENS[this.pen];
+    const k = pen.pressure && e.pointerType === "pen" && e.pressure > 0 ? .55 + e.pressure * .9 : 1;
+    this.cur = { c: this.color, w: Math.round(pen.w * k * 1000) / 1000, p: this.toLines(e) };
+    if (this.pen !== "lapiz") this.cur.k = this.pen;
     this.draw();
   },
   move(e) {
@@ -451,7 +483,7 @@ const Ink = {
     const prev = this.pointers.get(e.pointerId);
     this.pointers.set(e.pointerId, e.clientY);
     if (this.pointers.size > 1) { this.ta.scrollTop -= (e.clientY - prev) / this.pointers.size; return; }
-    if (this.erase) { this.eraseAt(e); return; }
+    if (this.erasing) { this.eraseAt(e); return; }
     if (!this.cur) return;
     for (const ev of e.getCoalescedEvents ? e.getCoalescedEvents() : [e]) {
       const [x, y] = this.toLines(ev), p = this.cur.p;
@@ -461,11 +493,15 @@ const Ink = {
   },
   up(e) {
     this.pointers.delete(e.pointerId);
+    if (!this.pointers.size) this.erasing = false;
     if (this.cur && !this.pointers.size) { this.strokes.push(this.cur); this.cur = null; this.draw(); dirty(); }
   },
   eraseAt(e) {
     const [x, y] = this.toLines(e);
-    const keep = this.strokes.filter((s) => !s.p.some((v, i) => i % 2 === 0 && Math.abs(v - x) < .35 && Math.abs(s.p[i + 1] - y) < .35));
+    const keep = this.strokes.filter((s) => {
+      const r = .35 + (s.k === "hl" ? s.w / 2 : 0);
+      return !s.p.some((v, i) => i % 2 === 0 && Math.abs(v - x) < r && Math.abs(s.p[i + 1] - y) < r);
+    });
     if (keep.length !== this.strokes.length) { this.strokes = keep; this.draw(); dirty(); }
   },
 };

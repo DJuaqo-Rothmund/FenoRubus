@@ -114,6 +114,37 @@ def allow_rotation(on: bool) -> None:
         pass
 
 
+_stylus = None
+
+
+def stylus_install() -> bool:
+    """Android: empieza a leer el botón y la goma del lápiz (StylusState.java)."""
+    global _stylus
+    if not IS_ANDROID:
+        return False
+    if _stylus is None:
+        try:
+            from jnius import autoclass  # type: ignore
+            cls = autoclass("org.rubus.fenorubus.StylusState")
+            if not cls.install(autoclass("org.kivy.android.PythonActivity").mActivity):
+                return False
+            _stylus = cls
+        except Exception as exc:  # noqa: BLE001 (sin esto el lápiz escribe igual)
+            print("stylus:", exc)
+            return False
+    return True
+
+
+def stylus_erasing() -> bool:
+    """El botón del lápiz está apretado (o se usa la punta de goma)."""
+    if _stylus is None:
+        return False
+    try:
+        return bool(_stylus.erasing())
+    except Exception:  # noqa: BLE001
+        return False
+
+
 def to_background() -> bool:
     """Android: deja la app en segundo plano (como el botón de inicio) en vez de cerrarla."""
     if not IS_ANDROID:

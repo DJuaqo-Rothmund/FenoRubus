@@ -100,11 +100,19 @@ def nav_icon(name: str, active: bool) -> str:
     return resource_path("assets", "ui", f"nav_{name}_{'active' if active else 'idle'}.png")
 
 
+_HEX: dict = {}
+
+
 def c(hex_color: str, alpha: float | None = None):
-    """Color Kivy desde hex (#RRGGBB o #RRGGBBAA); `alpha` lo sobrescribe."""
-    rgba = get_color_from_hex(hex_color)
-    if len(rgba) == 3:
-        rgba.append(1.0)
+    """Color Kivy desde hex (#RRGGBB o #RRGGBBAA); `alpha` lo sobrescribe. Cada hex se
+    interpreta una sola vez (las reglas KV lo llaman miles de veces)."""
+    base = _HEX.get(hex_color)
+    if base is None:
+        rgba = get_color_from_hex(hex_color)
+        if len(rgba) == 3:
+            rgba.append(1.0)
+        base = _HEX[hex_color] = tuple(rgba)
+    rgba = list(base)
     if alpha is not None:
         rgba[3] = alpha
     return rgba

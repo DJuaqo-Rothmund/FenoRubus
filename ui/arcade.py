@@ -70,6 +70,18 @@ def _glyph(ch: str):
     return GLYPHS.get(ch, GLYPHS["?"])
 
 
+_PIX: dict = {}
+
+
+def _pixels(ch: str) -> list:
+    """Píxeles encendidos (columna, fila) de una letra (calculados una vez)."""
+    got = _PIX.get(ch)
+    if got is None:
+        got = _PIX[ch] = [(k, r) for r, bits in enumerate(_glyph(ch))
+                          for k, b in enumerate(bits) if b == "1"]
+    return got
+
+
 class PixelText(Widget):
     """Texto en píxeles; cada «píxel» mide `px`. Líneas separadas por \\n."""
     text = StringProperty("")
@@ -90,28 +102,38 @@ class PixelText(Widget):
             self._tr.xy = self.pos
 
     def _redraw(self, *_):
-        """Dibuja en coordenadas locales; mover el texto solo cambia una traslación."""
-        from kivy.graphics import PopMatrix, PushMatrix, Translate
+        """Dibuja en coordenadas locales; mover el texto solo cambia una traslación.
+        Todos los píxeles de un color van en un solo Mesh (antes un Rectangle por píxel:
+        cientos de instrucciones y ~0,2 s por texto en un teléfono)."""
+        from kivy.graphics import Mesh, PopMatrix, PushMatrix, Translate
         lines = self.text.split("\n")
         px = self.px
         w = max((len(l) * 6 - 1) for l in lines) * px if lines else 0
         h = (len(lines) * 9 - 2) * px
+        q = px * .9
+        base = []                       # esquina inferior izquierda de cada píxel encendido
+        for li, line in enumerate(lines):
+            lw = (len(line) * 6 - 1) * px
+            x0 = (w - lw) / 2
+            y0 = h - (li * 9 + 7) * px
+            for ci, ch in enumerate(line):
+                for k, r in _pixels(ch):
+                    base.append((x0 + (ci * 6 + k) * px, y0 + (6 - r) * px))
         self.canvas.clear()
         with self.canvas:
             PushMatrix()
             self._tr = Translate(*self.pos)
             for col, off in ((self.shadow, px * .6), (self.color, 0)):
-                Color(*col)
-                for li, line in enumerate(lines):
-                    lw = (len(line) * 6 - 1) * px
-                    x0 = (w - lw) / 2 + off
-                    y0 = h - (li * 9 + 7) * px - off
-                    for ci, ch in enumerate(line):
-                        for r, bits in enumerate(_glyph(ch)):
-                            for k, b in enumerate(bits):
-                                if b == "1":
-                                    Rectangle(pos=(x0 + (ci * 6 + k) * px, y0 + (6 - r) * px),
-                                              size=(px * .9, px * .9))
+                verts, idx = [], []
+                for n, (x, y) in enumerate(base):
+                    x += off
+                    y -= off
+                    verts += [x, y, 0, 0, x + q, y, 0, 0, x + q, y + q, 0, 0, x, y + q, 0, 0]
+                    i = n * 4
+                    idx += [i, i + 1, i + 2, i, i + 2, i + 3]
+                if verts:
+                    Color(*col)
+                    Mesh(vertices=verts, indices=idx, mode="triangles")
             PopMatrix()
         self.size = (w, h)
 
@@ -120,31 +142,46 @@ class PixelOrb(ButtonBehavior, Widget):
     """Orbe central: núcleo que late y anillo de píxeles que gira."""
     phase = NumericProperty(0)
 
+    N = 28    # píxeles del anillo
+
     def __init__(self, **kw):
         super().__init__(**kw)
+        self._g = None
         self.bind(pos=self._redraw, size=self._redraw, phase=self._redraw, state=self._redraw)
 
+    def _build(self):
+        """Las instrucciones se crean una vez; cada cuadro solo cambia posiciones y brillo."""
+        g = self._g = {"halo": [], "ring": []}
+        with self.canvas.before:
+            for a in (.10, .16, .24):                       # halo
+                Color(*c(theme.MIND_ACCENT, a))
+                g["halo"].append(Ellipse())
+            Color(*c("#0B1630"))
+            g["core"] = Ellipse()
+            s = dp(5)
+            for i in range(self.N):                         # anillo de píxeles que gira
+                col = Color(*c(NEON[i % len(NEON)]))
+                g["ring"].append((col, Rectangle(size=(s, s))))
+
     def _redraw(self, *_):
-        self.canvas.before.clear()
+        if self._g is None:
+            self._build()
+        g = self._g
         cx, cy = self.center
         r = min(self.width, self.height) / 2
         beat = 1 + .06 * math.sin(self.phase * 3)
         press = .9 if self.state == "down" else 1
-        with self.canvas.before:
-            for i, a in enumerate((.10, .16, .24)):        # halo
-                Color(*c(theme.MIND_ACCENT, a))
-                rr = r * (1.05 - i * .14) * beat * press
-                Ellipse(pos=(cx - rr, cy - rr), size=(rr * 2, rr * 2))
-            Color(*c("#0B1630"))
-            rr = r * .66 * press
-            Ellipse(pos=(cx - rr, cy - rr), size=(rr * 2, rr * 2))
-            n, s = 28, dp(5)
-            for i in range(n):                              # anillo de píxeles que gira
-                ang = self.phase * .9 + i * 2 * math.pi / n
-                Color(*c(NEON[i % len(NEON)], .55 + .45 * (math.sin(self.phase * 4 + i) > 0)))
-                x = cx + math.cos(ang) * r * .82 * press
-                y = cy + math.sin(ang) * r * .82 * press
-                Rectangle(pos=(x - s / 2, y - s / 2), size=(s, s))
+        for i, e in enumerate(g["halo"]):
+            rr = r * (1.05 - i * .14) * beat * press
+            e.pos, e.size = (cx - rr, cy - rr), (rr * 2, rr * 2)
+        rr = r * .66 * press
+        g["core"].pos, g["core"].size = (cx - rr, cy - rr), (rr * 2, rr * 2)
+        n, s = self.N, dp(5)
+        for i, (col, rect) in enumerate(g["ring"]):
+            ang = self.phase * .9 + i * 2 * math.pi / n
+            col.a = .55 + .45 * (math.sin(self.phase * 4 + i) > 0)
+            rect.pos = (cx + math.cos(ang) * r * .82 * press - s / 2,
+                        cy + math.sin(ang) * r * .82 * press - s / 2)
 
 
 # Frambuesa de 8 bits (7×8): G hoja, R fruto, r brillo, D sombra.
@@ -219,30 +256,43 @@ class PixelArena(FloatLayout):
         for ch in self.children:            # textos de píxeles: siempre en su lugar
             if isinstance(ch, PixelText) and ch._tr is not None:
                 ch._tr.xy = ch.pos
-        tex = raspberry_texture()
-        self.canvas.before.clear()
         w, h = self.size
+        if getattr(self, "_g", None) is None:
+            self._build_arena()
+        self._bg.pos, self._bg.size = self.pos, self.size
+        for st, (trail, sprite) in zip(self.streaks, self._g):
+            st["x"] -= st["v"] * dt
+            s = st["s"]
+            sw, sh = 7 * s, 8 * s
+            if st["x"] * w < -sw * 3:
+                st["x"] = 1.05
+                st["y"] = random.random()
+            x = self.x + st["x"] * w
+            # Saltito de 8 bits: sube y baja en escalones de un píxel.
+            y = self.y + st["y"] * (h - sh) + round(math.sin(self._t * 6 + st["bob"])) * s
+            for k, (col, rect) in enumerate(trail, 1):     # estela: píxeles que se apagan
+                px = x + sw + k * s * 1.6
+                visible = self.x <= px <= self.right - s
+                col.a = max(.08, .7 - k / (st["len"] + 1)) if visible else 0
+                rect.pos = (px, y + sh * .45)
+            sprite[0].a = 1 if self.x <= x and x + sw <= self.right else 0
+            sprite[1].pos = (x, y)
+
+    def _build_arena(self):
+        """Instrucciones creadas una vez; cada cuadro (30 por segundo) solo las mueve."""
+        tex = raspberry_texture()
+        self._g = []
+        self.canvas.before.clear()
         with self.canvas.before:
             Color(*c("#060C1A", .55))
-            Rectangle(pos=self.pos, size=self.size)
+            self._bg = Rectangle(pos=self.pos, size=self.size)
             for st in self.streaks:
-                st["x"] -= st["v"] * dt
                 s = st["s"]
-                sw, sh = 7 * s, 8 * s
-                if st["x"] * w < -sw * 3:
-                    st["x"] = 1.05
-                    st["y"] = random.random()
-                x = self.x + st["x"] * w
-                # Saltito de 8 bits: sube y baja en escalones de un píxel.
-                y = self.y + st["y"] * (h - sh) + round(math.sin(self._t * 6 + st["bob"])) * s
-                for k in range(1, st["len"] + 1):          # estela: píxeles frambuesa que se apagan
-                    px = x + sw + k * s * 1.6
-                    if self.x <= px <= self.right - s:
-                        Color(*c(SPRITE_COLORS["R"], max(.08, .7 - k / (st["len"] + 1))))
-                        Rectangle(pos=(px, y + sh * .45), size=(s, s))
-                if self.x <= x and x + sw <= self.right:
-                    Color(1, 1, 1, 1)
-                    Rectangle(texture=tex, pos=(x, y), size=(sw, sh))
+                trail = []
+                for _k in range(st["len"]):
+                    trail.append((Color(*c(SPRITE_COLORS["R"], 0)), Rectangle(size=(s, s))))
+                sprite = (Color(1, 1, 1, 0), Rectangle(texture=tex, size=(7 * s, 8 * s)))
+                self._g.append((trail, sprite))
 
 
 def burst(x: float, y: float, n: int = 36):
@@ -411,6 +461,7 @@ class MindSky(Widget):
             self._ev.cancel()
             self._ev = None
         self.canvas.clear()
+        self._g = None
 
     def _step(self, dt):
         if self.get_root_window() is None:
@@ -421,32 +472,47 @@ class MindSky(Widget):
         if self.spark is None and random.random() < dt / 2.5:      # ~1 destello cada 2,5 s
             y = random.uniform(.15, .9)
             self.spark = {"x": -.2, "y": y, "dy": random.uniform(-.15, .15), "col": random.choice(NEON)}
-        self.canvas.clear()
+        if getattr(self, "_g", None) is None:
+            self._build_sky()
+        stars, bits, spark = self._g
+        for st, (col, e) in zip(self.stars, stars):
+            col.a = .25 + .75 * (.5 + .5 * math.sin(t * st["sp"] + st["ph"])) ** 3
+            r = st["r"]
+            e.pos = (self.x + st["x"] * w - r, self.y + st["y"] * h - r)
+        for b, (col, rect) in zip(self.bits, bits):
+            b["y"] += b["v"] * dt
+            if b["y"] > 1.05:
+                b["y"], b["x"] = -.05, random.random()
+            s = b["s"]
+            x = self.x + (b["x"] + .01 * math.sin(t * 1.3 + b["ph"])) * w
+            col.a = .35 + .3 * math.sin(t * 2 + b["ph"])
+            rect.pos = (round(x / s) * s, round((self.y + b["y"] * h) / s) * s)
+        sp = self.spark
+        if sp is not None:
+            sp["x"] += dt * .9
+            sp["y"] += sp["dy"] * dt
+            rgb = c(sp["col"])[:3]
+            for k, (col, rect) in enumerate(spark):              # cola del destello
+                col.rgba = (*rgb, max(0, .9 - k * .065))
+                rect.pos = (self.x + (sp["x"] - k * .018) * w,
+                            self.y + (sp["y"] - k * sp["dy"] * .02) * h)
+            if sp["x"] > 1.3:
+                self.spark = None
+                for col, _r in spark:
+                    col.a = 0
+
+    def _build_sky(self):
+        """Instrucciones creadas una vez (antes se rehacían 30 veces por segundo)."""
+        stars, bits, spark = [], [], []
         with self.canvas:
             for st in self.stars:
-                a = .25 + .75 * (.5 + .5 * math.sin(t * st["sp"] + st["ph"])) ** 3
-                Color(*c(st["col"], a))
                 r = st["r"]
-                Ellipse(pos=(self.x + st["x"] * w - r, self.y + st["y"] * h - r), size=(2 * r, 2 * r))
+                stars.append((Color(*c(st["col"], 0)), Ellipse(size=(2 * r, 2 * r), segments=10)))
             for b in self.bits:
-                b["y"] += b["v"] * dt
-                if b["y"] > 1.05:
-                    b["y"], b["x"] = -.05, random.random()
-                s = b["s"]
-                x = self.x + (b["x"] + .01 * math.sin(t * 1.3 + b["ph"])) * w
-                Color(*c(b["col"], .35 + .3 * math.sin(t * 2 + b["ph"])))
-                Rectangle(pos=(round(x / s) * s, round((self.y + b["y"] * h) / s) * s), size=(s, s))
-            sp = self.spark
-            if sp is not None:
-                sp["x"] += dt * .9
-                sp["y"] += sp["dy"] * dt
-                for k in range(14):                                   # cola del destello
-                    px = self.x + (sp["x"] - k * .018) * w
-                    py = self.y + (sp["y"] - k * sp["dy"] * .02) * h
-                    Color(*c(sp["col"], max(0, .9 - k * .065)))
-                    Rectangle(pos=(px, py), size=(dp(3), dp(3)))
-                if sp["x"] > 1.3:
-                    self.spark = None
+                bits.append((Color(*c(b["col"], 0)), Rectangle(size=(b["s"], b["s"]))))
+            for _k in range(14):
+                spark.append((Color(0, 0, 0, 0), Rectangle(size=(dp(3), dp(3)))))
+        self._g = (stars, bits, spark)
 
 
 class AuraCheck(ButtonBehavior, Widget):
@@ -499,7 +565,7 @@ class AuraCheck(ButtonBehavior, Widget):
                 for i, a in enumerate((.10, .16, .24)):            # halo azul que late
                     rr = r + dp(10) - i * dp(3) + dp(1.5) * math.sin(self._t * 6)
                     Color(*c("#38BDF8", a))
-                    Ellipse(pos=(cx - rr, cy - rr), size=(2 * rr, 2 * rr))
+                    Ellipse(pos=(cx - rr, cy - rr), size=(2 * rr, 2 * rr), segments=48)
                 for f in self._flames:                              # llamitas que suben
                     k = f["life"] / f["max"]
                     d = r + dp(2) + k * dp(10)
@@ -507,7 +573,7 @@ class AuraCheck(ButtonBehavior, Widget):
                     y = cy + math.sin(f["a"]) * d + k * dp(8)
                     s = f["s"] * (1 - k * .6)
                     Color(*c("#7DD3FC" if k < .5 else "#2563EB", (1 - k) * .9))
-                    Ellipse(pos=(x - s / 2, y - s / 2), size=(s, s * 1.4))
+                    Ellipse(pos=(x - s / 2, y - s / 2), size=(s, s * 1.4), segments=10)
             Color(*c("#0B1630"))
             Ellipse(pos=(cx - r, cy - r), size=(2 * r, 2 * r))
             Color(*c("#38BDF8" if self.active else theme.MIND_MUTED))

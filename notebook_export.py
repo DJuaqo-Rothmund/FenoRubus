@@ -81,6 +81,18 @@ def _hex(col: str):
     return tuple(int(col[i:i + 2], 16) for i in (0, 2, 4))
 
 
+def _stroke(d, s: dict, top: int, col) -> None:
+    p = s.get("p") or []
+    pts = [(M + p[i] * STEP, top + p[i + 1] * STEP) for i in range(0, len(p) - 1, 2)]
+    w = max(2, int(round(s.get("w", .06) * STEP * 2)))
+    if len(pts) > 1:
+        d.line(pts, fill=col, width=w, joint="curve")
+    if s.get("k") == "hl":
+        return                    # punta cuadrada
+    for x, y in (pts[:1] + pts[-1:]):
+        d.ellipse([x - w / 2, y - w / 2, x + w / 2, y + w / 2], fill=col)
+
+
 def signature(entry: dict) -> str:
     raw = json.dumps([entry.get("day"), entry.get("text"), entry.get("ink"),
                       [p["path"] for p in entry.get("photos", [])]], ensure_ascii=False)
@@ -123,15 +135,20 @@ def render(entry: dict, ws_name: str, code: str, dest: str) -> str:
         if y + STEP > H - M:
             break
         d.text((M, y), ln, font=font, fill=(27, 42, 35))
-    for s in strokes:                              # escritura a mano (en renglones)
-        p = s.get("p") or []
-        pts = [(M + p[i] * STEP, top + p[i + 1] * STEP) for i in range(0, len(p) - 1, 2)]
-        w = max(2, int(round(s.get("w", .06) * STEP * 2)))
-        col = _hex(s.get("c"))
-        if len(pts) > 1:
-            d.line(pts, fill=col, width=w, joint="curve")
-        for x, y in (pts[:1] + pts[-1:]):
-            d.ellipse([x - w / 2, y - w / 2, x + w / 2, y + w / 2], fill=col)
+    # Escritura a mano (en renglones): el destacador, translúcido y debajo de la tinta.
+    hl = [s for s in strokes if s.get("k") == "hl"]
+    if hl:
+        layer = Image.new("RGBA", (W, H), (0, 0, 0, 0))
+        ld = ImageDraw.Draw(layer)
+        for s in hl:
+            _stroke(ld, s, top, (*_hex(s.get("c")), 255))
+        alpha = layer.getchannel("A").point(lambda v: int(v * .35))
+        layer.putalpha(alpha)
+        im.paste(layer, (0, 0), layer)
+        d = ImageDraw.Draw(im)
+    for s in strokes:
+        if s.get("k") != "hl":
+            _stroke(d, s, top, _hex(s.get("c")))
     # Fotos de la página, dos por fila (siguen en otra hoja si no caben).
     y = bottom + 30
     col_w = (W - 2 * M - 30) // 2

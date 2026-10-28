@@ -298,6 +298,11 @@ dialog.nbdraw[open] { display: flex; }
 .nbpentools .ink { width: 28px; height: 28px; border-radius: 50%; border: 3px solid #fff; box-shadow: 0 0 0 1px rgba(0,0,0,.15); cursor: pointer; }
 .nbpentools .ink.on { box-shadow: 0 0 0 2px #C8963E; }
 .nbpentools .ghost.on { background: #EEDAB8; }
+.nbtools .seg button { display: inline-flex; align-items: center; }
+.nbtools .aa { font-size: 16px; letter-spacing: .5px; }
+.nbpentools { flex-wrap: wrap; }
+.nbpentools .pens button { padding: 5px 11px; font-size: 13px; }
+.nbinks { display: inline-flex; gap: 6px; }
 
 /* Entrenar IA: marcar estructuras con cajas */
 .tbar { height: 6px; border-radius: 3px; background: var(--leaf-soft); overflow: hidden; margin: 6px 0; }

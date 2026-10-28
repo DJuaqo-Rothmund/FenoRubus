@@ -299,13 +299,15 @@
             <canvas id="nbink" class="nbink"></canvas>
           </div>
           <div class="nbtools">
-            <span class="seg"><button type="button" id="nbkeys" class="on">Teclado</button><button type="button" id="nbpen">✎ Lápiz</button></span>
-            <span class="spacer"></span>
+            <span class="seg"><button type="button" id="nbkeys" class="on" title="Escribir con teclado"><b class="aa">Aa</b></button><button type="button" id="nbpen" title="Escribir a mano"><svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><path fill="currentColor" d="M17.8 2.6a1.9 1.9 0 0 1 2.7 0l.9.9a1.9 1.9 0 0 1 0 2.7l-9.7 9.7-4 1.3 1.3-4zM3 20.2c1.6-1.8 3.2-1.6 4.4-.5 1.1 1 2.3 1.2 3.6.2.8-.6 1.6-.7 2.5.1l-.9 1.1c-.4-.3-.7-.3-1 0-1.9 1.4-3.8 1.1-5.2-.2-.8-.7-1.6-.7-2.4.3z"/></svg></button></span>
             <span id="nbpentools" class="nbpentools" hidden>
-              <button type="button" class="ink on" data-c="#1E3A8A" style="background:#1E3A8A" title="Azul"></button>
-              <button type="button" class="ink" data-c="#212121" style="background:#212121" title="Negro"></button>
-              <button type="button" class="ink" data-c="#C62828" style="background:#C62828" title="Rojo"></button>
-              <button type="button" id="nberase" class="ghost" title="Goma: toque un trazo para borrarlo">Goma</button>
+              <span class="seg pens">
+                <button type="button" class="penk on" data-k="lapiz" title="Lápiz (con presión)">Lápiz</button>
+                <button type="button" class="penk" data-k="pl" title="Plumón">Plumón</button>
+                <button type="button" class="penk" data-k="hl" title="Destacador">Destacador</button>
+              </span>
+              <span id="nbinks" class="nbinks"></span>
+              <button type="button" id="nberase" class="ghost" title="Goma: toque un trazo para borrarlo (o use el botón del lápiz)">Goma</button>
               <button type="button" id="nbinkundo" class="ghost" title="Deshacer">↶</button>
             </span>
           </div>
