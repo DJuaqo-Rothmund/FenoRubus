@@ -2870,13 +2870,11 @@
         theme_text_color: "Custom"
         text_color: c(theme.MIND_MUTED)
 
-<IAPlusButton@ButtonBehavior+Image>:
-    # Logo IA+ (celeste con aura roja tenue)
+<IAPlusButton@KiButton>:
+    # Logo IA+ con «ki» rojo que emana del dibujo (ui/arcade.KiButton)
     source: theme.IAPLUS
     size_hint: None, None
-    size: dp(68), dp(68)
-    fit_mode: "contain"
-    opacity: .75 if self.state == "down" else 1
+    size: dp(60), dp(60)
 
 <AILabScreen>:
     md_bg_color: 0, 0, 0, 0
@@ -3186,7 +3184,7 @@
 
     # IA+ (cajas para el detector): pantalla aparte, junto al candado
     IAPlusButton:
-        pos: root.width - dp(122), root.height - dp(64)
+        pos: root.width - dp(116), root.height - dp(60)
         on_release: root.open_iaplus()
 
 <HeatmapScreen>:
