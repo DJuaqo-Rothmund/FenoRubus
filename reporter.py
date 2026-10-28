@@ -25,6 +25,7 @@ from html import escape
 import datetime as _dt
 import io
 import json
+import math
 import os
 from dataclasses import dataclass
 
@@ -120,6 +121,11 @@ class ImageStore:
 # ===========================================================================
 # SVG (gráficos sin JavaScript, 100 % offline)
 # ===========================================================================
+def _int_range(lo, hi) -> tuple[int, int]:
+    """Eje de semanas en enteros aunque haya muestreos extra (8.5)."""
+    return int(math.floor(lo)), int(math.ceil(hi))
+
+
 def svg_progress(points: list[tuple[int, int]], week_min: int, week_max: int,
                  width: int = 640, height: int = 220, spark: bool = False,
                  wlabel=None) -> str:
@@ -127,6 +133,7 @@ def svg_progress(points: list[tuple[int, int]], week_min: int, week_max: int,
     if not points:
         return ""
     wlabel = wlabel or (lambda n: n)   # n.º de semana de muestreo -> semana del año
+    week_min, week_max = _int_range(week_min, week_max)   # muestreo extra: 8.5
     pad_l, pad_r, pad_t, pad_b = (4, 4, 4, 4) if spark else (40, 14, 12, 28)
     w, h = width - pad_l - pad_r, height - pad_t - pad_b
     span = max(1, week_max - week_min)
@@ -187,6 +194,7 @@ def compare_chart(series: list[dict], week_min: int, week_max: int,
     if not series:
         return None
     wlabel = wlabel or (lambda n: n)   # n.º de semana de muestreo -> semana del año
+    week_min, week_max = _int_range(week_min, week_max)   # muestreo extra: 8.5
     week_max = max(week_max, week_min + 1)
     W, H = 720, 320
     pl, pr, pt, pb = 92, 96, 14, 30
@@ -228,14 +236,19 @@ def compare_chart(series: list[dict], week_min: int, week_max: int,
                f'<rect class="hit" x="{pl}" y="{pt}" width="{w}" height="{h}"/></svg>')
     data = {str(s_["id"]): {"name": s_["name"], "pts": {str(wk): c for wk, c in s_["points"]}}
             for s_ in series}
+    labels = {n: wlabel(n) for n in range(week_min, week_max + 1)}
+    for s_ in series:                     # muestreos extra (8.5 → «42.5»)
+        for wk, _c in s_["points"]:
+            if wk not in labels:
+                labels[wk] = wlabel(wk)
     return {"svg": "".join(out), "chips": [{"id": s_["id"], "name": s_["name"],
                                             "slot": sel.index(s_["id"]) + 1 if s_["id"] in sel else 0}
                                            for s_ in series],
             # Datos sin dibujar: el informe PDF traza su propio gráfico con ellos.
             "raw": {"series": series, "sel": sel, "wmin": week_min, "wmax": week_max,
-                    "labels": {n: wlabel(n) for n in range(week_min, week_max + 1)}},
+                    "labels": labels},
             "json": json.dumps({"series": data, "wmin": week_min, "wmax": week_max,
-                                "labels": {str(n): wlabel(n) for n in range(week_min, week_max + 1)},
+                                "labels": {str(n): v for n, v in labels.items()},
                                 "pl": pl, "w": w, "vw": W}, ensure_ascii=False).replace("</", "<\\/")}
 
 
@@ -519,7 +532,8 @@ class ReportGenerator:
     def _wlabel(self, season: int):
         """n.º de semana de muestreo -> n.º de semana del año (rótulos de los gráficos)."""
         start = self.db.season_start(season)
-        return lambda n: ph.week_of_year(ph.week_start(start, n).isoformat())
+        # Muestreo extra (8.5): la semana del año con medio (42.5).
+        return lambda n: ph.week_of_year(ph.week_start(start, int(n)).isoformat()) + (.5 if n % 1 else 0)
 
     def _heatmap(self, season: int, weeks: list[dict], varieties: list[dict]) -> list[dict]:
         matrix = self.db.phenology_matrix(season)
@@ -545,7 +559,8 @@ class ReportGenerator:
         done = sum(1 for c in cards if c["code"] is not None)
         title = f"Reporte semanal · {ph.week_title(week)}"
         return self._render(
-            "weekly.html", "semanal_{1}_S{0:02d}".format(*ph.iso_week(week["start_date"])),
+            "weekly.html", "semanal_{1}_S{0:02d}".format(*ph.iso_week(week["start_date"]))
+            + ("-extra" if ph.is_extra(week) else ""),
             "semanal", title, images, package, week=week, cards=cards,
             measures=self._measures(images, week_id=week_id),
             subtitle=f"{week['label']} · {ph.week_title(week)}",
@@ -579,7 +594,7 @@ class ReportGenerator:
         end = _dt.date.fromisoformat(weeks[-1]["start_date"]) + _dt.timedelta(days=6)
         title = title or f"Evolución · Semanas {ph.week_of_year(weeks[0])}–{ph.week_of_year(weeks[-1])}"
         return self._render(
-            "period.html", f"periodo_{season}_S{ph.week_of_year(weeks[0]):02d}-S{ph.week_of_year(weeks[-1]):02d}", "periodo",
+            "period.html", f"periodo_{season}_S{int(ph.week_of_year(weeks[0])):02d}-S{int(ph.week_of_year(weeks[-1])):02d}", "periodo",
             title, images, package, weeks=weeks, heat=heat, strips=strips, compare=self._compare(heat, weeks),
             progress=self._progress(season, weeks),
             subtitle=f"Del {ph.format_date_es(start, False)} al {ph.format_date_es(end)} · "

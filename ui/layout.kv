@@ -798,6 +798,22 @@
 
 <WeekTitle@ButtonBehavior+MDLabel>:
 
+<ExtraChip@ButtonBehavior+Label>:
+    on: False
+    font_size: "12.5sp"
+    bold: True
+    size_hint: None, None
+    size: self.texture_size[0] + dp(22), dp(30)
+    pos_hint: {"center_y": .5}
+    color: (1, 1, 1, 1) if self.on else c(theme.BERRY)
+    canvas.before:
+        Color:
+            rgba: c(theme.BERRY, .85 if self.state == "down" else 1) if self.on else c(theme.BERRY_SOFT)
+        RoundedRectangle:
+            pos: self.pos
+            size: self.size
+            radius: [self.height / 2]
+
 <SamplingTab>:
     orientation: "vertical"
     md_bg_color: 0, 0, 0, 0
@@ -834,6 +850,7 @@
                             id: week_kicker
                             halign: "center"
                             text: "SEMANA"
+                            text_color: c(theme.BERRY) if root.extra else c(theme.LEAF)
                         # Tocar el título: calendario para ir a la semana de cualquier día.
                         WeekTitle:
                             id: week_title
@@ -841,7 +858,7 @@
                             halign: "center"
                             font_style: "H6"
                             theme_text_color: "Custom"
-                            text_color: c(theme.INK, .6 if self.state == "down" else 1)
+                            text_color: c(theme.BERRY_DARK if root.extra else theme.INK, .6 if self.state == "down" else 1)
                             adaptive_height: True
                             on_release: root.pick_week_date()
                         Muted:
@@ -859,8 +876,8 @@
                         id: progress
                         max: 1
                         value: 0
-                        color: c(theme.LEAF)
-                        back_color: c(theme.LEAF_SOFT)
+                        color: c(theme.BERRY) if root.extra else c(theme.LEAF)
+                        back_color: c(theme.BERRY_SOFT) if root.extra else c(theme.LEAF_SOFT)
                         size_hint_y: None
                         height: dp(6)
                         pos_hint: {"center_y": .5}
@@ -874,12 +891,17 @@
                     padding: dp(4), 0, dp(8), 0
                     spacing: dp(2)
                     MDFlatButton:
-                        text: "Ir a la semana actual"
+                        text: "Semana actual"
                         theme_text_color: "Custom"
                         text_color: c(theme.LEAF_DARK)
                         pos_hint: {"center_y": .5}
                         on_release: root.go_current()
                     Widget:
+                    # Segundo muestreo de la semana («Semana 44.5»)
+                    ExtraChip:
+                        text: root.extra_text
+                        on: root.extra
+                        on_release: root.extra_action()
                     MDCheckbox:
                         id: skip_box
                         size_hint: None, None
@@ -895,11 +917,6 @@
                         pos_hint: {"center_y": .5}
                         theme_text_color: "Custom"
                         text_color: c(theme.INK)
-                GhostButton:
-                    id: measures_btn
-                    icon: "clipboard-list-outline"
-                    text: "Mediciones de la semana"
-                    on_release: root.open_measures()
             SectionLabel:
                 text: "VARIEDADES · toque para registrar"
             MDBoxLayout:
@@ -932,15 +949,18 @@
         pos_hint: {"center_y": .5}
         theme_text_color: "Custom"
         text_color: 1, 1, 1, 1
-    MDLabel:
-        text: "Cambiar"
-        font_style: "Caption"
-        halign: "right"
-        size_hint_x: None
-        width: dp(60)
+    # Mediciones de la semana: círculo flotante (tocar el nombre cambia de ensayo o predio)
+    MDIconButton:
+        icon: "clipboard-plus-outline"
+        size_hint: None, None
+        size: dp(40), dp(40)
+        padding: dp(7)
+        icon_size: "22sp"
         pos_hint: {"center_y": .5}
-        theme_text_color: "Custom"
-        text_color: 1, 1, 1, .8
+        md_bg_color: 1, 1, 1, 1
+        theme_icon_color: "Custom"
+        icon_color: c(theme.LEAF_DARK)
+        on_release: root.open_measures()
 
 <WorkspacesScreen>:
     md_bg_color: 0, 0, 0, 0

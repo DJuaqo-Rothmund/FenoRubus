@@ -47,16 +47,16 @@ export function isoWeek(d) {
   const w = 1 + Math.round(((t - first) / 86400000 - 3 + ((first.getUTCDay() + 6) % 7)) / 7);
   return [w, y];
 }
-export function weekTitle(start) {      // «Semana 42, año 2026»
+export function weekTitle(start) {      // «Semana 42, año 2026» · muestreo extra: «Semana 42.5, año 2026»
   const [w, y] = isoWeek(parseDate(start));
-  return `Semana ${w}, año ${y}`;
+  return `Semana ${w}${EXTRA.has(start) ? ".5" : ""}, año ${y}`;
 }
-export function weekLabel(start) {      // «Semana del 12 de octubre»
+export function weekLabel(start) {      // «Semana del 12 de octubre» · «Muestreo extra del 15 de octubre»
   const d = parseDate(start);
-  return `Semana del ${d.getUTCDate()} de ${MESES[d.getUTCMonth()]}`;
+  return `${EXTRA.has(start) ? "Muestreo extra" : "Semana"} del ${d.getUTCDate()} de ${MESES[d.getUTCMonth()]}`;
 }
-export function weekRange(start) {      // «12 oct – 18 oct 2026»
-  const a = parseDate(start), b = addDays(a, 6);
+export function weekRange(start) {      // «12 oct – 18 oct 2026» (el extra: «15 oct – 18 oct 2026»)
+  const a = parseDate(start), b = addDays(mondayOf(a), 6);
   return `${a.getUTCDate()} ${MES3[a.getUTCMonth()]} – ${b.getUTCDate()} ${MES3[b.getUTCMonth()]} ${b.getUTCFullYear()}`;
 }
 // Carpeta de la semana en Drive (= DriveBackup.week_folder): «Año 2026/Semana 42 · 12-10-2026».
@@ -157,6 +157,41 @@ export function varieties(state) {
   return rows(state, "varieties").filter((v) => v.active !== 0)
     .sort((a, b) => (a.sort_order || 0) - (b.sort_order || 0) || (a.name || "").localeCompare(b.name || "", "es"));
 }
+// ------------------------------------------------------------------ muestreo extra
+// Segundo muestreo de una semana (= Database.add_extra_week): «Semana 42.5». Se identifica
+// por su fecha (un día de la semana después del lunes) y su n.º interno termina en ,5.
+const EXTRA = new Set();
+export function setExtras(state) {        // se llama al cambiar los datos (render)
+  EXTRA.clear();
+  for (const w of rows(state, "sampling_weeks")) if (Number(w.week_number) % 1) EXTRA.add(w.start_date || w.uid);
+}
+export function isExtra(start) { return EXTRA.has(start); }
+export function weekShort(start) {         // «S42» · «S42.5» (encabezados y ejes)
+  return `S${isoWeek(parseDate(start))[0]}${EXTRA.has(start) ? ".5" : ""}`;
+}
+export function extraOf(monday) {        // el muestreo extra de la semana (o null)
+  const end = iso(addDays(parseDate(monday), 6));
+  return [...EXTRA].find((s) => s > monday && s <= end) || null;
+}
+export function regularOf(start) { return EXTRA.has(start) ? iso(mondayOf(parseDate(start))) : start; }
+export function nextWeek(start, dir) {   // 42 → 42.5 → 43 y al revés (= Database.next_week)
+  const mon = regularOf(start);
+  if (dir > 0) {
+    if (!EXTRA.has(start) && extraOf(mon)) return extraOf(mon);
+    return iso(addDays(parseDate(mon), 7));
+  }
+  if (EXTRA.has(start)) return mon;
+  const prev = iso(addDays(parseDate(mon), -7));
+  return extraOf(prev) || prev;
+}
+export function extraWeekChange(monday, day) {
+  const [w] = isoWeek(parseDate(monday));
+  const d = parseDate(day);
+  return [{ entity: "sampling_weeks", uid: day, ts: nowTs(), deleted: 0,
+    data: { season: seasonOf(parseDate(monday)), week_number: w + .5, start_date: day,
+      label: `Muestreo extra del ${d.getUTCDate()} de ${MESES[d.getUTCMonth()]}`, skipped: 0 } }];
+}
+
 export function observationFor(state, varietyUid, weekStart) {
   return rows(state, "observations").find((o) => o.variety_id === varietyUid && o.week_id === weekStart) || null;
 }
@@ -307,10 +342,13 @@ export function seasonWeeks(state, season) {
     && (!fixed || s >= fixed)).sort();
   if (!starts.length) return [];
   const out = [];
-  for (let d = parseDate(fixed && fixed < starts[0] ? fixed : starts[0]); iso(d) <= starts[starts.length - 1]; d = addDays(d, 7)) {
-    if (!skipped.has(iso(d))) out.push(iso(d));
+  const last = starts[starts.length - 1];
+  for (let d = mondayOf(parseDate(fixed && fixed < starts[0] ? fixed : starts[0])); iso(d) <= last; d = addDays(d, 7)) {
+    if (!skipped.has(iso(d)) && !EXTRA.has(iso(d))) out.push(iso(d));
   }
-  return out;
+  // Muestreos extra (42.5) de la temporada, entre sus semanas.
+  for (const x of EXTRA) if (seasonOf(parseDate(x)) === season && !skipped.has(x) && x >= out[0] && x <= iso(addDays(parseDate(last), 6))) out.push(x);
+  return out.sort();
 }
 export function seasons(state) {
   const s = new Set(rows(state, "observations").filter((o) => hasData(state, o)).map((o) => seasonOf(parseDate(o.week_id))));

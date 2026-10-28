@@ -581,12 +581,17 @@ function goSeason(season) {                 // la semana actual o la última con
 function renderWeek() {
   const season = C.seasonOf(C.parseDate(S.week));
   seasonOptions($("season"), season);
-  $("kicker").textContent = C.weekTitle(S.week).toUpperCase();
+  const extra = C.isExtra(S.week);
+  document.querySelector(".weekbar").classList.toggle("extra", extra);
+  $("extraweek").textContent = extra ? `‹ Volver a la ${C.weekTitle(C.regularOf(S.week)).split(",")[0]}`
+    : (C.extraOf(S.week) ? "Muestreo extra ›" : "+ Muestreo extra");
+  $("kicker").textContent = C.weekTitle(S.week).toUpperCase() + (C.isExtra(S.week) ? " · MUESTREO EXTRA" : "");
   $("wtitle").textContent = C.weekLabel(S.week);
   $("wrange").textContent = C.weekRange(S.week);
 }
 
 function render() {
+  C.setExtras(S.state);                   // muestreos extra («Semana 42.5»)
   if (S.tab === "matrix") renderMatrix();
   if (S.tab === "reports") renderReports();
   if (S.tab === "settings") renderSettings();
@@ -846,11 +851,33 @@ async function saveDetail(ev) {
   } finally { $("dsave").disabled = false; }
 }
 
-function shift(days) {
-  const d = C.addDays(C.parseDate(S.week), days);
-  if (d.getUTCFullYear() < 2020 || d.getUTCFullYear() > 2050) return;
-  S.week = C.iso(d);
+function shift(dir) {                     // pasa por el muestreo extra: 42 → 42.5 → 43
+  const w = C.nextWeek(S.week, dir);
+  const y = C.parseDate(w).getUTCFullYear();
+  if (y < 2020 || y > 2050) return;
+  S.week = w;
   render();
+}
+
+// Muestreo extra (segundo muestreo de la semana): se elige su día con el calendario.
+function extraWeek() {
+  if (C.isExtra(S.week)) { S.week = C.regularOf(S.week); render(); return; }
+  if (C.extraOf(S.week)) { S.week = C.extraOf(S.week); render(); return; }
+  const i = $("extrapick"), mon = C.parseDate(S.week);
+  i.min = C.iso(C.addDays(mon, 1)); i.max = C.iso(C.addDays(mon, 6));
+  const today = C.iso(C.todayUTC());
+  i.value = today >= i.min && today <= i.max ? today : i.min;
+  try { i.showPicker(); } catch { i.focus(); i.click(); }
+}
+async function extraPicked() {
+  const day = $("extrapick").value, mon = S.week;
+  if (!day || day <= mon || day > C.iso(C.addDays(C.parseDate(mon), 6))) return;
+  try {
+    await send(C.extraWeekChange(mon, day));
+    S.week = day;
+    render();
+    status(`${C.weekTitle(day)}: muestreo extra creado.`);
+  } catch (e) { status(`No se pudo crear el muestreo extra: ${e.message}`); }
 }
 
 // ================================================================== mediciones
@@ -1293,7 +1320,7 @@ function renderMatrix() {
     const heat = all.filter((r) => r.pts.length);
     const t = document.createElement("table");
     t.className = "hm";
-    t.innerHTML = `<thead><tr><th></th>${weeks.map((w) => `<th title="${C.weekLabel(w)}">S${C.isoWeek(C.parseDate(w))[0]}</th>`).join("")}</tr></thead>`;
+    t.innerHTML = `<thead><tr><th></th>${weeks.map((w) => `<th title="${C.weekLabel(w)}">${C.weekShort(w)}</th>`).join("")}</tr></thead>`;
     const tb = document.createElement("tbody");
     for (const r of heat) {
       const tr = document.createElement("tr");
@@ -1667,8 +1694,10 @@ async function boot() {
     S.week = C.iso(C.mondayOf(d));
     render();
   };
-  $("prev").onclick = () => shift(-7);
-  $("next").onclick = () => shift(7);
+  $("prev").onclick = () => shift(-1);
+  $("next").onclick = () => shift(1);
+  $("extraweek").onclick = extraWeek;
+  $("extrapick").onchange = extraPicked;
   $("today").onclick = () => { S.week = C.iso(C.mondayOf(C.todayUTC())); render(); };
   NB.init({ S, send, photoUrl, resize, uploadPhoto: uploadNotePhoto });
   $("trainfab").hidden = !TR.enabled();      // se activa abriendo la web con «#lab» una vez

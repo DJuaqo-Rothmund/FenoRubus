@@ -337,8 +337,9 @@ def legacy_season_of(date: _dt.date) -> int:
     return date.year if date.month >= 7 else date.year - 1
 
 
-def week_label(start: _dt.date) -> str:
-    return f"Semana del {start.day} de {MESES[start.month - 1]}"
+def week_label(start: _dt.date, extra: bool = False) -> str:
+    """«Semana del 12 de octubre»; «Muestreo extra del 15 de octubre»."""
+    return f"{'Muestreo extra' if extra else 'Semana'} del {start.day} de {MESES[start.month - 1]}"
 
 
 def format_date_es(d: _dt.date, with_year: bool = True) -> str:
@@ -376,25 +377,49 @@ def _week_date(week):
     return week["start_date"] if isinstance(week, dict) else week
 
 
+def is_extra(week) -> bool:
+    """Muestreo extra de la semana (segundo muestreo, «Semana 44.5»): su número interno
+    es el de la semana + 0,5 y su fecha, el día en que se hizo."""
+    if not isinstance(week, dict):
+        return False
+    n = week.get("week_number")
+    return n is not None and float(n) % 1 != 0
+
+
+def _wnum(week) -> str:
+    """«44» o «44.5» (muestreo extra)."""
+    w = iso_week(_week_date(week))[0]
+    return f"{w}.5" if is_extra(week) else str(w)
+
+
+def week_dir(week) -> str:
+    """Carpeta local de las fotos de la semana: «S08» o «S08.5» (muestreo extra)."""
+    n = float(week["week_number"])
+    return f"S{int(n):02d}" + (".5" if n % 1 else "")
+
+
 def week_title(week) -> str:
-    """«Semana 33, año 2026» a partir de una semana de muestreo (o su fecha de inicio)."""
+    """«Semana 33, año 2026» a partir de una semana de muestreo (o su fecha de inicio);
+    «Semana 33.5, año 2026» en un muestreo extra."""
     w, y = iso_week(_week_date(week))
-    return f"Semana {w}, año {y}"
+    return f"Semana {_wnum(week)}, año {y}"
 
 
 def week_long(week) -> str:
     """«Semana 42 del año 2026»."""
     w, y = iso_week(_week_date(week))
-    return f"Semana {w} del año {y}"
+    return f"Semana {_wnum(week)} del año {y}"
 
 
 def week_short(week) -> str:
-    """«S33»: rótulo corto (ejes de gráficos, rangos)."""
-    return f"S{iso_week(_week_date(week))[0]}"
+    """«S33»: rótulo corto (ejes de gráficos, rangos); «S33.5» en un muestreo extra."""
+    return f"S{_wnum(week)}"
 
 
-def week_of_year(week) -> int:
-    return iso_week(_week_date(week))[0]
+def week_of_year(week):
+    """Semana del año (int); en un muestreo extra, con medio (33.5)."""
+    w = iso_week(_week_date(week))[0]
+    return w + .5 if is_extra(week) else w
 
 
 def season_title(season: int) -> str:

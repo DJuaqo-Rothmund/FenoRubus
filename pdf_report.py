@@ -11,6 +11,7 @@ desde el PDF, como antes desde el HTML.
 from __future__ import annotations
 
 import json
+import math
 
 import phenology as ph
 from pdfdoc import PAGE_H, PAGE_W, PDFDoc
@@ -355,7 +356,7 @@ class Report(PDFDoc):
         self.line(x0, y0 + hh, x0 + w, y0 + hh, MUTED, .6)
         span = wmax - wmin
         step = 1 if span <= 14 else (2 if span <= 28 else 4)
-        for wk in range(wmin, wmax + 1, step):
+        for wk in range(int(wmin), int(math.ceil(wmax)) + 1, step):
             self.text(X(wk), y0 + hh + 10, f"S{labels.get(wk, labels.get(str(wk), wk))}", 6.5, False,
                       MUTED, "center")
         sel = raw.get("sel", [])
@@ -661,7 +662,7 @@ def variety(ctx: dict, names: dict, num=None) -> Report:
         if pts:
             lo = min(p[0] for p in pts)
             hi = max(max(p[0] for p in pts), lo + 1)
-            labels = {t["week_number"]: ph.week_of_year(t["start_date"]) for t in timeline}
+            labels = {t["week_number"]: ph.week_of_year(t) for t in timeline}
             r.chart({"series": [{"id": v["id"], "name": v["name"], "points": pts}], "sel": [v["id"]],
                      "wmin": lo, "wmax": hi, "labels": labels})
     if any(t["code"] is not None for t in timeline):

@@ -353,7 +353,7 @@ def relink_photos(db, dirs: list[str] | None = None) -> dict:
 
     def link(r, src):
         used.add(src)
-        dest_dir = data_subdir("photos", f"T{r['season']}", f"S{r['week_number']:02d}")
+        dest_dir = data_subdir("photos", f"T{r['season']}", ph.week_dir(r))
         _set_path(db, r["id"], store_photo(src, dest_dir, base_name(r), exact=True))
 
     pending = []
@@ -370,7 +370,7 @@ def relink_photos(db, dirs: list[str] | None = None) -> dict:
             relinked += 1
             continue
         # 2) Nombre descriptivo «variedad_S03_detalle_fecha» (versiones de septiembre).
-        prefix = f"{slugify(r['variety'])}_S{r['week_number']:02d}_{KIND_LABEL.get(r['kind'], r['kind'])}"
+        prefix = f"{slugify(r['variety'])}_{ph.week_dir(r)}_{KIND_LABEL.get(r['kind'], r['kind'])}"
         cands = [c for c in index.get(prefix.lower(), []) if c[1] not in used]
         if cands:
             ref = _when(r["captured_at"])
@@ -626,7 +626,7 @@ def import_reports(db, paths: list[str], progress=None) -> ReportImport:
                     continue
                 with open(tmp, "wb") as f:
                     f.write(data)
-                dest_dir = data_subdir("photos", f"T{week['season']}", f"S{week['week_number']:02d}")
+                dest_dir = data_subdir("photos", f"T{week['season']}", ph.week_dir(week))
                 stored = store_photo(tmp, dest_dir, ph.photo_basename(v, week["start_date"], kind,
                                                                       trial=db.code),
                                      exact=True)

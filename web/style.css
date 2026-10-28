@@ -370,3 +370,13 @@ dialog.tpage[open] { display: flex; }
 }
 
 .txrow { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; margin: 6px 0; }
+
+/* Muestreo extra («Semana 42.5»): misma semana en tonos frambuesa */
+.weektools { position: relative; }
+.extrabtn { color: var(--berry); border-color: var(--berry-soft); background: var(--berry-soft); font-weight: 600; }
+.weekbar.extra { box-shadow: inset 0 0 0 2px var(--berry-soft); }
+.weekbar.extra .kicker { color: var(--berry); }
+.weekbar.extra .wtitle { color: var(--berry-dark); }
+.weekbar.extra .progress { background: var(--berry-soft); }
+.weekbar.extra .progress div { background: var(--berry); }
+.weekbar.extra .extrabtn { background: var(--berry); color: #fff; }

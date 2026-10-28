@@ -2260,3 +2260,76 @@ def test_extra_photos_list_recursive_and_keys(tmp_path, monkeypatch):
     full = ex.local_path(photos[1])
     open(full, "wb").write(b"x")
     assert ex.release(photos[1]) and not os.path.exists(full)
+
+
+def test_extra_sampling_week(tmp_path):
+    """Muestreo extra («Semana 44.5»): segundo muestreo de la semana con su propia fecha;
+    las flechas pasan 44 → 44.5 → 45, viaja a otro equipo (también si se cambia la fecha)
+    y se mantiene al reabrir la base."""
+    import sync
+    a_dir = str(tmp_path / "a")
+    a = Database(os.path.join(a_dir, "a.sqlite3"))
+    a.set_season_start(2026, dt.date(2026, 9, 7))
+    v = a.add_variety("Variedad muestreo extra")
+    w44 = a.week_for_date(dt.date(2026, 10, 26))
+    with pytest.raises(ValueError):
+        a.add_extra_week(w44, dt.date(2026, 10, 26))         # el mismo primer día: no
+    ex = a.add_extra_week(w44, dt.date(2026, 10, 29))
+    assert ph.is_extra(ex) and ex["week_number"] == w44["week_number"] + .5
+    assert ph.week_title(ex) == "Semana 44.5, año 2026" and ph.week_dir(ex) == "S08.5"
+    assert a.week_end(ex) == dt.date(2026, 11, 1)
+    w45 = a.week_for_date(dt.date(2026, 11, 2))
+    assert a.next_week(w44, 1)["id"] == ex["id"] and a.next_week(ex, 1)["id"] == w45["id"]
+    assert a.next_week(w45, -1)["id"] == ex["id"] and a.next_week(ex, -1)["id"] == w44["id"]
+    assert a.week_for_date(dt.date(2026, 10, 30))["id"] == w44["id"]     # el calendario: la semana
+    o = a.get_or_create_observation(v, ex["id"])
+    a.update_observation(o["id"], bbch_code=63)
+    assert [w["week_number"] for w in a.list_weeks(2026)][-3:] == [8, 8.5, 9]
+
+    b_dir = str(tmp_path / "b")
+    b = Database(os.path.join(b_dir, "b.sqlite3"))
+    b.current_week(dt.date(2026, 10, 28))
+    sync.apply_changes(b, sync.export_changes(a, a_dir), b_dir, week_for_date=b.week_for_date)
+    bex = b.extra_week(b.week_for_date(dt.date(2026, 10, 26)))
+    assert bex and bex["start_date"] == "2026-10-29" and ph.is_extra(bex)
+    assert b.query_one("SELECT bbch_code FROM observations WHERE week_id=?", (bex["id"],))["bbch_code"] == 63
+
+    sync.mark_exported(a, sync.export_changes(a, a_dir))
+    a.add_extra_week(w44, dt.date(2026, 10, 30))              # cambio de fecha: también viaja
+    sync.apply_changes(b, sync.export_changes(a, a_dir), b_dir, week_for_date=b.week_for_date)
+    bex = b.extra_week(b.week_for_date(dt.date(2026, 10, 26)))
+    assert bex["start_date"] == "2026-10-30"
+    assert b.query_one("SELECT bbch_code FROM observations WHERE week_id=?", (bex["id"],))["bbch_code"] == 63
+    assert b.query_one("SELECT COUNT(*) AS n FROM sampling_weeks WHERE week_number != CAST(week_number AS INTEGER)")["n"] == 1
+
+    a.close()
+    a = Database(os.path.join(a_dir, "a.sqlite3"))            # al reabrir sigue siendo 44.5
+    assert ph.is_extra(a.extra_week(a.week_for_date(dt.date(2026, 10, 26))))
+    a.delete_extra_week(a.extra_week(a.week_for_date(dt.date(2026, 10, 26))))
+    assert a.extra_week(a.week_for_date(dt.date(2026, 10, 26))) is None
+
+
+def test_extra_sampling_from_web_bundle(tmp_path):
+    """El muestreo extra creado en la web (n.º de semana del año + 0,5, uid = su fecha)
+    llega al teléfono como muestreo extra de su semana, con su registro."""
+    import sync
+    d = str(tmp_path / "cel")
+    db = Database(os.path.join(d, "a.sqlite3"))
+    db.current_week(dt.date(2026, 10, 28))
+    v = db.add_variety("Variedad web extra")
+    vuid = db.query_one("SELECT uid FROM varieties WHERE id=?", (v,))["uid"]
+    ts = "2026-10-16T10:00:00"
+    bundle = {"format": 1, "device": "web123", "workspace": "", "changes": [
+        {"entity": "sampling_weeks", "uid": "2026-10-15", "ts": ts, "deleted": 0,
+         "data": {"season": 2026, "week_number": 42.5, "start_date": "2026-10-15",
+                  "label": "Muestreo extra del 15 de octubre", "skipped": 0}},
+        {"entity": "observations", "uid": "o-web-1", "ts": ts, "deleted": 0,
+         "data": {"variety_id": vuid, "week_id": "2026-10-15", "bbch_code": 65, "bbch_label": "x",
+                  "created_at": ts, "updated_at": ts}},
+    ]}
+    sync.apply_changes(db, bundle, d, week_for_date=db.week_for_date)
+    week = db.week_for_date(dt.date(2026, 10, 12))
+    ex = db.extra_week(week)
+    assert ex and ex["start_date"] == "2026-10-15" and ex["week_number"] == week["week_number"] + .5
+    assert db.query_one("SELECT bbch_code FROM observations WHERE week_id=?", (ex["id"],))["bbch_code"] == 65
+    assert db.query_one("SELECT bbch_code FROM observations WHERE week_id=?", (week["id"],)) is None
