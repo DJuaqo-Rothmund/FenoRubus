@@ -191,7 +191,7 @@ class Panel:
         card.add_widget(Factory.MindMuted(
             text=f"Fotos que no son de un ensayo ni de un predio, solo para entrenar IA+. Se guardan en Drive, "
                  f"carpeta «{ex.FOLDER}». Para subir muchas a la vez (con sus carpetas) use la web: "
-                 f"Entrenar IA › Subir fotos extra."))
+                 f"IA+ › Subir fotos extra."))
         row = BoxLayout(size_hint_y=None, height=dp(44), spacing=dp(8))
         for icon, label, src in (("camera-outline", "Cámara", "camera"), ("image-multiple-outline", "Galería", "gallery")):
             b = Factory.MindGhost(icon=icon, text=label)
@@ -287,7 +287,7 @@ class Panel:
 
     def open(self, i):
         if not has_iaplus():
-            app().toast("Las fotos extra se marcan en IA+ (app Lab) o en la web «Entrenar IA».")
+            app().toast("Las fotos extra se marcan en IA+ (app Lab) o en la web (botón IA+).")
             return
         from ui import boxes
         boxes.open_extra(self.list, i, on_close=self.render)
