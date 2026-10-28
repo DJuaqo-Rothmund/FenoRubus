@@ -84,6 +84,7 @@ START_AI_NIGHT = resource_path("assets", "ui", "start_ai_night.png")
 AI_GLOW = resource_path("assets", "ui", "ai_glow.png")
 START_NOTEBOOK = resource_path("assets", "ui", "start_notebook.png")   # cuaderno con frambuesa
 BLOB_NOTEBOOK = resource_path("assets", "ui", "blob_notebook.png")
+IAPLUS = resource_path("assets", "ui", "iaplus.png")              # IA+ celeste con aura roja tenue
 AI_BAR = resource_path("assets", "ui", "ai_bar.png")               # cerebro azul (barra)
 DRIVE_UP = resource_path("assets", "ui", "drive_up.png")           # hay algo por subir
 DRIVE_OK = resource_path("assets", "ui", "drive_ok.png")           # todo al día

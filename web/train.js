@@ -46,7 +46,14 @@ export function init(ctx) {
     document.querySelectorAll("#tfilter button").forEach((x) => x.classList.toggle("on", x === b));
     renderList();
   }));
-  $("trainfab").onclick = () => { $("tpage").showModal(); load(false); };
+  $("trainfab").onclick = () => { wsFilter = ""; $("tpage").showModal(); load(false); };
+  // IA+: directo a las fotos extra («IA+ Conocimiento ampliado») y a subir más.
+  $("iaplusfab").onclick = async () => {
+    wsFilter = "IA+";
+    $("tpage").showModal();
+    await load(false);
+    $("txfiles").scrollIntoView({ block: "center" });
+  };
   $("tpageclose").onclick = () => $("tpage").close();
   $("treload").onclick = () => load(true);
   // Fotos extra (IA+ Conocimiento ampliado): fotos sueltas o una carpeta con subcarpetas.
