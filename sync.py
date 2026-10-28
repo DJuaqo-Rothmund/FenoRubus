@@ -203,9 +203,18 @@ def apply_changes(db, bundle: dict, data_dir: str, week_for_date=None) -> dict:
         c["deleted"], -rank.get(c["entity"], 99) if c["deleted"] else rank.get(c["entity"], 99), c["ts"]))
     db.execute("UPDATE sync_state SET value='1' WHERE key='applying'")
     try:
+        moved = []
         for key, value in (bundle.get("settings") or {}).items():
             if key.startswith(SETTING_PREFIXES):
+                if key.startswith("season_start:"):
+                    old = db.query_one("SELECT value FROM settings WHERE key=?", (key,))
+                    if (old or {}).get("value") != value:
+                        moved.append(int(key.split(":", 1)[1]))
                 db.execute("INSERT OR REPLACE INTO settings(key, value) VALUES (?, ?)", (key, value))
+        # Llegó otra Semana 1: las semanas ya creadas aquí se renumeran por su fecha.
+        for season in moved:
+            if hasattr(db, "renumber_weeks"):
+                db.renumber_weeks(season)
         for ch in changes:
             table = ch["entity"]
             if table not in TABLES:
