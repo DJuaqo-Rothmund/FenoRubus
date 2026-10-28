@@ -663,20 +663,8 @@ class HomeScreen(MDScreen):
                 return btn
         return None
 
-    def _style_actions(self):
-        if getattr(self, "_styled", False):
-            return
-        ai = self._action((theme.AI_BAR,))
-        if ai is not None and ai.ids.lbl_ic._size[0]:   # el cerebro, más grande que el resto
-            lbl = ai.ids.lbl_ic
-            grow = dp(31) - lbl._size[0]
-            lbl._size = [dp(31), dp(31)]
-            lbl.y -= grow / 2
-            self._styled = True
-
     def update_drive_icon(self, *_):
         """Drive con flecha (hay algo por subir), con check (al día) o tachado (sin cuenta)."""
-        self._style_actions()
         if getattr(self, "_spin_ev", None):
             return   # subiendo: lo actualiza la animación
         btn = self._action([theme.DRIVE_UP, theme.DRIVE_OK, theme.DRIVE_OFF])

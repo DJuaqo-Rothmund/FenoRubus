@@ -582,3 +582,91 @@ class AuraCheck(ButtonBehavior, Widget):
             if self.active:
                 Color(*c("#BAE6FD"))
                 Ellipse(pos=(cx - r * .55, cy - r * .55), size=(r * 1.1, r * 1.1))
+
+
+# ------------------------------------------------------------------ IA+: «ki» rojo
+_ki_tex = None
+
+
+def ki_texture():
+    """Mancha roja difusa (degradado radial), una sola textura para todas las volutas."""
+    global _ki_tex
+    if _ki_tex is None:
+        from kivy.graphics.texture import Texture
+        n = 64
+        buf = bytearray()
+        for y in range(n):
+            for x in range(n):
+                d = math.hypot((x - n / 2 + .5) / (n / 2), (y - n / 2 + .5) / (n / 2))
+                a = max(0.0, 1 - d) ** 1.8
+                buf += bytes((255, 45, 75, int(255 * a)))
+        tex = Texture.create(size=(n, n), colorfmt="rgba")
+        tex.blit_buffer(bytes(buf), colorfmt="rgba", bufferfmt="ubyte")
+        _ki_tex = tex
+    return _ki_tex
+
+
+class KiButton(ButtonBehavior, Widget):
+    """Botón IA+: el logo con un «ki» rojo que emana del dibujo y se evapora hacia arriba
+    (volutas difusas que suben, crecen y se desvanecen, y un aura que respira). Las
+    instrucciones se crean una vez; cada cuadro solo las mueve (30 por segundo, y solo
+    mientras se ve)."""
+    source = StringProperty("")
+    N = 7
+
+    def __init__(self, **kw):
+        super().__init__(**kw)
+        self._t = 0.0
+        self._ev = None
+        tex = ki_texture()
+        rnd = random.Random(3)
+        self._wisps = [{"x": rnd.uniform(.12, .78), "ph": i / self.N, "w": rnd.uniform(.32, .46)}
+                       for i in range(self.N)]
+        with self.canvas.before:
+            self._aura_col = Color(1, 1, 1, .5)
+            self._aura = Rectangle(texture=tex)
+            self._cols, self._rects = [], []
+            for _ in self._wisps:
+                self._cols.append(Color(1, 1, 1, 0))
+                self._rects.append(Rectangle(texture=tex))
+        with self.canvas:
+            self._img_col = Color(1, 1, 1, 1)
+            self._img = Rectangle()
+        self.bind(source=self._load, pos=self._step0, size=self._step0, state=self._press)
+
+    def _load(self, *_):
+        from kivy.core.image import Image as CoreImage
+        self._img.texture = CoreImage(self.source).texture if self.source else None
+
+    def _press(self, *_):
+        self._img_col.a = .75 if self.state == "down" else 1
+
+    def on_parent(self, *_):
+        if self.parent is not None and self._ev is None:
+            self._ev = Clock.schedule_interval(self._step, 1 / 30)
+
+    def _step0(self, *_):
+        self._img.pos, self._img.size = self.pos, self.size
+        self._step(0)
+
+    def _step(self, dt):
+        if dt and self.get_root_window() is None:
+            if self._ev is not None:
+                self._ev.cancel()
+                self._ev = None
+            return
+        self._t += dt
+        x, y, w, h = self.x, self.y, self.width, self.height
+        beat = .5 + .5 * math.sin(self._t * 2.4)
+        r = w * (.62 + .1 * beat)
+        self._aura.pos, self._aura.size = (x + w / 2 - r, y + h / 2 - r), (2 * r, 2 * r)
+        self._aura_col.a = .45 + .3 * beat
+        life = 2.6
+        for wsp, col, rect in zip(self._wisps, self._cols, self._rects):
+            k = ((self._t / life) + wsp["ph"]) % 1.0           # 0 → 1 a lo largo de su vida
+            ww = w * wsp["w"] * (.6 + .7 * k)
+            hh = ww * (1.1 + .9 * k)
+            cx = x + w * wsp["x"] + math.sin(self._t * 1.7 + wsp["ph"] * 6) * w * .04
+            cy = y + h * .35 + k * h * 1.05
+            rect.pos, rect.size = (cx - ww / 2, cy - hh / 2), (ww, hh)
+            col.a = (min(1, k / .2) * (1 - k)) * .85
