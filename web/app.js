@@ -1570,6 +1570,21 @@ async function boot() {
   $("rweek").onchange = (e) => { e.target.dataset.touched = "1"; };
   document.querySelectorAll("[data-rep]").forEach((b) => (b.onclick = () => runReport(b.dataset.rep)));
   document.querySelectorAll("[data-pdf]").forEach((b) => (b.onclick = () => runPdf(b.dataset.pdf)));
+  // Tocar «Semana del …»: calendario; cualquier día lleva a la semana que lo contiene.
+  const pickWeek = () => {
+    const i = $("wpick");
+    i.value = S.week;
+    try { i.showPicker(); } catch { i.focus(); i.click(); }
+  };
+  $("wtitle").onclick = pickWeek;
+  $("wtitle").onkeydown = (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); pickWeek(); } };
+  $("wpick").onchange = () => {
+    if (!$("wpick").value) return;
+    const d = C.parseDate($("wpick").value);
+    if (d.getUTCFullYear() < 2020 || d.getUTCFullYear() > 2050) return;
+    S.week = C.iso(C.mondayOf(d));
+    render();
+  };
   $("prev").onclick = () => shift(-7);
   $("next").onclick = () => shift(7);
   $("today").onclick = () => { S.week = C.iso(C.mondayOf(C.todayUTC())); render(); };

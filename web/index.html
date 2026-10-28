@@ -49,7 +49,8 @@
       <div class="week">
         <select id="season" class="chip" aria-label="Temporada"></select>
         <div id="kicker" class="kicker"></div>
-        <div id="wtitle" class="wtitle"></div>
+        <div id="wtitle" class="wtitle pickable" role="button" tabindex="0" title="Elegir un día en el calendario"></div>
+        <input type="date" id="wpick" class="wpick" min="2020-01-01" max="2050-12-31" tabindex="-1" aria-hidden="true">
         <div id="wrange" class="muted"></div>
       </div>
       <button id="next" class="round" aria-label="Semana siguiente">›</button>
@@ -297,18 +298,25 @@
           <div class="nbwrap">
             <textarea id="nbtext" class="nbpaper" placeholder="¿Qué se vio hoy en terreno? Clima, labores, plagas, ideas…"></textarea>
             <canvas id="nbink" class="nbink"></canvas>
+            <button type="button" id="nbseldel" class="nbseldel" title="Borrar lo elegido" hidden>🗑</button>
           </div>
           <div class="nbtools">
-            <span class="seg"><button type="button" id="nbkeys" class="on" title="Escribir con teclado"><b class="aa">Aa</b></button><button type="button" id="nbpen" title="Escribir a mano"><svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><path fill="currentColor" d="M17.8 2.6a1.9 1.9 0 0 1 2.7 0l.9.9a1.9 1.9 0 0 1 0 2.7l-9.7 9.7-4 1.3 1.3-4zM3 20.2c1.6-1.8 3.2-1.6 4.4-.5 1.1 1 2.3 1.2 3.6.2.8-.6 1.6-.7 2.5.1l-.9 1.1c-.4-.3-.7-.3-1 0-1.9 1.4-3.8 1.1-5.2-.2-.8-.7-1.6-.7-2.4.3z"/></svg></button></span>
-            <span id="nbpentools" class="nbpentools" hidden>
-              <span class="seg pens">
-                <button type="button" class="penk on" data-k="lapiz" title="Lápiz (con presión)">Lápiz</button>
-                <button type="button" class="penk" data-k="pl" title="Plumón">Plumón</button>
-                <button type="button" class="penk" data-k="hl" title="Destacador">Destacador</button>
-              </span>
+            <span class="nbgroup">
+              <button type="button" id="nbkeys" class="tool on" title="Escribir con teclado"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="2.5" y="6" width="19" height="12" rx="2.5" fill="none" stroke="currentColor" stroke-width="1.8"/><path fill="currentColor" d="M5.5 9h2v2h-2zm3.5 0h2v2H9zm3.5 0h2v2h-2zm3.5 0h2v2h-2zM5.5 12.5h2v2h-2zm3.5 0h6v2H9zm7 0h2v2h-2z"/></svg></button>
+              <button type="button" id="nbpen" class="tool" data-mode="pen" title="Pluma (con presión si es un lápiz)"><svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M14.6 3.4 20.6 9.4 18.4 11.6 17 10.2 10.9 16.3 6.3 17.7 7.7 13.1 13.8 7 12.4 5.6zM9 14.1 8.6 15.4 9.9 15l5.7-5.7-1-1zM3 21v-1.6h18V21z"/></svg></button>
+              <button type="button" id="nbhl" class="tool" data-mode="hl" title="Destacador"><svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M15.3 2.6 21.4 8.7 12.9 17.2 6.8 11.1zM5.9 12.3l5.8 5.8-1.7 1.7-5.8.4.4-.6-1.3-1.3z"/><rect id="nbhlbar" x="2.5" y="20.6" width="19" height="2.4" rx="1.2" fill="#FFEB3B"/></svg></button>
+              <button type="button" id="nberase" class="tool" data-mode="erase" title="Goma: toque un trazo para borrarlo (o use el botón del lápiz)"><svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M15.1 3.6 21 9.5c.8.8.8 2 0 2.8L12.3 21H6.7l-3.7-3.7c-.8-.8-.8-2 0-2.8l9.3-9.3c.8-.8 2-.8 2.8 0zM5.8 13.1 4.4 14.5 7.5 17.6h3.9l1.1-1.1z"/><path fill="currentColor" d="M13 19.4h8V21h-8z"/></svg></button>
+              <button type="button" id="nblasso" class="tool" data-mode="lasso" title="Lazo: rodee trazos para moverlos, pintarlos o borrarlos"><svg viewBox="0 0 24 24" aria-hidden="true"><ellipse cx="12.5" cy="9.5" rx="8.5" ry="5.5" fill="none" stroke="currentColor" stroke-width="1.8" stroke-dasharray="3 2.4"/><path d="M7.6 14c-1.7 1.2-2 3.2-.4 4.2 1.4.9 3.5.3 3.4 2.3" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg></button>
+              <button type="button" id="nbinkundo" class="tool" title="Deshacer"><svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M12.5 8c-2.6 0-5 1-6.9 2.6L2 7v9h9l-3.6-3.6c1.4-1.2 3.2-1.9 5.1-1.9 3.5 0 6.5 2.3 7.6 5.5l2.4-.8C21.1 11 17.2 8 12.5 8z"/></svg></button>
+            </span>
+            <span class="vsep"></span>
+            <span class="nbgroup">
               <span id="nbinks" class="nbinks"></span>
-              <button type="button" id="nberase" class="ghost" title="Goma: toque un trazo para borrarlo (o use el botón del lápiz)">Goma</button>
-              <button type="button" id="nbinkundo" class="ghost" title="Deshacer">↶</button>
+              <span id="nbinkw" class="nbwidths">
+                <button type="button" class="wd" data-w="0" title="Grueso"><i style="height:7px"></i></button>
+                <button type="button" class="wd on" data-w="1" title="Medio"><i style="height:4.5px"></i></button>
+                <button type="button" class="wd" data-w="2" title="Fino"><i style="height:2.5px"></i></button>
+              </span>
             </span>
           </div>
         </div>

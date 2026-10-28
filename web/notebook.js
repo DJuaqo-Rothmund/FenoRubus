@@ -30,7 +30,6 @@ export function init(ctx) {
   $("nbnew").onclick = () => openPage(C.iso(C.todayUTC()));
   $("nbtext").oninput = dirty;
   $("nbkeys").onclick = () => setPen(false);
-  $("nbpen").onclick = () => setPen(true);
   Ink.init();
   $("nbpage").addEventListener("close", () => { saveText(); renderNotebook(); });
   $("nbdate").onchange = (e) => moveTo(e.target.value);
@@ -53,12 +52,9 @@ function dirty() {
 
 function setPen(on) {
   document.querySelector(".nbsheet").classList.toggle("pen", on);
-  $("nbkeys").classList.toggle("on", !on);
-  $("nbpen").classList.toggle("on", on);
-  $("nbpentools").hidden = !on;
-  Ink.erase = false;
-  $("nberase").classList.remove("on");
   if (on) $("nbtext").blur();
+  else Ink.clearSel();
+  Ink.syncBar();
   Ink.draw();
 }
 
@@ -381,52 +377,117 @@ function paint(g, strokes) {
 // Igual que la app (ui.notebook.InkLayer): trazos en renglones desde el borde superior
 // izquierdo del texto, así la letra queda en el mismo renglón en el teléfono y en la web.
 const LINE = 30, PAD_X = 14;
-// Plumas (= ui.notebook.PENS): grosor en renglones, opacidad y presión.
-const PENS = { lapiz: { w: .06, a: 1, pressure: true }, pl: { w: .13, a: 1 }, hl: { w: .55, a: .35 } };
-const INKS = ["#1E3A8A", "#212121", "#C62828", "#2E7D32"], HLS = ["#FFEB3B", "#76FF03", "#FF4081", "#40C4FF"];
+// Barra (= ui.notebook): teclado · pluma · destacador · goma · lazo | 5 colores | 3 grosores.
+const INKS = ["#212121", "#1E3A8A", "#C62828", "#E65100", "#2E7D32"];
+const HLS = ["#FFEB3B", "#76FF03", "#FF4081", "#40C4FF", "#FFAB40"];
+const WIDTHS = { pen: [.11, .065, .04], hl: [.75, .55, .35] };
+const ALPHA = { hl: .35 };                     // los demás trazos (pluma, plumón antiguo): 1
+
+function inside(x, y, poly) {                 // punto dentro de un polígono (rayos)
+  let hit = false;
+  for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+    const [xi, yi] = poly[i], [xj, yj] = poly[j];
+    if ((yi > y) !== (yj > y) && x < (xj - xi) * (y - yi) / ((yj - yi) || 1e-9) + xi) hit = !hit;
+  }
+  return hit;
+}
+
 const Ink = {
-  strokes: [], cur: null, color: INKS[0], pen: "lapiz", erase: false, pointers: new Map(), colors: {},
+  strokes: [], cur: null, mode: "pen", color: INKS[0], widthI: 1, pointers: new Map(),
+  colors: {}, widths: {}, sel: [], lasso: null, drag: null,
   init() {
     this.cv = $("nbink");
     this.g = this.cv.getContext("2d");
     this.ta = $("nbtext");
     this.ta.addEventListener("scroll", () => this.draw());
     new ResizeObserver(() => this.fit()).observe(this.ta);
-    document.querySelectorAll("#nbpentools .penk").forEach((b) => (b.onclick = () => this.setPen(b.dataset.k)));
-    this.swatches();
-    $("nberase").onclick = () => { this.erase = !this.erase; $("nberase").classList.toggle("on", this.erase); };
-    $("nbinkundo").onclick = () => { if (this.strokes.pop()) { this.draw(); dirty(); } };
+    document.querySelectorAll(".nbtools .tool[data-mode]").forEach((b) => (b.onclick = () => this.setMode(b.dataset.mode)));
+    document.querySelectorAll("#nbinkw .wd").forEach((b) => (b.onclick = () => this.setWidth(+b.dataset.w)));
+    $("nbinkundo").onclick = () => { if (this.strokes.pop()) { this.sel = []; this.draw(); dirty(); } };
+    $("nbseldel").onclick = () => this.deleteSel();
     this.cv.addEventListener("pointerdown", (e) => this.down(e));
     this.cv.addEventListener("pointermove", (e) => this.move(e));
     for (const ev of ["pointerup", "pointercancel"]) this.cv.addEventListener(ev, (e) => this.up(e));
     this.cv.addEventListener("contextmenu", (e) => e.preventDefault());   // botón del lápiz
     this.cv.addEventListener("wheel", (e) => { e.preventDefault(); this.ta.scrollTop += e.deltaY; }, { passive: false });
+    this.syncBar();
   },
-  setPen(k) {
-    this.pen = k; this.erase = false;
-    $("nberase").classList.remove("on");
-    document.querySelectorAll("#nbpentools .penk").forEach((x) => x.classList.toggle("on", x.dataset.k === k));
-    this.color = this.colors[k] || (k === "hl" ? HLS[0] : INKS[0]);
-    this.swatches();
+  penOn() { return document.querySelector(".nbsheet").classList.contains("pen"); },
+  setMode(m) {
+    if (this.mode === "pen" || this.mode === "hl") { this.colors[this.mode] = this.color; this.widths[this.mode] = this.widthI; }
+    if (m !== "lasso") this.clearSel();
+    this.mode = m;
+    if (m === "pen" || m === "hl") {
+      this.color = this.colors[m] || (m === "hl" ? HLS[0] : INKS[0]);
+      this.widthI = this.widths[m] ?? 1;
+    }
+    if (!this.penOn()) setPen(true); else this.syncBar();
   },
-  swatches() {
+  setColor(col) {
+    if (this.mode === "lasso" && this.sel.length) {           // pinta lo elegido
+      for (const i of this.sel) this.strokes[i].c = col;
+      this.draw(); dirty(); return;
+    }
+    if (this.mode !== "pen" && this.mode !== "hl") this.setMode("pen");
+    this.color = this.colors[this.mode] = col;
+    if (!this.penOn()) setPen(true); else this.syncBar();
+  },
+  setWidth(i) {
+    if (this.mode !== "pen" && this.mode !== "hl") this.setMode("pen");
+    this.widthI = this.widths[this.mode] = i;
+    if (!this.penOn()) setPen(true); else this.syncBar();
+  },
+  syncBar() {
+    const on = this.penOn(), drawing = on && (this.mode === "pen" || this.mode === "hl");
+    $("nbkeys").classList.toggle("on", !on);
+    document.querySelectorAll(".nbtools .tool[data-mode]").forEach((b) => b.classList.toggle("on", on && b.dataset.mode === this.mode));
+    $("nbhlbar").setAttribute("fill", this.colors.hl || (this.mode === "hl" ? this.color : HLS[0]));
     const box = $("nbinks");
     box.innerHTML = "";
-    for (const col of this.pen === "hl" ? HLS : INKS) {
+    for (const col of this.mode === "hl" ? HLS : INKS) {
       const b = document.createElement("button");
-      b.type = "button"; b.className = "ink" + (col === this.color ? " on" : "");
+      b.type = "button"; b.className = "ink" + (drawing && col === this.color ? " on" : "");
       b.style.background = col;
-      b.onclick = () => {
-        this.color = this.colors[this.pen] = col; this.erase = false;
-        $("nberase").classList.remove("on");
-        box.querySelectorAll(".ink").forEach((x) => x.classList.toggle("on", x === b));
-      };
+      b.title = "Color";
+      b.onclick = () => this.setColor(col);
       box.appendChild(b);
     }
+    document.querySelectorAll("#nbinkw .wd").forEach((b) => b.classList.toggle("on", drawing && +b.dataset.w === this.widthI));
+  },
+  // selección (lazo)
+  bounds() {
+    if (!this.sel.length) return null;
+    let x0 = 1e9, y0 = 1e9, x1 = -1e9, y1 = -1e9;
+    for (const i of this.sel) {
+      const s = this.strokes[i], pad = s.w / 2;
+      for (let j = 0; j < s.p.length; j += 2) {
+        x0 = Math.min(x0, s.p[j] - pad); x1 = Math.max(x1, s.p[j] + pad);
+        y0 = Math.min(y0, s.p[j + 1] - pad); y1 = Math.max(y1, s.p[j + 1] + pad);
+      }
+    }
+    return [x0 - .25, y0 - .25, x1 + .25, y1 + .25];
+  },
+  inSel([x, y]) { const b = this.bounds(); return b && x >= b[0] - .1 && x <= b[2] + .1 && y >= b[1] - .1 && y <= b[3] + .1; },
+  clearSel() { if (this.sel.length) { this.sel = []; this.draw(); } },
+  deleteSel() {
+    const drop = new Set(this.sel);
+    this.strokes = this.strokes.filter((_, i) => !drop.has(i));
+    this.sel = []; this.draw(); dirty();
+  },
+  closeLasso() {
+    const p = this.lasso; this.lasso = null;
+    const poly = [];
+    for (let i = 0; i < p.length; i += 2) poly.push([p[i], p[i + 1]]);
+    this.sel = poly.length < 3 ? [] : this.strokes.map((s, i) => {
+      let n = 0;
+      for (let j = 0; j < s.p.length; j += 2) if (inside(s.p[j], s.p[j + 1], poly)) n++;
+      return n && n >= s.p.length / 2 * .6 ? i : -1;
+    }).filter((i) => i >= 0);
+    this.draw();
   },
   load(json) {
     try { this.strokes = json ? JSON.parse(json) : []; } catch { this.strokes = []; }
-    this.cur = null;
+    this.cur = null; this.sel = []; this.lasso = null;
     this.fit();
   },
   dumps() { return this.strokes.length ? JSON.stringify(this.strokes) : ""; },
@@ -452,7 +513,7 @@ const Ink = {
     // El destacador, translúcido, va debajo de la tinta.
     for (const s of [...all.filter((s) => s.k === "hl"), ...all.filter((s) => s.k !== "hl")]) {
       const p = s.p, hl = s.k === "hl";
-      g.globalAlpha = (PENS[s.k] || PENS.lapiz).a;
+      g.globalAlpha = ALPHA[s.k] || 1;
       g.lineCap = hl ? "butt" : "round"; g.lineJoin = "round";
       g.strokeStyle = g.fillStyle = s.c;
       g.lineWidth = Math.max(.03, s.w * 2);
@@ -463,19 +524,40 @@ const Ink = {
       g.stroke();
     }
     g.globalAlpha = 1;
+    g.lineWidth = 1.5 / LINE; g.setLineDash([5 / LINE, 4 / LINE]); g.strokeStyle = "#1E88E5";
+    if (this.lasso && this.lasso.length > 2) {
+      g.beginPath(); g.moveTo(this.lasso[0], this.lasso[1]);
+      for (let i = 2; i < this.lasso.length; i += 2) g.lineTo(this.lasso[i], this.lasso[i + 1]);
+      g.closePath(); g.stroke();
+    }
+    const b = this.bounds(), del = $("nbseldel");
+    if (b) {
+      g.fillStyle = "rgba(30,136,229,.08)"; g.fillRect(b[0], b[1], b[2] - b[0], b[3] - b[1]);
+      g.strokeRect(b[0], b[1], b[2] - b[0], b[3] - b[1]);
+      del.hidden = false;
+      del.style.left = `${PAD_X + b[2] * LINE - 17}px`;
+      del.style.top = `${b[1] * LINE - this.ta.scrollTop - 17}px`;
+    } else del.hidden = true;
+    g.setLineDash([]);
   },
   // Botón del lápiz (barril, 2) o punta de goma (32): borra mientras se aprieta.
   penErasing(e) { return e.pointerType === "pen" && (e.buttons & 34) !== 0; },
   down(e) {
     this.cv.setPointerCapture(e.pointerId);
     this.pointers.set(e.pointerId, e.clientY);
-    if (this.pointers.size > 1) { this.cur = null; this.draw(); return; }      // dos dedos: desplazar
-    this.erasing = this.erase || this.penErasing(e);
+    if (this.pointers.size > 1) { this.cur = this.lasso = this.drag = null; this.draw(); return; }  // dos dedos: desplazar
+    this.erasing = this.mode === "erase" || this.penErasing(e);
     if (this.erasing) { this.eraseAt(e); return; }
-    const pen = PENS[this.pen];
-    const k = pen.pressure && e.pointerType === "pen" && e.pressure > 0 ? .55 + e.pressure * .9 : 1;
-    this.cur = { c: this.color, w: Math.round(pen.w * k * 1000) / 1000, p: this.toLines(e) };
-    if (this.pen !== "lapiz") this.cur.k = this.pen;
+    const pt = this.toLines(e);
+    if (this.mode === "lasso") {
+      if (this.inSel(pt)) { this.drag = pt; return; }          // arrastrar lo elegido
+      this.sel = []; this.lasso = [...pt]; this.draw(); return;
+    }
+    this.clearSel();
+    const hl = this.mode === "hl", w = WIDTHS[hl ? "hl" : "pen"][this.widthI];
+    const k = !hl && e.pointerType === "pen" && e.pressure > 0 ? .55 + e.pressure * .9 : 1;
+    this.cur = { c: this.color, w: Math.round(w * k * 1000) / 1000, p: pt };
+    if (hl) this.cur.k = "hl";
     this.draw();
   },
   move(e) {
@@ -484,6 +566,13 @@ const Ink = {
     this.pointers.set(e.pointerId, e.clientY);
     if (this.pointers.size > 1) { this.ta.scrollTop -= (e.clientY - prev) / this.pointers.size; return; }
     if (this.erasing) { this.eraseAt(e); return; }
+    if (this.drag) {
+      const [x, y] = this.toLines(e), dx = x - this.drag[0], dy = y - this.drag[1];
+      this.drag = [x, y];
+      for (const i of this.sel) this.strokes[i].p = this.strokes[i].p.map((v, j) => Math.round((v + (j % 2 ? dy : dx)) * 1000) / 1000);
+      this.draw(); return;
+    }
+    if (this.lasso) { this.lasso.push(...this.toLines(e)); this.draw(); return; }
     if (!this.cur) return;
     for (const ev of e.getCoalescedEvents ? e.getCoalescedEvents() : [e]) {
       const [x, y] = this.toLines(ev), p = this.cur.p;
@@ -493,8 +582,11 @@ const Ink = {
   },
   up(e) {
     this.pointers.delete(e.pointerId);
-    if (!this.pointers.size) this.erasing = false;
-    if (this.cur && !this.pointers.size) { this.strokes.push(this.cur); this.cur = null; this.draw(); dirty(); }
+    if (this.pointers.size) return;
+    this.erasing = false;
+    if (this.drag) { this.drag = null; dirty(); return; }
+    if (this.lasso) { this.closeLasso(); return; }
+    if (this.cur) { this.strokes.push(this.cur); this.cur = null; this.draw(); dirty(); }
   },
   eraseAt(e) {
     const [x, y] = this.toLines(e);
@@ -502,6 +594,6 @@ const Ink = {
       const r = .35 + (s.k === "hl" ? s.w / 2 : 0);
       return !s.p.some((v, i) => i % 2 === 0 && Math.abs(v - x) < r && Math.abs(s.p[i + 1] - y) < r);
     });
-    if (keep.length !== this.strokes.length) { this.strokes = keep; this.draw(); dirty(); }
+    if (keep.length !== this.strokes.length) { this.strokes = keep; this.sel = []; this.draw(); dirty(); }
   },
 };

@@ -157,44 +157,61 @@ class NotebookScreen(MDScreen):
 
 
 # --------------------------------------------------------------------------- escritura a mano
-INK_COLORS = ["#1E3A8A", "#212121", "#C62828", "#2E7D32"]
+INK_COLORS = ["#212121", "#1E3A8A", "#C62828", "#E65100", "#2E7D32"]
+HL_COLORS = ["#FFEB3B", "#76FF03", "#FF4081", "#40C4FF", "#FFAB40"]
+# Grosores (en renglones) de la barra: grueso, medio y fino.
+WIDTHS = {"pen": [.11, .065, .04], "hl": [.75, .55, .35]}
 
-
-# Plumas del modo lápiz: grosor en renglones, opacidad y si usa la presión del lápiz.
-# Los trazos guardan "k" solo si no son de lápiz ("pl" plumón, "hl" destacador).
-PENS = {
-    "lapiz": {"w": .06, "a": 1.0, "pressure": True},
-    "pl": {"w": .13, "a": 1.0, "pressure": False},
-    "hl": {"w": .55, "a": .35, "pressure": False},
-}
-HL_COLORS = ["#FFEB3B", "#76FF03", "#FF4081", "#40C4FF"]
+# Opacidad por tipo de trazo. Los trazos guardan "k" solo si no son de pluma ("hl"
+# destacador; "pl" plumón de versiones anteriores).
+PENS = {"lapiz": {"a": 1.0}, "pl": {"a": 1.0}, "hl": {"a": .35}}
 
 
 def stroke_alpha(stroke: dict) -> float:
     return PENS.get(stroke.get("k") or "lapiz", PENS["lapiz"])["a"]
 
 
+def _inside(x, y, poly) -> bool:
+    """Punto dentro de un polígono [(x, y), …] (rayos)."""
+    hit = False
+    j = len(poly) - 1
+    for i in range(len(poly)):
+        xi, yi = poly[i]
+        xj, yj = poly[j]
+        if (yi > y) != (yj > y) and x < (xj - xi) * (y - yi) / ((yj - yi) or 1e-9) + xi:
+            hit = not hit
+        j = i
+    return hit
+
+
 class InkLayer(StencilView):
-    """Escritura a mano sobre la hoja (modo lápiz). Los trazos se guardan en renglones
-    (x, y desde el borde superior izquierdo del texto) y siguen al texto al desplazarlo.
-    Con el lápiz activo: un dedo o el S-Pen escribe (con presión), dos dedos desplazan la
-    hoja; con la goma, tocar un trazo lo borra. Con el botón del S-Pen apretado (o su
-    punta de goma) también borra, solo mientras se aprieta.
+    """Escritura a mano sobre la hoja (modo lápiz), con la barra de herramientas del
+    cuaderno: pluma (con presión), destacador, goma y lazo; 5 colores y 3 grosores.
+
+    Los trazos se guardan en renglones (x, y desde el borde superior izquierdo del texto)
+    y siguen al texto al desplazarlo. Dos dedos desplazan la hoja. Con el botón del S-Pen
+    apretado (o su punta de goma) se borra, solo mientras se aprieta.
+
+    Lazo: se rodean trazos para elegirlos; luego se arrastran para moverlos, un color los
+    pinta y el botón de basura los borra. Tocar fuera suelta la selección.
 
     Dibujo: los trazos quedan en coordenadas de la hoja y el desplazamiento solo mueve un
-    Translate (no se reconstruye nada al desplazar ni al escribir: el trazo en curso es
-    una sola Line a la que se le agregan puntos)."""
+    Translate; el trazo en curso es una sola Line a la que se le agregan puntos."""
     active = BooleanProperty(False)
-    eraser = BooleanProperty(False)
+    mode = StringProperty("pen")          # pen · hl · erase · lasso
     color = StringProperty(INK_COLORS[0])
-    pen = StringProperty("lapiz")         # lapiz · pl (plumón) · hl (destacador)
+    width_i = NumericProperty(1)          # 0 grueso · 1 medio · 2 fino (de la herramienta)
+    sel_box = ListProperty([])            # [x, y, ancho, alto] en pantalla de lo elegido
 
     def __init__(self, **kw):
         super().__init__(**kw)
         self.strokes: list = []
+        self.sel: list = []                # índices de los trazos elegidos con el lazo
         self._cur = None
         self._cur_line = None
         self._erasing = False
+        self._lasso = None                # puntos del lazo en curso (renglones)
+        self._drag = None                 # arrastre de la selección: último punto
         self._touches: dict = {}
         self.ti = None
         self.on_change = None
@@ -226,6 +243,11 @@ class InkLayer(StencilView):
         st = self._step()
         return round((x - ox) / st, 3), round((oy - y) / st, 3)
 
+    def to_screen(self, lx, ly):
+        ox, oy = self._origin()
+        st = self._step()
+        return ox + lx * st, oy - ly * st
+
     def _place(self, *_):
         """Desplazar o mover la hoja: solo cambia el Translate."""
         if self.ti is None:
@@ -234,6 +256,7 @@ class InkLayer(StencilView):
             self.redraw()
             return
         self._move.xy = self._origin()
+        self._update_sel_box()
 
     def redraw(self, *_):
         """Reconstruye los trazos guardados (al cargar, borrar, deshacer o cambiar la letra)."""
@@ -255,7 +278,85 @@ class InkLayer(StencilView):
                 pts += [pts[0] + .5, pts[1]]
             self._ink.add(Line(points=pts, width=max(.8, s["w"] * st),
                                cap="square" if s.get("k") == "hl" else "round", joint="round"))
+        self._draw_selection()
 
+    # selección (lazo)
+    def _sel_bounds(self):
+        xs, ys = [], []
+        for i in self.sel:
+            s = self.strokes[i]
+            pad = s["w"] / 2
+            xs += [min(s["p"][0::2]) - pad, max(s["p"][0::2]) + pad]
+            ys += [min(s["p"][1::2]) - pad, max(s["p"][1::2]) + pad]
+        return (min(xs), min(ys), max(xs), max(ys)) if xs else None
+
+    def _draw_selection(self):
+        b = self._sel_bounds()
+        if b is None:
+            self._update_sel_box()
+            return
+        st = self._step()
+        x0, y0, x1, y1 = b
+        m = .25
+        self._ink.add(Color(*c("#1E88E5", .08)))
+        self._ink.add(Rectangle(pos=((x0 - m) * st, -(y1 + m) * st), size=((x1 - x0 + 2 * m) * st, (y1 - y0 + 2 * m) * st)))
+        self._ink.add(Color(*c("#1E88E5", .9)))
+        self._ink.add(Line(rectangle=((x0 - m) * st, -(y1 + m) * st, (x1 - x0 + 2 * m) * st, (y1 - y0 + 2 * m) * st),
+                           dash_length=dp(5), dash_offset=dp(4)))
+        self._update_sel_box()
+
+    def _update_sel_box(self):
+        b = self._sel_bounds()
+        if b is None:
+            if self.sel_box:
+                self.sel_box = []
+            return
+        x0, y0, x1, y1 = b
+        sx0, sy1 = self.to_screen(x0 - .25, y1 + .25)
+        sx1, sy0 = self.to_screen(x1 + .25, y0 - .25)
+        self.sel_box = [sx0, sy1, sx1 - sx0, sy0 - sy1]
+
+    def clear_selection(self):
+        if self.sel:
+            self.sel = []
+            self.redraw()
+
+    def delete_selection(self):
+        if self.sel:
+            keep = set(self.sel)
+            self.strokes = [s for i, s in enumerate(self.strokes) if i not in keep]
+            self.sel = []
+            self._changed()
+
+    def recolor_selection(self, col: str) -> bool:
+        if not self.sel:
+            return False
+        for i in self.sel:
+            self.strokes[i]["c"] = col
+        self._changed()
+        return True
+
+    def _in_sel(self, lx, ly) -> bool:
+        b = self._sel_bounds()
+        return b is not None and b[0] - .3 <= lx <= b[2] + .3 and b[1] - .3 <= ly <= b[3] + .3
+
+    def _close_lasso(self):
+        poly = list(zip(self._lasso[0::2], self._lasso[1::2]))
+        self._lasso = None
+        self._live.clear()
+        if len(poly) < 3:
+            self.clear_selection()
+            return
+        sel = []
+        for i, s in enumerate(self.strokes):
+            pts = list(zip(s["p"][0::2], s["p"][1::2]))
+            inside = sum(1 for x, y in pts if _inside(x, y, poly))
+            if pts and inside >= max(1, len(pts) * .6):
+                sel.append(i)
+        self.sel = sel
+        self.redraw()
+
+    # trazo en curso
     def _live_start(self):
         st = self._step()
         s = self._cur
@@ -283,6 +384,7 @@ class InkLayer(StencilView):
             self.strokes = json.loads(ink) if ink else []
         except ValueError:
             self.strokes = []
+        self.sel = []
         self.redraw()
 
     def dumps(self) -> str:
@@ -297,6 +399,7 @@ class InkLayer(StencilView):
     def undo(self):
         if self.strokes:
             self.strokes.pop()
+            self.sel = []
             self._changed()
 
     # toques
@@ -310,21 +413,36 @@ class InkLayer(StencilView):
         touch.grab(self)
         self._touches[touch.uid] = touch.pos
         if len(self._touches) > 1:          # dos dedos: desplazar la hoja
-            self._cur = None
+            self._cur = self._lasso = self._drag = None
             self._live_end()
             self._virt = self.ti.scroll_y
             return True
-        self._erasing = self.eraser or self._stylus_erasing()
+        lx, ly = self.to_lines(*touch.pos)
+        self._erasing = self.mode == "erase" or self._stylus_erasing()
         if self._erasing:
             self._erase(touch.pos)
             return True
-        pen = PENS.get(self.pen, PENS["lapiz"])
-        pressure = touch.pressure if pen["pressure"] and "pressure" in (touch.profile or []) else None
+        if self.mode == "lasso":
+            if self._in_sel(lx, ly):        # arrastrar lo elegido
+                self._drag = (lx, ly)
+                return True
+            self.sel = []
+            self.redraw()
+            self._lasso = [lx, ly]
+            self._live.clear()
+            self._live.add(Color(*c("#1E88E5", .9)))
+            self._lasso_line = Line(points=[], dash_length=dp(4), dash_offset=dp(4), close=True)
+            self._live.add(self._lasso_line)
+            return True
+        if self.sel:
+            self.clear_selection()
+        tool = "hl" if self.mode == "hl" else "pen"
+        w = WIDTHS[tool][int(self.width_i)]
+        pressure = touch.pressure if tool == "pen" and "pressure" in (touch.profile or []) else None
         k = .55 + pressure * .9 if pressure else 1.0
-        x, y = self.to_lines(*touch.pos)
-        self._cur = {"c": self.color, "w": round(pen["w"] * k, 3), "p": [x, y]}
-        if self.pen != "lapiz":
-            self._cur["k"] = self.pen
+        self._cur = {"c": self.color, "w": round(w * k, 3), "p": [lx, ly]}
+        if tool == "hl":
+            self._cur["k"] = "hl"
         self._live_start()
         return True
 
@@ -336,10 +454,23 @@ class InkLayer(StencilView):
         if len(self._touches) > 1:
             n = len(self._touches)
             self._scroll((touch.pos[1] - prev[1]) / n)
-        elif self._erasing:
+            return True
+        if self._erasing:
             self._erase(touch.pos)
+            return True
+        x, y = self.to_lines(*touch.pos)
+        if self._drag is not None:
+            dx, dy = x - self._drag[0], y - self._drag[1]
+            self._drag = (x, y)
+            for i in self.sel:
+                p = self.strokes[i]["p"]
+                self.strokes[i]["p"] = [round(v + (dx if j % 2 == 0 else dy), 3) for j, v in enumerate(p)]
+            self.redraw()
+        elif self._lasso is not None:
+            self._lasso += [x, y]
+            st = self._step()
+            self._lasso_line.points = [v * st if j % 2 == 0 else -v * st for j, v in enumerate(self._lasso)]
         elif self._cur is not None:
-            x, y = self.to_lines(*touch.pos)
             px, py = self._cur["p"][-2:]
             if math.hypot(x - px, y - py) * self._step() >= 1.5:
                 self._cur["p"] += [x, y]
@@ -351,9 +482,15 @@ class InkLayer(StencilView):
             return False
         touch.ungrab(self)
         self._touches.pop(touch.uid, None)
-        if not self._touches:
-            self._erasing = False
-        if self._cur is not None and not self._touches:
+        if self._touches:
+            return True
+        self._erasing = False
+        if self._drag is not None:
+            self._drag = None
+            self._changed()
+        elif self._lasso is not None:
+            self._close_lasso()
+        elif self._cur is not None:
             self.strokes.append(self._cur)
             self._cur = None
             self._live_end()
@@ -379,6 +516,7 @@ class InkLayer(StencilView):
                 keep.append(s)
         if len(keep) != len(self.strokes):
             self.strokes = keep
+            self.sel = []
             self._changed()
 
 # --------------------------------------------------------------------------- página
@@ -395,6 +533,7 @@ class NoteScreen(MDScreen):
         ti = self.ids.text
         ti.native_edit = False
         self._pen_colors = {}
+        self._pen_widths = {}
         ink = self.ids.ink
         ink.attach(ti)
         ink.on_change = self._ink_changed
@@ -520,27 +659,57 @@ class NoteScreen(MDScreen):
         self.saved_text = "Guardado"
 
     # ------------------------------------------------------------ lápiz
+    # Barra: teclado · pluma · destacador · goma · lazo | 5 colores | 3 grosores.
+    # Cada herramienta recuerda su color y su grosor.
+    hl_color = StringProperty(HL_COLORS[0])   # color del ícono del destacador
+
     def set_pen(self, on: bool):
         self.pen = on
         ink = self.ids.ink
         ink.active = on
-        ink.eraser = False
         if on:
             self.ids.text.focus = False
+        else:
+            ink.clear_selection()
+
+    def set_tool(self, mode: str):
+        """pen · hl · erase · lasso (y pasa al modo lápiz)."""
+        ink = self.ids.ink
+        if ink.mode in ("pen", "hl"):
+            self._pen_colors[ink.mode] = ink.color
+            self._pen_widths[ink.mode] = ink.width_i
+        if mode != "lasso":
+            ink.clear_selection()
+        ink.mode = mode
+        if mode in ("pen", "hl"):
+            ink.color = self._pen_colors.get(mode, HL_COLORS[0] if mode == "hl" else INK_COLORS[0])
+            ink.width_i = self._pen_widths.get(mode, 1)
+            self.pen_palette = HL_COLORS if mode == "hl" else INK_COLORS
+        if not self.pen:
+            self.set_pen(True)
 
     def set_ink_color(self, col: str):
-        self.ids.ink.color = col
-        self.ids.ink.eraser = False
-        self._pen_colors[self.ids.ink.pen] = col
-
-    def set_pen_kind(self, kind: str):
-        """Lápiz, plumón o destacador (cada uno recuerda su último color)."""
+        """Un color: pinta lo elegido con el lazo o queda para la pluma/destacador."""
         ink = self.ids.ink
-        ink.pen = kind
-        ink.eraser = False
-        default = HL_COLORS[0] if kind == "hl" else INK_COLORS[0]
-        ink.color = self._pen_colors.get(kind, default)
-        self.pen_palette = HL_COLORS if kind == "hl" else INK_COLORS
+        if ink.mode == "lasso" and ink.recolor_selection(col):
+            return
+        if ink.mode not in ("pen", "hl"):
+            self.set_tool("hl" if col in HL_COLORS and col not in INK_COLORS else "pen")
+        ink.color = col
+        self._pen_colors[ink.mode] = col
+        if ink.mode == "hl":
+            self.hl_color = col
+        if not self.pen:
+            self.set_pen(True)
+
+    def set_width(self, i: int):
+        ink = self.ids.ink
+        if ink.mode not in ("pen", "hl"):
+            self.set_tool("pen")
+        ink.width_i = i
+        self._pen_widths[ink.mode] = i
+        if not self.pen:
+            self.set_pen(True)
 
     def _ink_changed(self):
         self.on_text()
