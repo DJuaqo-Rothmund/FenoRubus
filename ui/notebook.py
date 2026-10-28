@@ -312,6 +312,7 @@ class InkLayer(StencilView):
         if len(self._touches) > 1:          # dos dedos: desplazar la hoja
             self._cur = None
             self._live_end()
+            self._virt = self.ti.scroll_y
             return True
         self._erasing = self.eraser or self._stylus_erasing()
         if self._erasing:
@@ -363,7 +364,10 @@ class InkLayer(StencilView):
         ti = self.ti
         bottom = max([max(s["p"][1::2]) for s in self.strokes if s["p"]] + [0]) * self._step()
         content = max(ti.minimum_height - ti.height, bottom - ti.height * .5, 0) + ti.height * .5
-        ti.scroll_y = max(0, min(content, ti.scroll_y + dy))
+        # Se acumula y se avanza de a renglones enteros (los renglones del fondo son fijos).
+        st = self._step()
+        self._virt = max(0, min(content, getattr(self, "_virt", ti.scroll_y) + dy))
+        ti.scroll_y = round(self._virt / st) * st
 
     def _erase(self, pos):
         x, y = self.to_lines(*pos)
@@ -394,11 +398,40 @@ class NoteScreen(MDScreen):
         ink = self.ids.ink
         ink.attach(ti)
         ink.on_change = self._ink_changed
-        ti.bind(pos=self._rule, size=self._rule, scroll_y=self._rule, line_height=self._rule)
+        ti.bind(pos=self._rule, size=self._rule, line_height=self._rule, scroll_y=self._snap)
+        self._last_scroll = 0
         self._rule()
 
+    def _snap(self, ti, value):
+        """El texto se desplaza de a renglones enteros: así los renglones del fondo quedan
+        fijos (no se mueven al escribir) y la letra siempre cae sobre ellos.
+        Arrastrando con el dedo se acumula el movimiento y se avanza al renglón más cercano;
+        si lo mueve el cursor (al escribir o con el teclado), hacia donde iba, para que el
+        cursor quede a la vista."""
+        if getattr(self, "_snapping", False):
+            return
+        step = ti.line_height + ti.line_spacing
+        if step <= 0:
+            return
+        delta = value - self._last_scroll
+        if getattr(ti, "_have_scrolled", False):          # arrastre con el dedo
+            self._virt = getattr(self, "_virt", self._last_scroll) + delta
+            n = round(self._virt / step)
+        else:
+            k = value / step
+            n = math.ceil(k - .001) if delta > 0 else math.floor(k + .001)
+        snapped = max(0, n * step)
+        self._last_scroll = snapped
+        if not getattr(ti, "_have_scrolled", False):
+            self._virt = snapped
+        if abs(snapped - value) > .5:
+            self._snapping = True
+            ti.scroll_y = snapped
+            self._snapping = False
+
     def _rule(self, *_):
-        """Renglones de cuaderno bajo el texto (siguen al texto al desplazarlo)."""
+        """Renglones de cuaderno bajo el texto: fijos en la hoja (el texto avanza de a
+        renglones enteros, ver _snap)."""
         from kivy.graphics import InstructionGroup
         ti = self.ids.text
         group = getattr(self, "_rules", None)
@@ -410,7 +443,7 @@ class NoteScreen(MDScreen):
         if step <= 0:
             return
         group.add(Color(*c(OCHRE, .28)))
-        y = ti.top - ti.padding[1] + ti.scroll_y - step
+        y = ti.top - ti.padding[1] - step
         while y > ti.y:
             if y < ti.top:
                 group.add(Rectangle(pos=(ti.x, y - dp(2)), size=(ti.width, dp(1))))
