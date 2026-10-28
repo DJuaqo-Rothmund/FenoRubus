@@ -21,13 +21,14 @@ import os
 
 from kivy.clock import Clock
 from kivy.core.window import Window
-from kivy.graphics import Color, Line, PopMatrix, PushMatrix, Rectangle, Scale, Translate
+from kivy.graphics import Color, InstructionGroup, Line, PopMatrix, PushMatrix, Rectangle, Scale, Translate
 from kivy.metrics import dp, sp
 from kivy.properties import BooleanProperty, ListProperty, NumericProperty, ObjectProperty, StringProperty
 from kivy.uix.behaviors import ButtonBehavior
 from kivy.uix.boxlayout import BoxLayout
 from kivy.uix.floatlayout import FloatLayout
 from kivy.uix.modalview import ModalView
+from kivy.uix.stencilview import StencilView
 from kivy.uix.widget import Widget
 from kivymd.app import MDApp
 from kivymd.uix.screen import MDScreen
@@ -159,27 +160,58 @@ class NotebookScreen(MDScreen):
 INK_COLORS = ["#1E3A8A", "#212121", "#C62828", "#2E7D32"]
 
 
-class InkLayer(Widget):
+# Plumas del modo lápiz: grosor en renglones, opacidad y si usa la presión del lápiz.
+# Los trazos guardan "k" solo si no son de lápiz ("pl" plumón, "hl" destacador).
+PENS = {
+    "lapiz": {"w": .06, "a": 1.0, "pressure": True},
+    "pl": {"w": .13, "a": 1.0, "pressure": False},
+    "hl": {"w": .55, "a": .35, "pressure": False},
+}
+HL_COLORS = ["#FFEB3B", "#76FF03", "#FF4081", "#40C4FF"]
+
+
+def stroke_alpha(stroke: dict) -> float:
+    return PENS.get(stroke.get("k") or "lapiz", PENS["lapiz"])["a"]
+
+
+class InkLayer(StencilView):
     """Escritura a mano sobre la hoja (modo lápiz). Los trazos se guardan en renglones
     (x, y desde el borde superior izquierdo del texto) y siguen al texto al desplazarlo.
     Con el lápiz activo: un dedo o el S-Pen escribe (con presión), dos dedos desplazan la
-    hoja; con la goma, tocar un trazo lo borra."""
+    hoja; con la goma, tocar un trazo lo borra. Con el botón del S-Pen apretado (o su
+    punta de goma) también borra, solo mientras se aprieta.
+
+    Dibujo: los trazos quedan en coordenadas de la hoja y el desplazamiento solo mueve un
+    Translate (no se reconstruye nada al desplazar ni al escribir: el trazo en curso es
+    una sola Line a la que se le agregan puntos)."""
     active = BooleanProperty(False)
     eraser = BooleanProperty(False)
     color = StringProperty(INK_COLORS[0])
+    pen = StringProperty("lapiz")         # lapiz · pl (plumón) · hl (destacador)
 
     def __init__(self, **kw):
         super().__init__(**kw)
         self.strokes: list = []
         self._cur = None
+        self._cur_line = None
+        self._erasing = False
         self._touches: dict = {}
         self.ti = None
         self.on_change = None
-        self.bind(pos=self.redraw, size=self.redraw)
+        self._built_step = None
+        with self.canvas:
+            PushMatrix()
+            self._move = Translate(0, 0)
+            self._ink = InstructionGroup()
+            self._live = InstructionGroup()
+            PopMatrix()
+        self.bind(pos=self._place, size=self._place)
 
     def attach(self, ti):
         self.ti = ti
-        ti.bind(scroll_y=self.redraw, line_height=self.redraw, pos=self.redraw, size=self.redraw)
+        ti.bind(scroll_y=self._place, pos=self._place, size=self._place,
+                line_height=self.redraw, line_spacing=self.redraw)
+        self.redraw()
 
     # geometría: renglones <-> pantalla
     def _step(self):
@@ -194,22 +226,56 @@ class InkLayer(Widget):
         st = self._step()
         return round((x - ox) / st, 3), round((oy - y) / st, 3)
 
+    def _place(self, *_):
+        """Desplazar o mover la hoja: solo cambia el Translate."""
+        if self.ti is None:
+            return
+        if self._built_step != self._step():
+            self.redraw()
+            return
+        self._move.xy = self._origin()
+
     def redraw(self, *_):
-        self.canvas.clear()
+        """Reconstruye los trazos guardados (al cargar, borrar, deshacer o cambiar la letra)."""
+        self._ink.clear()
         if not self.ti:
             return
-        ox, oy = self._origin()
+        st = self._built_step = self._step()
+        self._move.xy = self._origin()
+        # El destacador va debajo de la tinta.
+        order = [s for s in self.strokes if s.get("k") == "hl"] + \
+                [s for s in self.strokes if s.get("k") != "hl"]
+        for s in order:
+            if not s.get("p"):
+                continue
+            self._ink.add(Color(*c(s["c"], stroke_alpha(s))))
+            p = s["p"]
+            pts = [v * st if i % 2 == 0 else -v * st for i, v in enumerate(p)]
+            if len(pts) == 2:
+                pts += [pts[0] + .5, pts[1]]
+            self._ink.add(Line(points=pts, width=max(.8, s["w"] * st),
+                               cap="square" if s.get("k") == "hl" else "round", joint="round"))
+
+    def _live_start(self):
         st = self._step()
-        with self.canvas:
-            for s in self.strokes + ([self._cur] if self._cur else []):
-                Color(*c(s["c"]))
-                p = s["p"]
-                pts = []
-                for i in range(0, len(p), 2):
-                    pts += [ox + p[i] * st, oy - p[i + 1] * st]
-                if len(pts) == 2:
-                    pts += [pts[0] + .5, pts[1]]
-                Line(points=pts, width=max(.8, s["w"] * st), cap="round", joint="round")
+        s = self._cur
+        self._live.clear()
+        self._live.add(Color(*c(s["c"], stroke_alpha(s))))
+        x, y = s["p"][0] * st, -s["p"][1] * st
+        self._cur_line = Line(points=[x, y, x + .5, y], width=max(.8, s["w"] * st),
+                              cap="square" if s.get("k") == "hl" else "round", joint="round")
+        self._live.add(self._cur_line)
+
+    def _live_add(self, x, y):
+        st = self._step()
+        pts = self._cur_line.points
+        if len(self._cur["p"]) == 4:       # el segundo punto reemplaza el punto inicial doble
+            pts = pts[:2]
+        self._cur_line.points = pts + [x * st, -y * st]
+
+    def _live_end(self):
+        self._live.clear()
+        self._cur_line = None
 
     def load(self, ink: str):
         import json
@@ -234,6 +300,10 @@ class InkLayer(Widget):
             self._changed()
 
     # toques
+    def _stylus_erasing(self) -> bool:
+        from android_bridge import stylus_erasing
+        return stylus_erasing()
+
     def on_touch_down(self, touch):
         if not self.active or not self.collide_point(*touch.pos) or self.ti is None:
             return False
@@ -241,16 +311,20 @@ class InkLayer(Widget):
         self._touches[touch.uid] = touch.pos
         if len(self._touches) > 1:          # dos dedos: desplazar la hoja
             self._cur = None
-            self.redraw()
+            self._live_end()
             return True
-        if self.eraser:
+        self._erasing = self.eraser or self._stylus_erasing()
+        if self._erasing:
             self._erase(touch.pos)
             return True
-        pressure = touch.pressure if "pressure" in (touch.profile or []) else None
+        pen = PENS.get(self.pen, PENS["lapiz"])
+        pressure = touch.pressure if pen["pressure"] and "pressure" in (touch.profile or []) else None
         k = .55 + pressure * .9 if pressure else 1.0
         x, y = self.to_lines(*touch.pos)
-        self._cur = {"c": self.color, "w": round(.06 * k, 3), "p": [x, y]}
-        self.redraw()
+        self._cur = {"c": self.color, "w": round(pen["w"] * k, 3), "p": [x, y]}
+        if self.pen != "lapiz":
+            self._cur["k"] = self.pen
+        self._live_start()
         return True
 
     def on_touch_move(self, touch):
@@ -261,14 +335,14 @@ class InkLayer(Widget):
         if len(self._touches) > 1:
             n = len(self._touches)
             self._scroll((touch.pos[1] - prev[1]) / n)
-        elif self.eraser:
+        elif self._erasing:
             self._erase(touch.pos)
         elif self._cur is not None:
             x, y = self.to_lines(*touch.pos)
             px, py = self._cur["p"][-2:]
             if math.hypot(x - px, y - py) * self._step() >= 1.5:
                 self._cur["p"] += [x, y]
-                self.redraw()
+                self._live_add(x, y)
         return True
 
     def on_touch_up(self, touch):
@@ -276,9 +350,12 @@ class InkLayer(Widget):
             return False
         touch.ungrab(self)
         self._touches.pop(touch.uid, None)
+        if not self._touches:
+            self._erasing = False
         if self._cur is not None and not self._touches:
             self.strokes.append(self._cur)
             self._cur = None
+            self._live_end()
             self._changed()
         return True
 
@@ -290,9 +367,12 @@ class InkLayer(Widget):
 
     def _erase(self, pos):
         x, y = self.to_lines(*pos)
-        r = .35
-        keep = [s for s in self.strokes
-                if not any(abs(s["p"][i] - x) < r and abs(s["p"][i + 1] - y) < r for i in range(0, len(s["p"]), 2))]
+        keep = []
+        for s in self.strokes:
+            r = .35 + (s["w"] / 2 if s.get("k") == "hl" else 0)
+            p = s["p"]
+            if not any(abs(p[i] - x) < r and abs(p[i + 1] - y) < r for i in range(0, len(p) - 1, 2)):
+                keep.append(s)
         if len(keep) != len(self.strokes):
             self.strokes = keep
             self._changed()
@@ -300,6 +380,7 @@ class InkLayer(Widget):
 # --------------------------------------------------------------------------- página
 class NoteScreen(MDScreen):
     pen = BooleanProperty(False)           # modo lápiz (escritura a mano)
+    pen_palette = ListProperty(INK_COLORS)  # colores de la pluma elegida
     day = StringProperty("")
     title = StringProperty("")
     wide = BooleanProperty(False)
@@ -309,6 +390,7 @@ class NoteScreen(MDScreen):
         # Se escribe directo en la hoja, sin el cuadro de texto nativo de Android (native_input).
         ti = self.ids.text
         ti.native_edit = False
+        self._pen_colors = {}
         ink = self.ids.ink
         ink.attach(ti)
         ink.on_change = self._ink_changed
@@ -349,6 +431,8 @@ class NoteScreen(MDScreen):
     kb_pad = NumericProperty(0)           # espacio del teclado del teléfono bajo la hoja
 
     def on_pre_enter(self, *_):
+        from android_bridge import stylus_install
+        stylus_install()      # botón del S-Pen: borra mientras se aprieta
         Window.bind(size=self._layout)
         self._layout()
         self.ids.text.bind(focus=self._on_focus)
@@ -414,6 +498,16 @@ class NoteScreen(MDScreen):
     def set_ink_color(self, col: str):
         self.ids.ink.color = col
         self.ids.ink.eraser = False
+        self._pen_colors[self.ids.ink.pen] = col
+
+    def set_pen_kind(self, kind: str):
+        """Lápiz, plumón o destacador (cada uno recuerda su último color)."""
+        ink = self.ids.ink
+        ink.pen = kind
+        ink.eraser = False
+        default = HL_COLORS[0] if kind == "hl" else INK_COLORS[0]
+        ink.color = self._pen_colors.get(kind, default)
+        self.pen_palette = HL_COLORS if kind == "hl" else INK_COLORS
 
     def _ink_changed(self):
         self.on_text()

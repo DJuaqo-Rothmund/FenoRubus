@@ -686,6 +686,22 @@
         icon_color: c(theme.LEAF_DARK, .8)
         pos_hint: {"x": .01, "top": .99}
         on_release: app.open_settings(general_only=True)
+    # Sincronizar con Google Drive (trae lo de los otros equipos de la cuenta)
+    MDIconButton:
+        id: syncbtn
+        icon: "sync"
+        icon_size: "26sp"
+        theme_icon_color: "Custom"
+        icon_color: c(theme.LEAF_DARK, .8)
+        pos: gear.right - dp(6), gear.y
+        on_release: root.sync_now()
+        canvas.before:
+            PushMatrix
+            Rotate:
+                angle: root.sync_angle
+                origin: self.center
+        canvas.after:
+            PopMatrix
     PostIt:
         id: postit
         size_hint: None, None
@@ -3646,6 +3662,33 @@
             pos: self.x + dp(4), self.y + dp(4)
             size: self.width - dp(8), self.height - dp(8)
 
+<NbTool@ButtonBehavior+AnchorLayout>:
+    icon: ""
+    selected: False
+    size_hint: None, None
+    pos_hint: {"center_y": .5}
+    canvas.before:
+        Color:
+            rgba: c(NB_BROWN) if self.selected else c(NB_SOFT)
+        RoundedRectangle:
+            pos: self.pos
+            size: self.size
+            radius: [self.height / 2]
+        Color:
+            rgba: (0, 0, 0, .12) if self.state == "down" else (0, 0, 0, 0)
+        RoundedRectangle:
+            pos: self.pos
+            size: self.size
+            radius: [self.height / 2]
+    MDIcon:
+        icon: root.icon
+        font_size: "21sp"
+        halign: "center"
+        size_hint: None, None
+        size: root.size
+        theme_text_color: "Custom"
+        text_color: (1, 1, 1, 1) if root.selected else c(NB_BROWN)
+
 <NoteScreen>:
     md_bg_color: 0, 0, 0, 0
     MDBoxLayout:
@@ -3723,33 +3766,21 @@
                         id: ink
                         pos_hint: {"x": 0, "y": 0}
                         size_hint: 1, 1
-                # Teclado o lápiz (y, con lápiz: colores, goma y deshacer)
+                # Teclado (Aa) o lápiz; con lápiz, otra fila: plumas y colores
                 BoxLayout:
                     size_hint_y: None
                     height: dp(44)
                     spacing: dp(6)
                     padding: 0, dp(4), 0, 0
-                    PillButton:
-                        text: "Teclado"
-                        font_size: "13sp"
-                        size_hint: None, None
-                        size: dp(76), dp(36)
+                    NbTool:
+                        icon: "format-letter-case"
+                        size: dp(52), dp(36)
                         selected: not root.pen
-                        bg_on: c(NB_BROWN)
-                        fg_on: 1, 1, 1, 1
-                        bg_off: c(NB_SOFT)
-                        fg_off: c(NB_BROWN)
                         on_release: root.set_pen(False)
-                    PillButton:
-                        text: "Lápiz"
-                        font_size: "13sp"
-                        size_hint: None, None
-                        size: dp(64), dp(36)
+                    NbTool:
+                        icon: "draw"
+                        size: dp(52), dp(36)
                         selected: root.pen
-                        bg_on: c(NB_BROWN)
-                        fg_on: 1, 1, 1, 1
-                        bg_off: c(NB_SOFT)
-                        fg_off: c(NB_BROWN)
                         on_release: root.set_pen(True)
                     Widget:
                     BoxLayout:
@@ -3758,27 +3789,6 @@
                         spacing: dp(4)
                         opacity: 1 if root.pen else 0
                         disabled: not root.pen
-                        PenSwatch:
-                            swatch: c("#1E3A8A")
-                            size: dp(30), dp(30)
-                            pos_hint: {"center_y": .5}
-                            selected: ink.color == "#1E3A8A" and not ink.eraser
-                            ring: c(NB_OCHRE)
-                            on_release: root.set_ink_color("#1E3A8A")
-                        PenSwatch:
-                            swatch: c("#212121")
-                            size: dp(30), dp(30)
-                            pos_hint: {"center_y": .5}
-                            selected: ink.color == "#212121" and not ink.eraser
-                            ring: c(NB_OCHRE)
-                            on_release: root.set_ink_color("#212121")
-                        PenSwatch:
-                            swatch: c("#C62828")
-                            size: dp(30), dp(30)
-                            pos_hint: {"center_y": .5}
-                            selected: ink.color == "#C62828" and not ink.eraser
-                            ring: c(NB_OCHRE)
-                            on_release: root.set_ink_color("#C62828")
                         MDIconButton:
                             icon: "eraser"
                             size_hint: None, None
@@ -3797,6 +3807,56 @@
                             icon_color: c(NB_BROWN)
                             pos_hint: {"center_y": .5}
                             on_release: ink.undo()
+                BoxLayout:
+                    size_hint_y: None
+                    height: dp(40) if root.pen else 0
+                    opacity: 1 if root.pen else 0
+                    disabled: not root.pen
+                    spacing: dp(5)
+                    NbTool:
+                        icon: "pencil"
+                        size: dp(38), dp(34)
+                        selected: ink.pen == "lapiz" and not ink.eraser
+                        on_release: root.set_pen_kind("lapiz")
+                    NbTool:
+                        icon: "marker"
+                        size: dp(38), dp(34)
+                        selected: ink.pen == "pl" and not ink.eraser
+                        on_release: root.set_pen_kind("pl")
+                    NbTool:
+                        icon: "format-color-highlight"
+                        size: dp(38), dp(34)
+                        selected: ink.pen == "hl" and not ink.eraser
+                        on_release: root.set_pen_kind("hl")
+                    Widget:
+                    PenSwatch:
+                        swatch: c(root.pen_palette[0])
+                        size: dp(30), dp(30)
+                        pos_hint: {"center_y": .5}
+                        selected: ink.color == root.pen_palette[0] and not ink.eraser
+                        ring: c(NB_OCHRE)
+                        on_release: root.set_ink_color(root.pen_palette[0])
+                    PenSwatch:
+                        swatch: c(root.pen_palette[1])
+                        size: dp(30), dp(30)
+                        pos_hint: {"center_y": .5}
+                        selected: ink.color == root.pen_palette[1] and not ink.eraser
+                        ring: c(NB_OCHRE)
+                        on_release: root.set_ink_color(root.pen_palette[1])
+                    PenSwatch:
+                        swatch: c(root.pen_palette[2])
+                        size: dp(30), dp(30)
+                        pos_hint: {"center_y": .5}
+                        selected: ink.color == root.pen_palette[2] and not ink.eraser
+                        ring: c(NB_OCHRE)
+                        on_release: root.set_ink_color(root.pen_palette[2])
+                    PenSwatch:
+                        swatch: c(root.pen_palette[3])
+                        size: dp(30), dp(30)
+                        pos_hint: {"center_y": .5}
+                        selected: ink.color == root.pen_palette[3] and not ink.eraser
+                        ring: c(NB_OCHRE)
+                        on_release: root.set_ink_color(root.pen_palette[3])
             # ---- fotos
             BoxLayout:
                 orientation: "vertical"

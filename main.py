@@ -9,6 +9,7 @@ Punto de entrada y navegación KivyMD.
 """
 from __future__ import annotations
 
+import gc
 import hashlib
 import os
 import threading
@@ -66,6 +67,16 @@ def remove_android_splash(self, *args):
 
 
 EventLoopBase.remove_android_splash = remove_android_splash
+
+# Recolector de basura: menos revisiones de objetos nuevos (cada widget crea cientos) y
+# lo ya cargado (pantallas, KivyMD) se congela para que las revisiones completas no lo
+# recorran (ver _gc_freeze).
+gc.set_threshold(5000, 15, 15)
+
+
+def _gc_freeze():
+    gc.collect(1)        # solo lo reciente (rápido); luego todo lo vivo queda fuera
+    gc.freeze()
 
 theme.install_palette()  # antes de cargar widgets KivyMD con color
 
@@ -507,6 +518,9 @@ class FenoRubusApp(MDApp):
 
     def _leave_splash(self, *_):
         _step("inicio")
+        # Lo cargado al abrir ya no lo revisa el recolector de basura: sin esto, cada
+        # tanto una revisión completa de ~900 mil objetos congelaba la app 1-3 s.
+        Clock.schedule_once(lambda *_: _gc_freeze(), 1)
         self.sm.get_screen("splash").ids.logo.stop()
         self.sm.transition = FadeTransition(duration=0.25)   # solo logo -> inicio
         self.start   # la pantalla de inicio es siempre lo primero al abrir la app
@@ -604,6 +618,7 @@ class FenoRubusApp(MDApp):
     def go(self, name: str, direction: str = "left"):
         if not self.sm.has_screen(name):
             getattr(self, name)  # carga diferida de la pantalla
+            Clock.schedule_once(lambda *_: _gc_freeze(), .5)
         if self.sm.current != name:
             self._history.append(self.sm.current)
         self.sm.current = name
@@ -692,7 +707,9 @@ class FenoRubusApp(MDApp):
             f.ids.pin.text = ""
             return False
 
-        form_dialog("Acceso restringido · Calibración IA", form, ok, "INGRESAR")
+        dialog = form_dialog("Acceso restringido · Calibración IA", form, ok, "INGRESAR")
+        # «Listo» en el teclado también entra.
+        form.ids.pin.bind(on_text_validate=lambda *_: ok(form) and dialog.dismiss())
 
     # ---------------------------------------------------------- utilidades
     def toast(self, text: str):
