@@ -1700,7 +1700,8 @@ async function boot() {
   $("extrapick").onchange = extraPicked;
   $("today").onclick = () => { S.week = C.iso(C.mondayOf(C.todayUTC())); render(); };
   NB.init({ S, send, photoUrl, resize, uploadPhoto: uploadNotePhoto });
-  $("trainfab").hidden = !TR.enabled();      // se activa abriendo la web con «#lab» una vez
+  $("aifabs").hidden = !TR.enabled();
+  document.body.classList.toggle("withfabs", TR.enabled());      // se activa abriendo la web con «#lab» una vez
   TR.init({ S, photoUrl, loadLabels, saveLabels, allStates, extraList, extraUrl, extraUpload,
     email: () => store.get("pr_email") });
   $("dsave").onclick = saveDetail;
