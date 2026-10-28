@@ -2869,20 +2869,13 @@
         theme_text_color: "Custom"
         text_color: c(theme.MIND_MUTED)
 
-<IAPlusButton@ButtonBehavior+Label>:
-    text: "IA+"
-    bold: True
-    font_size: "15sp"
+<IAPlusButton@ButtonBehavior+Image>:
+    # Logo IA+ (celeste con aura roja tenue)
+    source: theme.IAPLUS
     size_hint: None, None
-    size: dp(60), dp(32)
-    color: c("#0B1630")
-    canvas.before:
-        Color:
-            rgba: c("#7CF2B0") if self.state == "normal" else c("#4FC3F7")
-        RoundedRectangle:
-            pos: self.pos
-            size: self.size
-            radius: [self.height / 2]
+    size: dp(68), dp(68)
+    fit_mode: "contain"
+    opacity: .75 if self.state == "down" else 1
 
 <AILabScreen>:
     md_bg_color: 0, 0, 0, 0
@@ -3192,7 +3185,7 @@
 
     # IA+ (cajas para el detector): pantalla aparte, junto al candado
     IAPlusButton:
-        pos: root.width - dp(122), root.height - dp(49)
+        pos: root.width - dp(122), root.height - dp(64)
         on_release: root.open_iaplus()
 
 <HeatmapScreen>:
