@@ -46,6 +46,10 @@ main { max-width: 860px; margin: 0 auto; padding: 16px; }
   font-size: 13px; border-radius: 999px; padding: 3px 12px; margin-bottom: 4px; }
 .kicker { font-size: 11px; letter-spacing: .08em; color: var(--leaf-dark); font-weight: 700; }
 .wtitle { font-size: 22px; font-weight: 600; }
+.wtitle.pickable { cursor: pointer; border-radius: 10px; padding: 0 6px; }
+.wtitle.pickable:hover { background: rgba(46, 125, 50, .08); text-decoration: underline dotted; text-underline-offset: 4px; }
+.week { position: relative; }
+.wpick { position: absolute; left: 50%; top: 60%; width: 1px; height: 1px; opacity: 0; pointer-events: none; border: 0; padding: 0; }
 .weekfoot { grid-column: 1 / -1; display: flex; align-items: center; gap: 10px; padding: 0 6px; }
 .progress { flex: 1; height: 6px; border-radius: 3px; background: var(--leaf-soft); overflow: hidden; }
 .progress div { height: 100%; width: 0; background: var(--leaf); transition: width .3s; }
@@ -294,15 +298,23 @@ dialog.nbdraw[open] { display: flex; }
 .nbtools .seg { display: inline-flex; background: #EEDAB8; border-radius: 999px; padding: 3px; }
 .nbtools .seg button { border: 0; background: transparent; border-radius: 999px; padding: 6px 14px; font-weight: 600; color: #6B4423; cursor: pointer; }
 .nbtools .seg button.on { background: #6B4423; color: #fff; }
-.nbpentools { display: inline-flex; align-items: center; gap: 6px; }
-.nbpentools .ink { width: 28px; height: 28px; border-radius: 50%; border: 3px solid #fff; box-shadow: 0 0 0 1px rgba(0,0,0,.15); cursor: pointer; }
-.nbpentools .ink.on { box-shadow: 0 0 0 2px #C8963E; }
-.nbpentools .ghost.on { background: #EEDAB8; }
-.nbtools .seg button { display: inline-flex; align-items: center; }
-.nbtools .aa { font-size: 16px; letter-spacing: .5px; }
-.nbpentools { flex-wrap: wrap; }
-.nbpentools .pens button { padding: 5px 11px; font-size: 13px; }
+.nbtools { gap: 8px 10px; }
+.nbgroup { display: inline-flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.nbtools .tool { width: 42px; height: 36px; border: 0; border-radius: 999px; background: #EEDAB8; color: #6B4423;
+  display: grid; place-items: center; cursor: pointer; padding: 0; }
+.nbtools .tool svg { width: 22px; height: 22px; }
+.nbtools .tool.on { background: #6B4423; color: #fff; }
+.nbtools .tool:active { filter: brightness(.92); }
+.vsep { width: 1px; align-self: stretch; margin: 6px 2px; background: rgba(200, 150, 62, .55); }
 .nbinks { display: inline-flex; gap: 6px; }
+.nbinks .ink { width: 28px; height: 28px; border-radius: 50%; border: 3px solid #fff; box-shadow: 0 0 0 1px rgba(0,0,0,.15); cursor: pointer; padding: 0; }
+.nbinks .ink.on { box-shadow: 0 0 0 2px #C8963E; }
+.nbwidths { display: inline-flex; gap: 2px; }
+.nbwidths .wd { width: 34px; height: 28px; border: 0; border-radius: 8px; background: transparent; display: grid; place-items: center; cursor: pointer; padding: 0 6px; }
+.nbwidths .wd i { display: block; width: 100%; border-radius: 99px; background: #6B4423; }
+.nbwidths .wd.on { background: #EEDAB8; }
+.nbseldel { position: absolute; width: 34px; height: 34px; border-radius: 50%; border: 0; background: #1E88E5; color: #fff;
+  font-size: 16px; cursor: pointer; z-index: 3; box-shadow: 0 2px 6px rgba(0,0,0,.25); }
 
 /* Entrenar IA: marcar estructuras con cajas */
 .tbar { height: 6px; border-radius: 3px; background: var(--leaf-soft); overflow: hidden; margin: 6px 0; }

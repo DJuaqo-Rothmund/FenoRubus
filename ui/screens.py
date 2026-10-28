@@ -1857,6 +1857,22 @@ class SamplingTab(MDBoxLayout):
         a.season = a.week["season"]
         self.refresh()
 
+    def pick_week_date(self):
+        """Tocar «Semana del …»: calendario; cualquier día lleva a la semana que lo contiene
+        (el título muestra su primer día)."""
+        a = app()
+        from android_bridge import pick_date
+        start = _dt.date.fromisoformat(a.week["start_date"])
+
+        def go(day):
+            if day < ph.FIRST_BROWSE or day > ph.LAST_BROWSE:
+                a.toast("Las semanas van de 2020 a 2050.")
+                return
+            a.week = a.db.week_for_date(day)
+            a.season = a.week["season"]
+            self.refresh()
+        pick_date(start, go, "Ir a la semana de…")
+
     def go_current(self):
         a = app()
         a.week = a.db.current_week()

@@ -114,6 +114,52 @@ def allow_rotation(on: bool) -> None:
         pass
 
 
+_date_listener = None     # referencia viva mientras el diálogo de fecha está abierto
+
+
+def pick_date(initial, on_pick, title: str = "") -> None:
+    """Calendario para elegir un día: en Android, el del sistema (DatePickerDialog); en el
+    computador, el de KivyMD. on_pick(datetime.date) se llama en el hilo de la interfaz."""
+    import datetime as _dt
+    from kivy.clock import Clock
+    if IS_ANDROID:
+        try:
+            from android.runnable import run_on_ui_thread  # type: ignore
+            from jnius import PythonJavaClass, autoclass, java_method  # type: ignore
+
+            class Listener(PythonJavaClass):
+                __javainterfaces__ = ["android/app/DatePickerDialog$OnDateSetListener"]
+                __javacontext__ = "app"
+
+                @java_method("(Landroid/widget/DatePicker;III)V")
+                def onDateSet(self, view, year, month, day):
+                    d = _dt.date(year, month + 1, day)          # el mes de Java parte en 0
+                    Clock.schedule_once(lambda *_: on_pick(d), 0)
+
+            global _date_listener
+            _date_listener = Listener()
+
+            @run_on_ui_thread
+            def _open():
+                activity = autoclass("org.kivy.android.PythonActivity").mActivity
+                dlg = autoclass("android.app.DatePickerDialog")(
+                    activity, _date_listener, initial.year, initial.month - 1, initial.day)
+                if title:
+                    dlg.setTitle(title)
+                dlg.show()
+            _open()
+            return
+        except Exception as exc:  # noqa: BLE001 (si falla, el calendario de la app)
+            print("pick_date nativo:", exc)
+    from kivymd.uix.pickers import MDDatePicker
+    from ui import theme
+    picker = MDDatePicker(year=initial.year, month=initial.month, day=initial.day,
+                          title=title.upper() if title else "ELIJA UN DÍA",
+                          primary_color=theme.c(theme.LEAF_DARK), selector_color=theme.c(theme.LEAF))
+    picker.bind(on_save=lambda _w, value, _r: on_pick(value))
+    picker.open()
+
+
 _stylus = None
 
 
