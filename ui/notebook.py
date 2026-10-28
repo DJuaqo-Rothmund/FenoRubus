@@ -537,7 +537,12 @@ class NoteScreen(MDScreen):
         ink = self.ids.ink
         ink.attach(ti)
         ink.on_change = self._ink_changed
-        ti.bind(pos=self._rule, size=self._rule, line_height=self._rule, scroll_y=self._snap)
+        # Los renglones se dibujan una vez por cuadro, ya acomodada la hoja: al abrir o cerrar
+        # el teclado la hoja cambia de alto y de posición en pasos, y con los valores de un
+        # paso intermedio quedaban corridos (o encima del título).
+        self._rule_ev = Clock.create_trigger(self._rule, -1)
+        ti.bind(pos=self._rule_ev, size=self._rule_ev, line_height=self._rule_ev, scroll_y=self._snap)
+        self.bind(kb_pad=self._rule_ev)
         self._last_scroll = 0
         self._rule()
 
@@ -578,6 +583,8 @@ class NoteScreen(MDScreen):
             group = self._rules = InstructionGroup()
             ti.canvas.before.insert(0, group)     # debajo de todo (el color no se hereda al texto)
         group.clear()
+        if "ink" in self.ids:
+            self.ids.ink._place()          # la escritura a mano, con la hoja ya acomodada
         step = ti.line_height + ti.line_spacing
         if step <= 0:
             return
