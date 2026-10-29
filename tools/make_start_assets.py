@@ -186,6 +186,17 @@ def notebook_icon():
     blob(420, (238, 218, 184), 811).save(os.path.join(UI, "blob_notebook.png"))   # ocre claro
 
 
+def neon_glow(ai):
+    """Brillo neón cian del Entrenador IA: un halo cercano intenso y otro amplio y tenue,
+    del mismo tamaño que el ícono (se dibuja detrás, alineado con las líneas)."""
+    near = tint(ai, (90, 240, 255)).filter(ImageFilter.GaussianBlur(4))
+    near.putalpha(near.split()[3].point(lambda v: min(255, int(v * 2.6))))
+    far = tint(ai, (40, 200, 255)).filter(ImageFilter.GaussianBlur(16))
+    far.putalpha(far.split()[3].point(lambda v: min(255, int(v * 1.8))))
+    far.alpha_composite(near)
+    return far
+
+
 def main():
     background()
     blob(420, (250, 214, 228), 115).save(os.path.join(UI, "blob_id.png"))
@@ -193,9 +204,7 @@ def main():
     blob(440, (46, 52, 130), 7, stars=True).save(os.path.join(UI, "blob_ai.png"))
     ai = Image.open(os.path.join(UI, "start_ai.png")).convert("RGBA")
     tint(ai, (190, 228, 255)).save(os.path.join(UI, "start_ai_night.png"))
-    glow = tint(ai, (120, 190, 255)).filter(ImageFilter.GaussianBlur(14))
-    glow.putalpha(glow.split()[3].point(lambda v: min(255, int(v * 2.2))))
-    glow.save(os.path.join(UI, "ai_glow.png"))
+    neon_glow(ai).save(os.path.join(UI, "ai_glow.png"))
     bar_icons()
     notebook_icon()
 

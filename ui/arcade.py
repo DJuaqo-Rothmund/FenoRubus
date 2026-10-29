@@ -609,8 +609,8 @@ def ki_texture():
 class KiButton(ButtonBehavior, Widget):
     """Botón IA+: el logo con un «ki» rojo que emana del dibujo y se evapora hacia arriba
     (volutas difusas que suben, crecen y se desvanecen, y un aura que respira). Las
-    instrucciones se crean una vez; cada cuadro solo las mueve (30 por segundo, y solo
-    mientras se ve)."""
+    instrucciones se crean una vez; cada cuadro solo las mueve (30 por segundo; mientras
+    no se ve, el cuadro no hace nada)."""
     source = StringProperty("")
     N = 7
 
@@ -653,10 +653,7 @@ class KiButton(ButtonBehavior, Widget):
 
     def _step(self, dt):
         if dt and self.get_root_window() is None:
-            if self._ev is not None:
-                self._ev.cancel()
-                self._ev = None
-            return
+            return            # pantalla oculta: no se dibuja, pero sigue andando al volver
         self._t += dt
         x, y, w, h = self.x, self.y, self.width, self.height
         beat = .5 + .5 * math.sin(self._t * 2.4)
