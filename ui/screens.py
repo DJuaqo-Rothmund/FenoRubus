@@ -767,7 +767,7 @@ class StartIcon(ButtonBehavior, BoxLayout):
     source = StringProperty()
     bubble = StringProperty("")
     glow = StringProperty("")
-    glow_level = NumericProperty(.55)   # brillo que «respira» (Entrenador IA)
+    glow_level = NumericProperty(.82)   # brillo neón (Entrenador IA)
     label = StringProperty()
     color = ColorProperty([0, 0, 0, 1])
     diameter = NumericProperty(dp(130))
@@ -821,13 +821,9 @@ class StartScreen(MDScreen):
         Clock.schedule_once(lambda *_: self.refresh(), 0)
 
     def on_enter(self, *_):
-        delay = 0
         if getattr(self, "_intro_ready", False):
             self._intro_ready = False
             self._play_intro()
-            delay = 1.0
-        self._breath_ev = Clock.schedule_once(lambda *_: self._breathe(), delay)
-
         self._t0 = time.monotonic()
         self._float_ev = Clock.schedule_interval(self._float, 1 / 30)
 
@@ -841,15 +837,21 @@ class StartScreen(MDScreen):
             k = math.sin(t * 1.5 + phase)
             w.bob = dp(4) * k
             w.pulse = 1 + .035 * math.sin(t * 1.5 + phase - .9)
+        self.ids.ic_ai.glow_level = self.neon(t)
+
+    @staticmethod
+    def neon(t: float) -> float:
+        """Brillo del Entrenador IA como un tubo de neón: encendido, con un pulso leve y,
+        cada tanto, un parpadeo corto (dos destellos)."""
+        level = .82 + .12 * math.sin(t * 2.2)
+        k = t % 7.0
+        if 5.0 < k < 5.08 or 5.16 < k < 5.22:
+            level = .35
+        return level
 
     def on_leave(self, *_):
         if getattr(self, "_float_ev", None):
             self._float_ev.cancel()
-        if getattr(self, "_breath_ev", None):
-            self._breath_ev.cancel()
-        if getattr(self, "_breath", None):
-            self._breath.cancel(self.ids.ic_ai)
-            self._breath = None
 
     # ------------------------------------------------------------ animación
     def _prepare_intro(self):
@@ -868,17 +870,6 @@ class StartScreen(MDScreen):
         for i, w in enumerate((self.ids.ic_id, self.ids.ic_predio, self.ids.ic_ai, self.ids.ic_nb)):
             anim = Animation(d=.12 + .11 * i) + Animation(reveal=1, lift=0, d=.38, t="out_back")
             anim.start(w)
-
-    def _breathe(self):
-        from kivy.animation import Animation
-        if getattr(self, "_breath", None):
-            return
-        # Tres «respiraciones» y queda quieto: una animación sin fin obliga a redibujar la
-        # pantalla completa 60 veces por segundo y resta fluidez al resto.
-        step = Animation(glow_level=1, d=1.4, t="in_out_sine") + Animation(glow_level=.5, d=1.4, t="in_out_sine")
-        anim = step + step + step + Animation(glow_level=.8, d=.8)
-        self._breath = anim
-        anim.start(self.ids.ic_ai)
 
     # --------------------------------------------------------------- textos
     @staticmethod

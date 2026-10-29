@@ -437,7 +437,7 @@
             source: root.glow
             opacity: root.glow_level if root.glow else 0
             size_hint: None, None
-            size: root.diameter * .92, root.diameter * .92
+            size: (root.diameter * (.88 if root.state == "down" else 1),) * 2
             pos_hint: {"center_x": .5, "center_y": .5}
             fit_mode: "contain"
         Image:
