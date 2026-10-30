@@ -841,13 +841,8 @@ class StartScreen(MDScreen):
 
     @staticmethod
     def neon(t: float) -> float:
-        """Brillo del Entrenador IA como un tubo de neón: encendido, con un pulso leve y,
-        cada tanto, un parpadeo corto (dos destellos)."""
-        level = .82 + .12 * math.sin(t * 2.2)
-        k = t % 7.0
-        if 5.0 < k < 5.08 or 5.16 < k < 5.22:
-            level = .35
-        return level
+        """Brillo neón del Entrenador IA: sube y baja suave y continuo (sin parpadeos)."""
+        return .7 + .25 * math.sin(t * 1.6)
 
     def on_leave(self, *_):
         if getattr(self, "_float_ev", None):
