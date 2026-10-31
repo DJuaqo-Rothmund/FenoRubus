@@ -4,7 +4,7 @@ extra_photos.py
 Fotos extra para entrenar IA+: fotos que no son de ningún ensayo ni predio (de otros
 años, de otros lugares…), en una carpeta propia de Drive:
 
-    PhenoRubus · Imágenes de Fenología/IA+ Conocimiento ampliado/
+    App Fenología/<módulo>/IA+ Conocimiento ampliado/
         20261028-153012-extra.jpg          ← sacadas o elegidas en el teléfono
         2024/Regina/IMG_1234.jpg           ← subidas desde la web (con sus subcarpetas)
 
@@ -78,8 +78,7 @@ def thumb_path(photo: dict) -> str:
 
 # ------------------------------------------------------------------ Drive
 def folder_id(drive, create: bool = True) -> str | None:
-    from drive_backup import ROOT_FOLDER
-    root = drive._folder(ROOT_FOLDER, None)
+    root = drive.root_id()
     return drive._folder(FOLDER, root) if create else root and drive._folder(FOLDER, root)
 
 

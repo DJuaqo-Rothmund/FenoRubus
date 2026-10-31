@@ -22,7 +22,7 @@ _dbs: dict[str, tuple[Database, set]] = {}
 def _db(code: str, workspace: dict) -> tuple[Database, set]:
     if code not in _dbs:
         db = Database(os.path.join(DATA, f"{code}.sqlite3"), seed=False, code=code, workspace=workspace)
-        for c, label, desc, kw in ph.BBCH_RUBUS:          # escala BBCH, sin variedades de ejemplo
+        for c, label, desc, kw in ph.BBCH_SCALE:          # escala BBCH, sin variedades de ejemplo
             db.upsert_bbch(c, label, desc, kw, source="base")
         db.execute("INSERT OR REPLACE INTO meta(key, value) VALUES ('seeded', '1')")
         db.refresh_bbch_scale()

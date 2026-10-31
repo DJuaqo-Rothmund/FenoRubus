@@ -12,7 +12,9 @@ import { photoHeat, pickPoint, sectorMap } from "./maps.js";
 const SCOPE = "https://www.googleapis.com/auth/drive.file";
 const API = "https://www.googleapis.com/drive/v3/files";
 const UPLOAD = "https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=id";
-const ROOT = "PhenoRubus · Imágenes de Fenología";
+// Carpeta del módulo en Drive: «App Fenología/PhenoRubus» (como la app). La antigua
+// «PhenoRubus · Imágenes de Fenología» se mueve ahí la primera vez (con todo lo que tenía).
+const TOP = "App Fenología", MODULE = "PhenoRubus", LEGACY_ROOT = "PhenoRubus · Imágenes de Fenología";
 const SYNC = "Sincronización";
 const FOLDER = "application/vnd.google-apps.folder";
 const PROFILES = { id: "I+D", predio: "Predio" };
@@ -119,6 +121,26 @@ async function folder(name, parent, create = true) {
   return id;
 }
 
+async function rootFolder(create = true) {
+  if (S.folders.has("module")) return S.folders.get("module");
+  const top = await folder(TOP, null, create);
+  let id = top && await folder(MODULE, top, false);
+  if (!id) {
+    const old = (await list(`name='${q(LEGACY_ROOT)}' and mimeType='${FOLDER}' and trashed=false`, "files(id,parents)"))[0];
+    if (old && top) {
+      const qs = new URLSearchParams({ addParents: top, removeParents: (old.parents || []).join(","), fields: "id" });
+      await api("PATCH", `${API}/${old.id}?${qs}`, JSON.stringify({ name: MODULE }), "application/json");
+      id = old.id;
+    } else if (old) {
+      id = old.id;          // solo lectura: se usa donde está
+    } else if (top) {
+      id = await folder(MODULE, top, create);
+    }
+  }
+  if (id) S.folders.set("module", id);
+  return id;
+}
+
 async function upload(parent, name, blob, mime) {
   const b = "pr" + C.newUid();
   const meta = JSON.stringify({ name, parents: [parent] });
@@ -136,12 +158,12 @@ async function updateFile(id, blob, mime) {
 }
 
 // Marcas para entrenar el detector (web/train.js): UN archivo para todos los ensayos y
-// predios (es la misma especie), «PhenoRubus · Imágenes de Fenología/Entrenamiento IA/
+// predios (es la misma especie), «App Fenología/PhenoRubus/Entrenamiento IA/
 // marcas.json», aparte de los registros. Los archivos por ensayo de la primera versión
 // (<código>.json) se suman al leer.
 const TRAIN_DIR = "Entrenamiento IA", TRAIN_FILE = "marcas.json";
 async function trainDir(create) {
-  const root = await folder(ROOT, null, create);
+  const root = await rootFolder(create);
   return root && await folder(TRAIN_DIR, root, create);
 }
 async function loadLabels() {
@@ -181,7 +203,7 @@ async function saveLabels(data) {
 // clave de cada foto en marcas.json es «ext/<subcarpetas>/<nombre>».
 const EXTRA_DIR = "IA+ Conocimiento ampliado";
 async function extraDir(create) {
-  const root = await folder(ROOT, null, create);
+  const root = await rootFolder(create);
   return root && await folder(EXTRA_DIR, root, create);
 }
 async function extraList() {
@@ -330,7 +352,7 @@ async function pool(items, n, fn) {        // fn(item, i) con n en paralelo
 function status(t) { $("status").textContent = t || ""; }
 
 async function loadWorkspaces() {
-  S.root = await folder(ROOT, null, false);
+  S.root = await rootFolder(false);
   S.sync = S.root && await folder(SYNC, S.root, false);
   if (!S.sync) throw new Error("Aún no hay datos en Drive: abra la app del celular con Google Drive conectado y pulse «Sincronizar».");
   const files = await list(`'${S.sync}' in parents and trashed=false`);
@@ -494,14 +516,14 @@ async function resize(file) {
 
 async function weekFolderId(week = S.week, sub = "") {
   const prefix = `${PROFILES[S.ws.profile] || "Otros"}/${(S.ws.name || S.ws.code).replace(/\//g, "-").trim()}`;
-  let parent = await folder(ROOT, null, true);
+  let parent = await rootFolder(true);
   for (const part of `${prefix}/${C.weekFolder(week)}${sub ? `/${sub}` : ""}`.split("/")) parent = await folder(part, parent, true);
   return parent;
 }
 
 // Foto del cuaderno: carpeta exclusiva «PhenoRubus · …/Cuaderno de campo» (= notebook_export).
 async function uploadNotePhoto(day, name, blob) {
-  const dir = await folder("Cuaderno de campo", await folder(ROOT, null, true), true);
+  const dir = await folder("Cuaderno de campo", await rootFolder(true), true);
   const id = await upload(dir, name, blob, "image/jpeg");
   S.photoIds.set(name, id);
   S.photoUrls.set(name, URL.createObjectURL(blob));

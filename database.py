@@ -30,6 +30,7 @@ import threading
 from typing import Any, Iterable
 
 import phenology as ph
+from platform_utils import GLOBAL_KEYS, global_get, global_set
 
 SCHEMA_VERSION = 3
 
@@ -468,7 +469,7 @@ class Database:
             ai.execute("DELETE FROM bbch_stages WHERE code=? AND source='base'", (old,))
         have = {r["code"]: r for r in ai.query("SELECT code, source FROM bbch_stages")}
         n = 0
-        for code, label, desc, kw in ph.BBCH_RUBUS:
+        for code, label, desc, kw in ph.BBCH_SCALE:
             cur = have.get(code)
             if cur is None or cur["source"] == "base":
                 ai.upsert_bbch(code, label, desc, kw, source="base")
@@ -488,9 +489,10 @@ class Database:
         seeded = self.query_one("SELECT value FROM meta WHERE key='seeded'")
         if seeded:
             return
-        for i, (name, code) in enumerate(DEFAULT_VARIETIES):
+        import crops
+        for i, (name, code) in enumerate(crops.current().varieties):
             self.add_variety(name, code=code, sort_order=i, log=False)
-        for code, label, desc, kw in ph.BBCH_RUBUS:
+        for code, label, desc, kw in ph.BBCH_SCALE:
             self.upsert_bbch(code, label, desc, kw, source="base")
         self.execute("INSERT OR REPLACE INTO meta(key, value) VALUES ('seeded', ?)", (_now(),))
         self.log("seed", "database", None, "Variedades y escala BBCH iniciales")
@@ -516,6 +518,8 @@ class Database:
         return self.shared if self.shared is not None else self
 
     def get_setting(self, key: str, default: Any = None) -> Any:
+        if key in GLOBAL_KEYS:          # cuenta de Drive: una sola para todos los cultivos
+            return global_get(key, default)
         if self._settings_db(key) is not self:
             return self.shared.get_setting(key, default)
         row = self.query_one("SELECT value FROM settings WHERE key=?", (key,))
@@ -527,6 +531,9 @@ class Database:
             return row["value"]
 
     def set_setting(self, key: str, value: Any) -> None:
+        if key in GLOBAL_KEYS:
+            global_set(key, value)
+            return
         if self._settings_db(key) is not self:
             self.shared.set_setting(key, value)
             return

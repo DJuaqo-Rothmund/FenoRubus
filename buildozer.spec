@@ -30,10 +30,9 @@ requirements = python3,kivy==2.3.1,kivymd==1.2.0,pillow,numpy,jinja2,markupsafe,
 
 # (str) Presplash / icon
 presplash.filename = %(source.dir)s/assets/presplash.png
-# Pantalla de carga ANIMADA (Lottie, la dibuja Android mientras arranca Python y la app
-# precarga; ver tools/make_splash_lottie.py y splash_native.py). presplash.png queda de
-# respaldo si no se pudiera usar.
-android.presplash_lottie = %(source.dir)s/assets/splash_lottie.json
+# Pantalla de carga al abrir: fija y neutra (los tres frutos y «App Fenología»), hasta
+# que aparece la pantalla de cultivos. La animación de cada módulo (la de PhenoRubus, la
+# de siempre) se ve al elegir el cultivo (ver tools/make_crop_assets.py y splash_native.py).
 icon.filename = %(source.dir)s/assets/icon.png
 android.presplash_color = #F2F4EE
 

@@ -27,7 +27,7 @@ import uuid
 from concurrent.futures import ThreadPoolExecutor
 
 import sync
-from drive_backup import API, ROOT_FOLDER, UPLOAD, DriveError
+from drive_backup import API, UPLOAD, DriveError
 
 SYNC_FOLDER = "Sincronización"
 MAX_DOWNLOADS = 200         # fotos por sincronización automática (la manual las baja todas)
@@ -49,7 +49,7 @@ class DriveSync:
 
     # ------------------------------------------------------------ Drive
     def _root(self) -> str:
-        return self.drive._folder(SYNC_FOLDER, self.drive._folder(ROOT_FOLDER, None))
+        return self.drive._folder(SYNC_FOLDER, self.drive.root_id())
 
     def _list(self, folder: str) -> list[dict]:
         out, token = [], None
