@@ -65,6 +65,25 @@ def fast_clear(container) -> None:
 # ===========================================================================
 # Widgets comunes
 # ===========================================================================
+def themed(**props):
+    """Colores por defecto que dependen del estilo de la app (Ajustes › Estilo): el valor
+    de la clase se fijó al importar; cada widget nuevo toma el del estilo actual, salvo que
+    la regla KV o quien lo crea haya dado otro."""
+    def deco(cls):
+        at_import = {n: c(getattr(theme, t), a) for n, (t, a) in props.items()}
+        orig = cls.__init__
+
+        def __init__(self, **kw):
+            orig(self, **kw)
+            for name, (token, alpha) in props.items():
+                if name not in kw and list(getattr(self, name)) == list(at_import[name]):
+                    setattr(self, name, c(getattr(theme, token), alpha))
+        cls.__init__ = __init__
+        return cls
+    return deco
+
+
+@themed(md_bg_color=("GLASS", None), line_color=("GLASS_EDGE", None))
 class GlassCard(BoxLayout):
     """
     Tarjeta de vidrio liviana (BoxLayout + 2 instrucciones de canvas).
@@ -91,6 +110,7 @@ class GlassCard(BoxLayout):
 class GlassButton(ButtonBehavior, GlassCard):
     """Tarjeta pulsable con realce al tocar (sin animación de ripple)."""
 
+@themed(bg=("LEAF_SOFT", None), fg=("LEAF_DARK", None))
 class Tag(MDLabel):
     bg = ColorProperty(c(theme.LEAF_SOFT))
     fg = ColorProperty(c(theme.LEAF_DARK))
@@ -109,14 +129,16 @@ class UnitButton(MDRectangleFlatButton):
             self.text = self.options[(i + 1) % len(self.options)]
 
 
+@themed(bg_on=("BERRY", None), bg_off=("SURFACE", .55), fg_on=("ON_BERRY", None), fg_off=("LEAF_DARK", None),
+        edge=("GLASS_EDGE", None))
 class PillButton(ButtonBehavior, Label):
     """Botón píldora dibujado con UNA forma redondeada (sin la sombra rectangular de los
     botones con relieve de KivyMD, que en algunos teléfonos se veía desplazada junto con
     el color de «presionado»)."""
     selected = BooleanProperty(False)
     bg_on = ColorProperty(c(theme.BERRY))
-    bg_off = ColorProperty(c("#FFFFFF", .55))
-    fg_on = ColorProperty(c("#FFFFFF"))
+    bg_off = ColorProperty(c(theme.SURFACE, .55))
+    fg_on = ColorProperty(c(theme.ON_BERRY))
     fg_off = ColorProperty(c(theme.LEAF_DARK))
     edge = ColorProperty(c(theme.GLASS_EDGE))
     press_tint = ColorProperty(c("#000000", .10))
@@ -203,6 +225,7 @@ def when_text(stamp: str) -> str:
     return stamp
 
 
+@themed(accent=("LEAF_SOFT", None))
 class PickRow(GlassButton):
     title = StringProperty()
     subtitle = StringProperty()
@@ -279,6 +302,7 @@ def bbch_pick_items(db, callback, extra: list | None = None) -> list[tuple]:
     return items
 
 
+@themed(accent=("LEAF_SOFT", None))
 class ScaleGroup(ButtonBehavior, GlassCard):
     title = StringProperty()
     count = StringProperty()
@@ -287,6 +311,7 @@ class ScaleGroup(ButtonBehavior, GlassCard):
     macro = NumericProperty(0)
 
 
+@themed(accent=("LEAF_SOFT", None))
 class ScaleRow(ButtonBehavior, GlassCard):
     code = StringProperty()
     text = StringProperty()
@@ -611,6 +636,11 @@ def list_dialog(title: str, rows: list[tuple[str, str]]):
     dialog.open()
 
 
+def _crop():
+    import crops
+    return crops.current()
+
+
 def bbch_tag_colors(code: int | None):
     """Del verde vegetativo al rojo frambuesa de la maduración."""
     return theme.stage_colors(code)
@@ -635,8 +665,20 @@ class NavTile(ButtonBehavior, BoxLayout):
 # Home
 # ===========================================================================
 class SplashScreen(MDScreen):
-    """Pantalla de apertura: logo animado, nombre y firma, igual que la pantalla de carga
-    nativa de Android. La animación la maneja la app (main.on_start)."""
+    """Pantalla de carga de cada módulo: logo animado, nombre y firma. PhenoRubus usa su
+    animación de siempre; PhenoBlue y PhenoCran, la de su logo simple. La animación la
+    maneja la app (main.choose_crop)."""
+
+    def __init__(self, **kw):
+        super().__init__(**kw)
+        if theme.crop_id != "frambuesa":
+            from ui.splash_anim import CropLogoAnim
+            old = self.ids.logo
+            new = CropLogoAnim(theme.LOGO, size_hint=old.size_hint)
+            parent = old.parent
+            parent.remove_widget(old)
+            parent.add_widget(new)
+            self.ids["logo"] = new
 
 
 class HomeScreen(MDScreen):
@@ -787,6 +829,63 @@ class GoogleButton(ButtonBehavior, FloatLayout):
     text = StringProperty("Inicia sesión con Google")
 
 
+class LaunchScreen(MDScreen):
+    """Lo que se ve al abrir la app (igual a la pantalla de carga de Android: los tres
+    frutos y «App Fenología») mientras se prepara la pantalla de cultivos."""
+
+
+@themed(md_bg_color=("GLASS_STRONG", None))
+class CropCard(ButtonBehavior, GlassCard):
+    crop_id = StringProperty()
+    app_name = StringProperty()
+    crop_name = StringProperty()
+    species = StringProperty()
+    logo = StringProperty()
+    accent = StringProperty("#A8184A")
+
+
+class CropScreen(MDScreen):
+    """Primera pantalla: elegir el cultivo (PhenoBlue, PhenoCran, PhenoRubus) y conectar la
+    cuenta de Google (una sola para todos los cultivos)."""
+
+    def on_pre_enter(self, *_):
+        self.refresh()
+
+    def refresh(self):
+        import crops
+        box = self.ids.cards
+        fast_clear(box)
+        for crop in crops.CROPS.values():
+            accent = theme.crop_accent(crop.id)
+            card = CropCard(crop_id=crop.id, app_name=crop.app, crop_name=crop.name,
+                            species=crop.species, logo=theme.crop_logo(crop.id), accent=accent)
+            card.bind(on_release=lambda w: app().choose_crop(w.crop_id))
+            box.add_widget(card)
+        self.refresh_account()
+
+    def refresh_account(self):
+        from platform_utils import global_get
+        acc = global_get("drive_account")
+        if global_get("drive_enabled", False):
+            self.ids.account.text = f"Google Drive conectado{f' · {acc}' if acc else ''}"
+            self.ids.google_btn.text = "Cambiar cuenta de Google"
+        else:
+            self.ids.account.text = "Sin cuenta: los datos quedan solo en este equipo"
+            self.ids.google_btn.text = "Inicia sesión con Google"
+
+    def connect_google(self):
+        a = app()
+        if not a.drive.available:
+            a.toast("La cuenta de Google se conecta en el teléfono (Android).")
+            return
+        a.toast("Elija la cuenta de Google y acepte el permiso")
+
+        def done(ok, msg):
+            Clock.schedule_once(lambda *_: (a.toast(msg), self.refresh_account()))
+
+        a.drive.connect(done)
+
+
 class StartScreen(MDScreen):
     """Lo primero que se ve al abrir la app: I+D, Predio, Entrenador IA y la cuenta de Google."""
     _animated = False
@@ -894,12 +993,6 @@ class StartScreen(MDScreen):
             self.ids.week_lbl.text = ""
         self._pills()
         self._postit()
-        drive = a.drive
-        st = drive.status()
-        if st["enabled"]:
-            self.ids.google_btn.text = "Cambiar cuenta de Google"
-        else:
-            self.ids.google_btn.text = "Inicia sesión con Google"
 
     def _pills(self):
         a = app()
@@ -968,21 +1061,6 @@ class StartScreen(MDScreen):
 
     def open_ai(self):
         app().open_ai_lab()
-
-    def connect_google(self):
-        a = app()
-        if not a.drive.available:
-            a.toast("La cuenta de Google se conecta en el teléfono (Android).")
-            return
-        a.toast("Elija la cuenta de Google y acepte el permiso")
-
-        def done(ok, msg):
-            Clock.schedule_once(lambda *_: (a.toast(msg), self.refresh()))
-
-        a.drive.connect(done)
-
-    def continue_local(self):
-        app().enter_home()
 
 
 class SectorRow(GlassButton):
@@ -1683,6 +1761,7 @@ class SettingsScreen(MDScreen):
             tab.refresh()
 
 
+@themed(code_bg=("BERRY_SOFT", None), code_fg=("LEAF_DARK", None))
 class VarietyRow(GlassButton):
     kicker = StringProperty()      # parcela «T1R1» (chica) cuando el tratamiento tiene nombre
     title = StringProperty()
@@ -3145,7 +3224,7 @@ class ObservationScreen(MDScreen):
             self._set_bbch(self.obs["ai_code"])
 
     def open_scale(self, caller):
-        bbch_dialog("Escala BBCH · frambueso", app().db, self._set_bbch,
+        bbch_dialog(f"Escala BBCH · {_crop().fruit}", app().db, self._set_bbch,
                     current=ph.parse_bbch_code(self.ids.bbch.text or ""))
 
     # -------------------------------------------------------------- guardar
@@ -3179,6 +3258,7 @@ class ObservationScreen(MDScreen):
 # ===========================================================================
 # Widgets gráficos de la vista previa
 # ===========================================================================
+@themed(color=("BERRY", None), track=("BERRY_SOFT", None))
 class ProgressRing(Widget):
     """Anillo de avance (0..1) con el porcentaje al centro."""
     value = NumericProperty(0)
@@ -3192,6 +3272,7 @@ def _muted_label(text: str):
                    theme_text_color="Custom", text_color=c(theme.MUTED))
 
 
+@themed(fg=("INK", None))
 class StageChip(BoxLayout):
     """Etiqueta de estadio (leyenda del mapa)."""
     text = StringProperty()
@@ -3199,6 +3280,7 @@ class StageChip(BoxLayout):
     fg = ColorProperty(c(theme.INK))
 
 
+@themed(sub_color=("MUTED", None), badge_fg=("INK", None))
 class PreviewTile(ButtonBehavior, BoxLayout):
     """Ficha de la vista previa: la frambuesa dibujada de la variedad (gris si esa semana
     no tiene registro), su estado BBCH y nombre. El botón ES la frambuesa: solo responde
@@ -3420,7 +3502,7 @@ class PreviewTab(MDScreen):
         if self.kind == "variety":
             box.add_widget(MDLabel(text=("Toque un sector del plano para ver su información; tocando "
                                          "un equipo de riego se acerca." if self._plan() else
-                                         "Toque una frambuesa para ver todo el informe de esa variedad."),
+                                         f"Toque un{'a' if _crop().id == 'frambuesa' else ''} {_crop().fruit} para ver todo el informe de esa variedad."),
                                    font_style="Caption", adaptive_height=True,
                                    theme_text_color="Custom", text_color=c(theme.MUTED)))
             return
@@ -3955,6 +4037,9 @@ class SettingsTab(MDScreen):
 
     def refresh(self):
         a = app()
+        name, desc = theme.STYLES[theme.style]
+        self.ids.style_text.text = f"[b]{name}[/b] · {desc}"
+        self.ids.style_text.markup = True
         cfg = a.reminders.config()
         self._loading = True
         self.ids.enabled.active = cfg.enabled
@@ -3982,7 +4067,7 @@ class SettingsTab(MDScreen):
         engine = f"Extractor: {ext.extractor.name} · " if ext else ""
         self.ids.ai_text.text = (f"{engine}{n} fotos de referencia. "
                                  "Todo el análisis se ejecuta en el teléfono, sin conexión.")
-        self.ids.data_text.text = f"PhenoRubus versión {app_version()} · datos locales: {a.db.path}"
+        self.ids.data_text.text = f"{_crop().app} versión {app_version()} · datos locales: {a.db.path}"
         self.refresh_drive()
         self.refresh_sync()
 
@@ -4953,7 +5038,7 @@ class AILabScreen(MDScreen):
     def show_scale(self):
         rows = [(f"BBCH {ph.code_str(r['code'])}: {r['label']}", f"[{r['source']}] {r['description']}")
                 for r in app().db.list_bbch()]
-        list_dialog("Escala BBCH · frambueso", rows)
+        list_dialog(f"Escala BBCH · {_crop().fruit}", rows)
 
     def save_template(self):
         from importer import write_template

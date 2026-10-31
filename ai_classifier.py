@@ -84,6 +84,8 @@ def color_masks(hsv: np.ndarray) -> dict[str, np.ndarray]:
         "yellow_green": (h >= 55) & (h < 75) & (s >= 0.25) & (v > 0.2),
         "yellow": (h >= 40) & (h < 55) & (s >= 0.35) & (v > 0.35),
         "brown": (h >= 15) & (h < 40) & (s >= 0.2) & (v > 0.1) & (v <= 0.6),
+        # Azul/morado del arándano maduro (no entra en el descriptor: COLOR_CLASSES).
+        "blue": (h >= 200) & (h < 290) & (s >= 0.18) & (v > 0.08),
     }
 
 
@@ -360,7 +362,7 @@ class PhenologyClassifier:
     def catalog(self) -> list[dict]:
         rows = self.db.list_bbch()
         return rows or [{"code": c, "label": n, "description": d, "keywords": k}
-                        for c, n, d, k in ph.BBCH_RUBUS]
+                        for c, n, d, k in ph.BBCH_SCALE]
 
     def label(self, code: int) -> str:
         return ph.bbch_label(code, self.db.bbch_names())
@@ -483,6 +485,27 @@ class PhenologyClassifier:
         dark, green, brown = prof["dark_red"], prof["green"], prof["brown"]
         yellow = prof["yellow"] + prof["yellow_green"] * 0.5
         berry = pink + red + dark
+        import crops
+        if crops.current().id == "arandano":
+            # Arándano: madura de verde a rosado y luego azul con pruina (89).
+            blue = prof.get("blue", 0.0)
+            berry = blue + 0.6 * (pink + red + dark)
+            if berry > 0.03:
+                f = 1.0 + min(berry, 0.4) * 16
+                ripe = blue / (berry + 1e-6)              # 0 rosado ... 1 azul
+                target = 81 + 8 * min(1.0, ripe)
+                s *= np.where(macro == 8, f * (np.exp(-0.5 * ((codes - target) / 3.0) ** 2) + 0.3), 1.0)
+                s *= np.where(macro < 7, 0.5, 1.0)
+            else:
+                s *= np.where(macro == 8, 0.6, 1.0)
+            if white > 0.04:     # flores blancas acampanadas
+                s *= np.where(macro == 6, 1.0 + min(white, 0.35) * 14, 1.0)
+            if green > 0.35 and berry < 0.02 and white < 0.02:
+                s *= np.where(np.isin(macro, [1, 2, 3, 5, 7]), 1.5, 1.0)
+            if brown > 0.2 and green < 0.1:
+                s *= np.where(macro == 0, 2.5, 0.7)
+            s = s / s.sum()
+            return s, {k: round(v, 3) for k, v in prof.items()}
         if white > 0.04:
             f = 1.0 + min(white, 0.35) * 14
             s *= np.where(macro == 6, f, 1.0)
@@ -604,7 +627,7 @@ class PhenologyClassifier:
         dom = sorted(prof.items(), key=lambda kv: -kv[1])[:2]
         names = {"white": "blanco", "pink": "rosado", "red": "rojo", "dark_red": "rojo oscuro",
                  "green": "verde", "yellow_green": "verde amarillo", "yellow": "amarillo",
-                 "brown": "pardo"}
+                 "brown": "pardo", "blue": "azul"}
         parts.append("color: " + ", ".join(f"{names[c]} {v:.0%}" for c, v in dom))
         if "notas" in comps:
             parts.append("notas coinciden con claves del estadio")

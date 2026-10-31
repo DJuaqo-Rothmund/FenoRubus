@@ -184,39 +184,61 @@ class PixelOrb(ButtonBehavior, Widget):
                         cy + math.sin(ang) * r * .82 * press - s / 2)
 
 
-# Frambuesa de 8 bits (7×8): G hoja, R fruto, r brillo, D sombra.
-RASPBERRY = ["..G.G..",
-             ".GGGGG.",
-             ".RRRRR.",
-             "RRrRRrR",
-             "RRRRRRR",
-             "DRrRRRD",
-             ".DRRRD.",
-             "..DRD.."]
-SPRITE_COLORS = {"G": "#4CAF50", "R": "#D81B60", "r": "#F8BBD0", "D": "#8E1240"}
-_sprite_tex = None
+# Fruta de 8 bits (7×8) de cada cultivo: G hoja, R fruto, r brillo, D sombra.
+SPRITES = {
+    "frambuesa": (["..G.G..",
+                   ".GGGGG.",
+                   ".RRRRR.",
+                   "RRrRRrR",
+                   "RRRRRRR",
+                   "DRrRRRD",
+                   ".DRRRD.",
+                   "..DRD.."],
+                  {"G": "#4CAF50", "R": "#D81B60", "r": "#F8BBD0", "D": "#8E1240"}),
+    "arandano": (["..D.D..",
+                  "..DDD..",
+                  ".RRRRR.",
+                  "RrrRRRR",
+                  "RrRRRRR",
+                  "RRRRRRD",
+                  ".RRRRD.",
+                  "..DDD.."],
+                 {"R": "#4A63C2", "r": "#B8C6F2", "D": "#26336E"}),
+    "cranberry": (["...G...",
+                   "..GG...",
+                   "..RRR..",
+                   ".RrRRR.",
+                   ".RrRRR.",
+                   ".RRRRD.",
+                   ".DRRRD.",
+                   "..DDD.."],
+                  {"G": "#4CAF50", "R": "#C2183A", "r": "#F6B3BF", "D": "#7A0F24"}),
+}
+RASPBERRY, SPRITE_COLORS = SPRITES["frambuesa"]
+_sprite_tex: dict = {}
 
 
 def raspberry_texture():
-    """Textura de la frambuesa pixelada (una sola, ampliada sin suavizar)."""
-    global _sprite_tex
-    if _sprite_tex is None:
+    """Textura de la fruta pixelada del cultivo activo (una sola, ampliada sin suavizar)."""
+    crop = theme.crop_id if theme.crop_id in SPRITES else "frambuesa"
+    if crop not in _sprite_tex:
         from kivy.graphics.texture import Texture
         from kivy.utils import get_color_from_hex
-        h, w = len(RASPBERRY), len(RASPBERRY[0])
+        rows, colors = SPRITES[crop]
+        h, w = len(rows), len(rows[0])
         buf = bytearray()
-        for row in reversed(RASPBERRY):           # la textura va de abajo hacia arriba
+        for row in reversed(rows):                # la textura va de abajo hacia arriba
             for ch in row:
                 if ch == ".":
                     buf += bytes((0, 0, 0, 0))
                 else:
-                    r, g, b, _a = get_color_from_hex(SPRITE_COLORS[ch])
+                    r, g, b, _a = get_color_from_hex(colors[ch])
                     buf += bytes((int(r * 255), int(g * 255), int(b * 255), 255))
         tex = Texture.create(size=(w, h), colorfmt="rgba")
         tex.blit_buffer(bytes(buf), colorfmt="rgba", bufferfmt="ubyte")
         tex.mag_filter = tex.min_filter = "nearest"
-        _sprite_tex = tex
-    return _sprite_tex
+        _sprite_tex[crop] = tex
+    return _sprite_tex[crop]
 
 
 class PixelArena(FloatLayout):

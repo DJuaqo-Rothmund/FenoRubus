@@ -13,6 +13,7 @@ from __future__ import annotations
 import json
 import math
 
+import crops
 import phenology as ph
 from pdfdoc import PAGE_H, PAGE_W, PDFDoc
 
@@ -61,14 +62,14 @@ class Report(PDFDoc):
         self.y = M
         if len(self.pages) > 1:
             self.text(M, M - 8, self.fit(self.title, CW * .75, 8, True), 8, True, MUTED)
-            self.text(M + CW, M - 8, "PhenoRubus", 8, False, MUTED, "right")
+            self.text(M + CW, M - 8, crops.current().app, 8, False, MUTED, "right")
             self.line(M, M - 3, M + CW, M - 3, RULE, .6)
             self.y = M + 10
 
     def _footer(self, doc, n, total):
         y = PAGE_H - 26
         self.line(M, y - 10, M + CW, y - 10, RULE, .5)
-        self.text(M, y, f"PhenoRubus · cuaderno de campo digital · generado {self.generated}", 7.5,
+        self.text(M, y, f"{crops.current().app} · cuaderno de campo digital · generado {self.generated}", 7.5,
                   False, MUTED)
         self.text(M + CW, y, f"Página {n} de {total}", 7.5, False, MUTED, "right")
 
@@ -184,7 +185,7 @@ class Report(PDFDoc):
         self.image(resource_path("assets", "ui", "logo_line_report.png"), M + CW - self.LOGO, M - 6,
                    self.LOGO, self.LOGO, mode="contain", max_px=400, bg=None)
         tw = CW - self.LOGO - 10           # el texto del encabezado no pisa el logo
-        self.text(M, self.y + 8, "PHENORUBUS · INFORME FENOLÓGICO", 8, True, OLIVE)
+        self.text(M, self.y + 8, f"{crops.current().app.upper()} · INFORME FENOLÓGICO", 8, True, OLIVE)
         self.y += 16
         for line in self.wrap(self.title, tw, 20, True):
             self.y += 22

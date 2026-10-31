@@ -36,6 +36,10 @@ INITIAL = [  # (perfil, tipo, nombre, código, archivo)
     ("predio", "predio", "El Amanecer", "AM", "ensayos/AM.sqlite3"),
     ("predio", "predio", "La Esperanza 2", "LE", "ensayos/LE.sqlite3"),
 ]
+# Arándano y cranberry: parten con un ensayo de I+D vacío (los predios se crean después).
+INITIAL_OTHER = [
+    ("id", "variedades", "Nuevas variedades", "NV", "ensayos/NV.sqlite3"),
+]
 CODE_RE = re.compile(r"^[A-Z0-9]{2,4}$")
 
 SCHEMA = """
@@ -83,7 +87,7 @@ class Workspaces:
         self.shared.conn.execute("PRAGMA foreign_keys = OFF")
         self.shared.conn.executescript(SCHEMA)
         if not self.shared.query_one("SELECT 1 FROM bbch_stages LIMIT 1"):
-            for code, label, desc, kw in ph.BBCH_RUBUS:
+            for code, label, desc, kw in ph.BBCH_SCALE:
                 self.shared.upsert_bbch(code, label, desc, kw, source="base")
         self.shared.refresh_bbch_scale()   # escala BBCH del frambueso al día (cañas y laterales)
         self.ensure_initial()
@@ -98,9 +102,11 @@ class Workspaces:
     def ensure_initial(self) -> None:
         if self.shared.query_one("SELECT 1 FROM workspaces LIMIT 1"):
             return
+        import crops
         legacy = os.path.join(self.data_dir, LEGACY_DB)
         had_data = os.path.exists(legacy)
-        for i, (profile, kind, name, code, file) in enumerate(INITIAL):
+        initial = INITIAL if crops.current().id == "frambuesa" else INITIAL_OTHER
+        for i, (profile, kind, name, code, file) in enumerate(initial):
             self.shared.execute(
                 "INSERT INTO workspaces(profile, kind, name, code, file, sort_order, created_at) "
                 "VALUES (?,?,?,?,?,?,?)", (profile, kind, name, code, file, i, _now()))
@@ -119,7 +125,7 @@ class Workspaces:
                 local.close()
         self.shared.set_setting("last_workspace", nv["id"])
         self.shared.log("create", "workspaces", None,
-                        "Nuevas variedades (NV), El Amanecer (AM), La Esperanza 2 (LE)")
+                        ", ".join(f"{name} ({code})" for _p, _k, name, code, _f in initial))
 
     def list(self, profile: str | None = None, archived: bool = False) -> list[dict]:
         sql, params = "SELECT * FROM workspaces WHERE archived=?", [int(archived)]

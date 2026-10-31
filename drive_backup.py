@@ -27,7 +27,7 @@ import phenology as ph
 from platform_utils import IS_ANDROID
 
 SCOPE = "https://www.googleapis.com/auth/drive.file"
-ROOT_FOLDER = "PhenoRubus · Imágenes de Fenología"
+ROOT_FOLDER = "PhenoRubus · Imágenes de Fenología"   # raíz antigua (hasta la 1.1.151)
 FOLDER_MIME = "application/vnd.google-apps.folder"
 API = "https://www.googleapis.com/drive/v3/files"
 UPLOAD = "https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=id"
@@ -704,9 +704,46 @@ class DriveBackup:
         self.db.set_setting("drive_folders", cache)
         return fid
 
+    def root_id(self) -> str:
+        """Carpeta del módulo en Drive: «App Fenología/<PhenoRubus|PhenoBlue|PhenoCran>».
+        Frambuesa: la primera vez, la carpeta antigua «PhenoRubus · Imágenes de Fenología»
+        (con todo lo respaldado) se mueve ahí y pasa a llamarse «PhenoRubus»."""
+        import crops
+        crop = crops.current()
+        cache = self.db.get_setting("drive_folders") or {}
+        key = f"module/{crop.drive_folder}"
+        if key in cache:
+            return cache[key]
+        top = self._folder(crops.DRIVE_TOP, None)
+        fid = self._find_folder(crop.drive_folder, top)
+        if fid is None and crop.id == "frambuesa":
+            old = self._find_folder(ROOT_FOLDER, None)
+            if old is not None:
+                parents = self._call("GET", f"{API}/{old}?fields=parents").get("parents", [])
+                self._call("PATCH", f"{API}/{old}?" + urllib.parse.urlencode(
+                    {"addParents": top, "removeParents": ",".join(parents), "fields": "id"}),
+                    json.dumps({"name": crop.drive_folder}).encode(), "application/json; charset=UTF-8")
+                fid = old
+                self.log(f"Drive: «{ROOT_FOLDER}» pasa a «{crops.DRIVE_TOP}/{crop.drive_folder}»")
+        if fid is None:
+            fid = self._folder(crop.drive_folder, top)
+        cache = self.db.get_setting("drive_folders") or {}
+        cache[key] = fid
+        self.db.set_setting("drive_folders", cache)
+        return fid
+
+    def _find_folder(self, name: str, parent: str | None) -> str | None:
+        esc = name.replace("\\", "\\\\").replace("'", "\\'")
+        q = f"name='{esc}' and mimeType='{FOLDER_MIME}' and trashed=false"
+        if parent:
+            q += f" and '{parent}' in parents"
+        found = self._call("GET", f"{API}?" + urllib.parse.urlencode(
+            {"q": q, "fields": "files(id)", "spaces": "drive"})).get("files", [])
+        return found[0]["id"] if found else None
+
     def _upload(self, path: str, remote: str) -> str:
         *dirs, fname = remote.split("/")
-        parent = self._folder(ROOT_FOLDER, None)
+        parent = self.root_id()
         for d in dirs:
             parent = self._folder(d, parent)
         with open(path, "rb") as f:
@@ -731,7 +768,7 @@ class DriveBackup:
         """Sube `path` a «PhenoRubus · …/<remote>» REEMPLAZANDO el archivo del mismo nombre si
         ya existe (p. ej. la página del cuaderno al editarla de nuevo). Devuelve su id."""
         *dirs, fname = remote.split("/")
-        parent = self._folder(ROOT_FOLDER, None)
+        parent = self.root_id()
         for d in dirs:
             parent = self._folder(d, parent)
         esc = fname.replace("\\", "\\\\").replace("'", "\\'")
@@ -760,7 +797,7 @@ class DriveBackup:
         if (self.db.code != self.db.get_setting("drive_legacy_code", "NV")
                 or self.db.get_setting("drive_layout_v2", False)):
             return 0
-        root = self._folder(ROOT_FOLDER, None)
+        root = self.root_id()
         q = f"'{root}' in parents and mimeType='{FOLDER_MIME}' and trashed=false"
         found = self._call("GET", f"{API}?" + urllib.parse.urlencode(
             {"q": q, "fields": "files(id,name)", "spaces": "drive", "pageSize": "200"})).get("files", [])
@@ -782,7 +819,7 @@ class DriveBackup:
 
     def _find_path(self, path: str) -> str | None:
         """Id de la carpeta «PhenoRubus/<path>» en Drive, o None si no existe (no la crea)."""
-        parent = self._folder(ROOT_FOLDER, None)
+        parent = self.root_id()
         for part in path.strip("/").split("/"):
             esc = part.replace("\\", "\\\\").replace("'", "\\'")
             q = (f"name='{esc}' and mimeType='{FOLDER_MIME}' and trashed=false "
@@ -806,7 +843,7 @@ class DriveBackup:
         src = self._find_path(mv["from"])
         moved = 0
         if src:
-            dest = self._folder(ROOT_FOLDER, None)
+            dest = self.root_id()
             for part in mv["to"].strip("/").split("/"):
                 dest = self._folder(part, dest)
             q = f"'{src}' in parents and trashed=false"

@@ -23,7 +23,7 @@ def main():
     data = {
         "version": ph.BBCH_SCALE_VERSION,
         "stages": [{"code": c, "label": label, "macro": ph.macro_of(c), "text": ph.code_str(c)}
-                   for c, label, _desc, _kw in ph.BBCH_RUBUS],
+                   for c, label, _desc, _kw in ph.BBCH_SCALE],
         "macros": {str(k): v for k, v in ph.MACRO_STAGES.items()},
         "colors": {str(k): v for k, v in ph.MACRO_COLORS.items()},
     }

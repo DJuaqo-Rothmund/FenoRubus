@@ -5,6 +5,8 @@ difuminado, con tarjetas translúcidas tipo vidrio (glassmorphism).
 KivyMD 1.2 solo acepta paletas con nombre; se re-definen las rampas «Green»
 (-> verde hoja) y «Pink» (-> frambuesa) antes de construir la app.
 """
+import os
+
 from kivy.utils import get_color_from_hex
 
 from platform_utils import resource_path
@@ -29,6 +31,10 @@ GLASS_STRONG = "#FFFFFFD9"
 GLASS_EDGE = "#FFFFFFE6"  # borde luminoso del vidrio
 LINE = "#1E4A3A2E"        # líneas finas verdes translúcidas
 CLEAR = "#00000000"
+SURFACE = "#FFFFFF"       # superficies claras (barras, botones fantasma, campos) con su alfa
+FILL_DARK = "#1E4A3A"     # rellenos oscuros con texto blanco (franja del ensayo, avisos)
+NAV_TILE = "#FFFFFF"      # azulejos de la barra inferior (sus íconos son oscuros)
+ON_BERRY = "#FFFFFF"      # texto sobre el color de la fruta (píldoras elegidas)
 
 # --- «Mente del sistema» (módulo de IA): negros/azules con grises -------------
 MIND_BG = resource_path("assets", "ui", "mind_bg.jpg")
@@ -46,6 +52,7 @@ MIND_FIRE = "#FFB454"
 
 BACKGROUND = resource_path("assets", "ui", "background.jpg")
 LOGO = resource_path("assets", "ui", "logo.png")
+APP_LOGO = resource_path("assets", "ui", "app_logo.png")   # los tres frutos (pantalla de cultivos)
 WORDMARK = resource_path("assets", "ui", "wordmark.png")
 # Frambuesas ilustradas (vista previa): color = semana con registro; gris = sin registro.
 BERRY_KEYS = ("meeker", "wakefield", "lagorai", "cascade_harvest", "codigo_11", "codigo_24",
@@ -64,6 +71,8 @@ def berry_art(*names: str, gray: bool = False) -> str:
         t = t.replace("n°", "").replace("nº", "").replace("no.", "")
         return "_".join(w for w in "".join(ch if ch.isalnum() else " " for ch in t).split())
 
+    if crop_id != "frambuesa":     # PhenoBlue / PhenoCran: su fruto (gris sin registro)
+        return resource_path("assets", "crops", crop_id, "fruit_gris.png" if gray else "fruit.png")
     keys = [slug(n) for n in names if n]
     key = next((k for k in keys if k in BERRY_KEYS), None)
     if key is None:
@@ -135,7 +144,7 @@ STAGE_COLORS = {
 
 def stage_colors(code):
     if code is None:
-        return c("#FFFFFF", .55), c(MUTED)
+        return c(SURFACE, .55), c(MUTED)
     import phenology as ph
     bg, fg = STAGE_COLORS.get(ph.macro_of(code), ("#FFFFFF", INK))
     return c(bg, .92), c(fg)
@@ -155,14 +164,21 @@ BERRY_RAMP = {
 
 def install_palette() -> None:
     from kivymd.color_definitions import colors
-    colors["Green"].update(LEAF_RAMP)
-    colors["Pink"].update(BERRY_RAMP)
+    if crop_id == "frambuesa" and style == "pastel":
+        colors["Green"].update(LEAF_RAMP)
+        colors["Pink"].update(BERRY_RAMP)
+    else:
+        colors["Green"].update(_ramp(LEAF if style not in DARK_STYLES else LEAF_LIGHT))
+        colors["Pink"].update(_ramp(BERRY))
     colors["Light"].update({"StatusBar": "1E4A3A", "AppBar": "2F6B4F",
                             "Background": "F3F7F2", "CardsDialogs": "FBFDFB"})
+    if style in DARK_STYLES:
+        colors["Dark"].update({"StatusBar": SPLASH_BG[1:7], "AppBar": SURFACE[1:7],
+                               "Background": SPLASH_BG[1:7], "CardsDialogs": SURFACE[1:7]})
 
 
 def apply(theme_cls) -> None:
-    theme_cls.theme_style = "Light"
+    theme_cls.theme_style = "Dark" if style in DARK_STYLES else "Light"
     theme_cls.primary_palette = "Green"
     theme_cls.primary_hue = "500"
     theme_cls.accent_palette = "Pink"
@@ -212,3 +228,131 @@ DV_FLOWER = resource_path("assets", "ui", "dv_flower.png")
 DV_CUT = resource_path("assets", "ui", "dv_cut.png")
 DV_BRANCH = resource_path("assets", "ui", "dv_branch.png")
 HAND_FONT = resource_path("assets", "fonts", "Caveat.ttf")
+
+
+# ---------------------------------------------------------------------------
+# Cultivo y estilo de la app (Ajustes › Estilo). configure() reemplaza los colores y
+# las imágenes de arriba; las pantallas que se construyen después ya los usan (la app las
+# rehace al cambiar de cultivo o de estilo).
+# ---------------------------------------------------------------------------
+STYLES = {
+    "pastel": ("Pastel de fruta", "Verdes suaves y el color de la fruta, con tarjetas de vidrio"),
+    "bosque": ("Bosque", "Verdes oscuros lisos y bordes simples; íconos y logos con su color"),
+    "lino": ("Lino", "Claro y cálido, como papel de cuaderno, con detalles verde oliva"),
+    "noche": ("Noche de huerto", "Azul noche y ciruela, con la fruta encendida como neón"),
+}
+DEFAULT_STYLE = "pastel"
+
+# Color de la fruta (acento): frambuesa, arándano azul, cranberry carmesí.
+FRUIT = {
+    "frambuesa": {"BERRY": "#A8184A", "BERRY_DARK": "#7E1238", "BERRY_LIGHT": "#E0718F", "BERRY_SOFT": "#F8DCE4"},
+    "arandano": {"BERRY": "#3E5AA8", "BERRY_DARK": "#2A3F7E", "BERRY_LIGHT": "#8EA3DC", "BERRY_SOFT": "#DEE5F7"},
+    "cranberry": {"BERRY": "#9C1C34", "BERRY_DARK": "#741427", "BERRY_LIGHT": "#D7707F", "BERRY_SOFT": "#F6DADF"},
+}
+# Fruta sobre fondos oscuros: más luminosa.
+FRUIT_GLOW = {
+    "frambuesa": {"BERRY": "#FF6A93", "BERRY_DARK": "#FF9AB5", "BERRY_LIGHT": "#C8496F"},
+    "arandano": {"BERRY": "#8FADFF", "BERRY_DARK": "#B5C8FF", "BERRY_LIGHT": "#5B78C8"},
+    "cranberry": {"BERRY": "#FF5D78", "BERRY_DARK": "#FF95A6", "BERRY_LIGHT": "#C43B55"},
+}
+_BASE = {k: globals()[k] for k in (
+    "LEAF_DARK", "LEAF", "LEAF_LIGHT", "LEAF_SOFT", "INK", "INK_2", "MUTED", "WARN", "GLASS",
+    "GLASS_STRONG", "GLASS_EDGE", "LINE", "SURFACE", "SPLASH_BG", "FILL_DARK", "NAV_TILE", "ON_BERRY")}
+STYLE_COLORS = {
+    "pastel": {},
+    "bosque": {
+        "LEAF_DARK": "#E3F0E6", "LEAF": "#9FD3B0", "LEAF_LIGHT": "#7FC29B", "LEAF_SOFT": "#2C5547",
+        "INK": "#EEF5F0", "INK_2": "#C5D8CC", "MUTED": "#94B3A2", "WARN": "#E8B55A",
+        "GLASS": "#214739F5", "GLASS_STRONG": "#26503FFA", "GLASS_EDGE": "#3B6A59",
+        "LINE": "#FFFFFF24", "SURFACE": "#245043", "SPLASH_BG": "#17332B",
+        "BERRY_SOFT": "#35574C", "FILL_DARK": "#0E2620", "NAV_TILE": "#DCEBE1", "ON_BERRY": "#0E2620"},
+    "lino": {
+        "LEAF_DARK": "#3D4A27", "LEAF": "#5E6E38", "LEAF_LIGHT": "#93A266", "LEAF_SOFT": "#E9EBD9",
+        "INK": "#2E2A24", "INK_2": "#4F483E", "MUTED": "#8A8070", "WARN": "#B7791F",
+        "GLASS": "#FFFFFFEB", "GLASS_STRONG": "#FFFFFFF7", "GLASS_EDGE": "#E3DACB",
+        "LINE": "#5E6E3833", "SURFACE": "#FFFDF8", "SPLASH_BG": "#F6F1E7", "FILL_DARK": "#3D4A27"},
+    "noche": {
+        "LEAF_DARK": "#B6F0D4", "LEAF": "#72DCAC", "LEAF_LIGHT": "#4FB386", "LEAF_SOFT": "#1F3A40",
+        "INK": "#ECE9F5", "INK_2": "#C4C0D6", "MUTED": "#9A96B0", "WARN": "#F2B65A",
+        "GLASS": "#1E2240D9", "GLASS_STRONG": "#232849F0", "GLASS_EDGE": "#FFFFFF26",
+        "LINE": "#FFFFFF22", "SURFACE": "#262B4E", "SPLASH_BG": "#15172B",
+        "FILL_DARK": "#0D0F1F", "NAV_TILE": "#D9DCF2", "ON_BERRY": "#12142A"},
+}
+DARK_STYLES = ("bosque", "noche")
+FRUIT_SOFT_DARK = {"noche": {"frambuesa": "#42223A", "arandano": "#252F58", "cranberry": "#45202C"}}
+
+crop_id = "frambuesa"
+style = DEFAULT_STYLE
+
+
+def _crop_asset(name: str, crop: str) -> str:
+    path = resource_path("assets", "crops", crop, name)
+    return path if crop != "frambuesa" and os.path.exists(path) else resource_path("assets", "ui", name)
+
+
+def is_dark() -> bool:
+    return style in DARK_STYLES
+
+
+def configure(crop: str | None = None, style_name: str | None = None) -> None:
+    """Colores e imágenes del cultivo y del estilo (antes de construir las pantallas)."""
+    global crop_id, style, BACKGROUND, START_BG, BLOB_ID, LOGO, WORDMARK
+    crop_id = crop or crop_id
+    style = style_name if style_name in STYLES else (style if style_name is None else DEFAULT_STYLE)
+    g = globals()
+    g.update(_BASE)
+    g.update(FRUIT.get(crop_id, FRUIT["frambuesa"]))
+    g.update(STYLE_COLORS[style])
+    if style in DARK_STYLES:
+        glow = FRUIT_GLOW.get(crop_id, FRUIT_GLOW["frambuesa"])
+        g.update(glow if style == "noche" else {k: glow[k] for k in ("BERRY", "BERRY_DARK")})
+        if style == "noche":
+            g["BERRY_SOFT"] = FRUIT_SOFT_DARK["noche"].get(crop_id, "#42223A")
+    LOGO = _crop_asset("logo.png", crop_id)
+    WORDMARK = _crop_asset("wordmark.png", crop_id)
+    if style == "pastel":
+        BACKGROUND = _crop_asset("background.jpg", crop_id)
+        START_BG = _crop_asset("start_bg.jpg", crop_id)
+    else:
+        BACKGROUND = START_BG = resource_path("assets", "styles", style, "background.jpg")
+    BLOB_ID = _crop_asset("blob_id.png", crop_id)
+    install_palette()
+
+
+def _ramp(hex_color: str) -> dict:
+    """Rampa de KivyMD (50…900) a partir del color medio."""
+    r, g, b = (int(hex_color[i:i + 2], 16) for i in (1, 3, 5))
+
+    def mix(t, to):
+        return "".join(f"{int(v + (to - v) * t):02X}" for v in (r, g, b))
+    ramp = {"500": f"{r:02X}{g:02X}{b:02X}"}
+    for k, t in (("50", .92), ("100", .84), ("200", .68), ("300", .5), ("400", .3)):
+        ramp[k] = mix(t, 255)
+    for k, t in (("600", .1), ("700", .22), ("800", .34), ("900", .5)):
+        ramp[k] = mix(t, 0)
+    ramp.update({"A100": ramp["200"], "A200": ramp["300"], "A400": ramp["400"], "A700": ramp["600"]})
+    return ramp
+
+
+def crop_accent(crop: str) -> str:
+    """Color de la fruta de un cultivo en el estilo actual (tarjetas de la pantalla de cultivos)."""
+    if style in DARK_STYLES:
+        return FRUIT_GLOW.get(crop, FRUIT_GLOW["frambuesa"])["BERRY"]
+    return FRUIT.get(crop, FRUIT["frambuesa"])["BERRY"]
+
+
+def crop_logo(crop: str) -> str:
+    return _crop_asset("logo.png", crop)
+
+
+def on_bg(hex_color: str) -> list:
+    """Un color fijo de texto (p. ej. el nombre de cada botón del inicio) legible en el
+    estilo actual: en los oscuros se aclara."""
+    if style not in DARK_STYLES:
+        return c(hex_color)
+    r, g, b = (int(hex_color[i:i + 2], 16) for i in (1, 3, 5))
+    return c("#" + "".join(f"{int(v + (255 - v) * .55):02X}" for v in (r, g, b)))
+
+
+def nav_tile_alpha() -> float:
+    return .9 if style in DARK_STYLES else .55

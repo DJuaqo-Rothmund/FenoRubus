@@ -34,8 +34,45 @@ CLASSES = [            # (clave, nombre, color): la posición es la tecla en la 
     ("fruto_pinton", "Fruto pintón", "#EC407A"),
     ("fruto_maduro", "Fruto maduro", "#B71C1C"),
 ]
+# Clases de cada cultivo (crops.activate -> set_crop). Las claves comunes se mantienen
+# (yema, flor, fruto_…) para que las marcas se puedan juntar entre cultivos parecidos.
+CROP_CLASSES = {
+    "frambuesa": list(CLASSES),
+    "arandano": [
+        ("yema", "Yema", "#A1887F"),
+        ("brote", "Brote", "#8BC34A"),
+        ("boton", "Yema floral", "#00897B"),
+        ("racimo", "Racimo floral", "#5C6BC0"),
+        ("flor", "Flor", "#F9A825"),
+        ("flor_pasada", "Flor pasada", "#8D6E63"),
+        ("fruto_verde", "Fruto verde", "#2E7D32"),
+        ("fruto_pinton", "Fruto rosado", "#EC407A"),
+        ("fruto_maduro", "Fruto azul (maduro)", "#283593"),
+    ],
+    "cranberry": [
+        ("yema", "Yema", "#A1887F"),
+        ("upright", "Brote vertical", "#8BC34A"),
+        ("estolon", "Estolón", "#6D8B3A"),
+        ("gancho", "Gancho", "#00897B"),
+        ("flor", "Flor", "#F48FB1"),
+        ("flor_pasada", "Flor pasada", "#8D6E63"),
+        ("fruto_verde", "Fruto verde", "#2E7D32"),
+        ("fruto_pinton", "Fruto blush", "#FB8C00"),
+        ("fruto_maduro", "Fruto rojo (maduro)", "#B71C1C"),
+    ],
+}
 NAMES = {k: n for k, n, _ in CLASSES}
 COLORS = {k: c for k, _, c in CLASSES}
+
+
+def set_crop(crop_id: str) -> None:
+    """Clases del cultivo activo (se cambian en el lugar: los módulos que las importaron
+    ven las nuevas)."""
+    CLASSES[:] = CROP_CLASSES.get(crop_id, CROP_CLASSES["frambuesa"])
+    NAMES.clear()
+    NAMES.update({k: n for k, n, _ in CLASSES})
+    COLORS.clear()
+    COLORS.update({k: c for k, _, c in CLASSES})
 GOAL = 300
 DRIVE_DIR = "Entrenamiento IA"
 DRIVE_FILE = "marcas.json"
@@ -110,9 +147,8 @@ class LabelStore:
     def sync(self, drive_sync) -> int:
         """Baja las marcas de Drive (las del PC u otro teléfono), las suma y sube el total si
         aquí hay cambios. drive_sync: sync_drive.DriveSync. Devuelve cuántas fotos llegaron."""
-        from drive_backup import ROOT_FOLDER
         drive = drive_sync.drive
-        root = drive._folder(ROOT_FOLDER, None)
+        root = drive.root_id()             # «App Fenología/<módulo>»: marcas de cada cultivo
         folder = drive._folder(DRIVE_DIR, root)
         files = [f for f in drive_sync._list(folder) if f["name"].endswith(".json")]
         main = next((f for f in files if f["name"] == DRIVE_FILE), None)
