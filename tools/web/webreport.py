@@ -43,7 +43,7 @@ def load(code: str, workspace_json: str, bundles_json: str) -> int:
     nt, nr = db.trial_size()
     if not nt:   # paquetes de una app sin «trial_*»: el tamaño sale de las parcelas
         row = db.query_one("SELECT COUNT(DISTINCT treatment) AS t, MIN(treatment) AS t0, MAX(rep) AS r "
-                           "FROM varieties WHERE treatment >= 0 AND rep >= 1")
+                           "FROM varieties WHERE treatment >= 0 AND rep >= 1 AND IFNULL(pheno_unit, 0) = 0")
         if row and row["t"]:
             db.set_setting("trial_treatments", int(row["t"]))
             db.set_setting("trial_t0", row["t0"] == 0)

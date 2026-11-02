@@ -58,18 +58,22 @@ class Report(PDFDoc):
         self.footer = self._footer
 
     # ------------------------------------------------------------ hojas
+    plain = False   # PDF simple: sin logo ni nombre de la app (solo la información e imágenes)
+
     def _running_header(self, doc):
         self.y = M
         if len(self.pages) > 1:
             self.text(M, M - 8, self.fit(self.title, CW * .75, 8, True), 8, True, MUTED)
-            self.text(M + CW, M - 8, crops.current().app, 8, False, MUTED, "right")
+            if not self.plain:
+                self.text(M + CW, M - 8, crops.current().app, 8, False, MUTED, "right")
             self.line(M, M - 3, M + CW, M - 3, RULE, .6)
             self.y = M + 10
 
     def _footer(self, doc, n, total):
         y = PAGE_H - 26
         self.line(M, y - 10, M + CW, y - 10, RULE, .5)
-        self.text(M, y, f"{crops.current().app} · cuaderno de campo digital · generado {self.generated}", 7.5,
+        self.text(M, y, f"Generado {self.generated}" if self.plain else
+                  f"{crops.current().app} · cuaderno de campo digital · generado {self.generated}", 7.5,
                   False, MUTED)
         self.text(M + CW, y, f"Página {n} de {total}", 7.5, False, MUTED, "right")
 
@@ -181,12 +185,14 @@ class Report(PDFDoc):
 
     def start(self):
         self.add_page()
-        from platform_utils import resource_path
-        self.image(resource_path("assets", "ui", "logo_line_report.png"), M + CW - self.LOGO, M - 6,
-                   self.LOGO, self.LOGO, mode="contain", max_px=400, bg=None)
-        tw = CW - self.LOGO - 10           # el texto del encabezado no pisa el logo
-        self.text(M, self.y + 8, f"{crops.current().app.upper()} · INFORME FENOLÓGICO", 8, True, OLIVE)
-        self.y += 16
+        logo = 0 if self.plain else self.LOGO
+        if not self.plain:
+            from platform_utils import resource_path
+            self.image(resource_path("assets", "ui", "logo_line_report.png"), M + CW - self.LOGO, M - 6,
+                       self.LOGO, self.LOGO, mode="contain", max_px=400, bg=None)
+            self.text(M, self.y + 8, f"{crops.current().app.upper()} · INFORME FENOLÓGICO", 8, True, OLIVE)
+            self.y += 16
+        tw = CW - logo - (10 if logo else 0)   # el texto del encabezado no pisa el logo
         for line in self.wrap(self.title, tw, 20, True):
             self.y += 22
             self.text(M, self.y, line, 20, True, INK)
@@ -197,7 +203,8 @@ class Report(PDFDoc):
         if self.meta:
             self.y += 14
             self.text(M, self.y, self.fit("  ·  ".join(self.meta), tw, 8.5), 8.5, False, MUTED)
-        self.y = max(self.y, M - 6 + self.LOGO - 8)
+        if logo:
+            self.y = max(self.y, M - 6 + logo - 8)
         self.y += 10
         self.line(M, self.y, M + CW, self.y, INK, 1.4)
         self.y += 8
@@ -458,6 +465,9 @@ class Report(PDFDoc):
 # ===========================================================================
 def _doc(ctx, meta, names, num) -> Report:
     r = Report(ctx["title"], ctx.get("subtitle", ""), meta, ctx["generated"], names, num)
+    r.plain = bool(ctx.get("plain"))
+    if r.plain:
+        r.author = ""
     r.start()
     return r
 
@@ -790,12 +800,13 @@ def treatments(ctx: dict, names: dict, num=None) -> Report:
     if ctx.get("unified"):
         # Fenología unificada: ningún tratamiento la cambia; una sola fila para el ensayo.
         r.h2("Fenología del ensayo (unificada)",
-             "En este ensayo ningún tratamiento cambia la fenología: el estado BBCH se registra una "
-             "vez para todo el ensayo. La comparación de tratamientos queda en las mediciones.")
-        r.heatmap(ctx["heat"], weeks, label="Ensayo")
+             "En este ensayo ningún tratamiento cambia la fenología: el estado BBCH se registra en "
+             "los puntos de fenología del ensayo. La comparación de tratamientos queda en las mediciones.")
+        r.heatmap(ctx["heat"], weeks, label="Punto")
     else:
         r.h2("Estado BBCH medio por tratamiento",
-             "Promedio de las repeticiones en cada semana. Letras distintas = diferencias significativas "
+             (ctx["unit_note"] + " " if ctx.get("unit_note") else "")
+             + "Promedio de las repeticiones en cada semana. Letras distintas = diferencias significativas "
              "(LSD de Fisher, p < 0,05), solo en las semanas en que el ANOVA es significativo.")
         per = 12
         for i in range(0, max(1, len(weeks)), per):

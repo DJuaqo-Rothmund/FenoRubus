@@ -343,7 +343,8 @@ class Database:
         "varieties": [("sector", "INTEGER"), ("irrigation", "INTEGER"),
                       ("treatment", "INTEGER"), ("rep", "INTEGER"),   # parcela T1R1…
                       ("cultivar", "TEXT"),                           # predio: variedad de la unidad
-                      ("plant_year", "INTEGER")],                     # predio: año de plantación
+                      ("plant_year", "INTEGER"),                      # predio: año de plantación
+                      ("pheno_unit", "INTEGER NOT NULL DEFAULT 0")],  # punto de fenología unificada
         "observations": [("latitude", "REAL"), ("longitude", "REAL"),
                          ("gps_accuracy", "REAL"), ("gps_source", "TEXT")],
         "sampling_weeks": [("skipped", "INTEGER NOT NULL DEFAULT 0")],   # semana no muestreada
@@ -362,6 +363,8 @@ class Database:
         # «Fenología del ensayo»: antes tratamiento 0 (ahora el 0 es T0). Las parcelas
         # siempre tienen repetición ≥ 1.
         self.conn.execute("UPDATE varieties SET treatment=-1 WHERE treatment=0 AND rep=0")
+        # Y luego (antes de los puntos configurables) tratamiento -1: ahora pheno_unit = 1.
+        self.conn.execute("UPDATE varieties SET pheno_unit=1, treatment=NULL, rep=1 WHERE treatment=-1")
         self.conn.execute("UPDATE meta SET value=? WHERE key='schema_version'", (str(SCHEMA_VERSION),))
 
     def _migrate_seasons_apr(self) -> None:
@@ -545,53 +548,188 @@ class Database:
 
     # ------------------------------------------------------------ varieties
     def list_varieties(self, include_archived: bool = False) -> list[dict]:
-        """Variedades, sectores o parcelas (sin el registro «Fenología del ensayo», que es
-        solo para la fenología unificada: ver pheno_units)."""
-        sql = "SELECT * FROM varieties WHERE IFNULL(treatment, 0) != -1"
+        """Variedades, sectores o parcelas (sin los puntos de la fenología unificada, que
+        son solo para la fenología: ver pheno_units)."""
+        sql = "SELECT * FROM varieties WHERE pheno_unit = 0"
         if not include_archived:
             sql += " AND active = 1"
         sql += " ORDER BY sort_order, name"
         return self.query(sql)
 
     # ----------------------------------------------- fenología unificada (ensayos T×R)
+    # La fenología se registra en PUNTOS propios (no en las parcelas T×R, que siguen para
+    # las mediciones): uno para todo el ensayo, varios comunes (p. ej. «Caña gruesa»,
+    # «Caña media», «Caña delgada») o esos mismos en cada tratamiento.
     UNIT_NAME = "Fenología del ensayo"
 
     @property
     def unified_pheno(self) -> bool:
-        """Ensayo de tratamientos con una sola fenología para todo el ensayo (ningún
-        tratamiento la cambia): el estado BBCH se registra una vez por semana; las mediciones
-        siguen por tratamiento y repetición."""
+        """Ensayo de tratamientos con fenología unificada: el estado BBCH se registra en los
+        puntos de fenología; las mediciones siguen por tratamiento y repetición."""
         return self.is_trial and bool(self.get_setting("trial_unified", False))
 
-    def trial_unit(self, create: bool = True) -> dict | None:
-        """El registro «Fenología del ensayo» (tratamiento -1, repetición 0: el 0 es T0).
-        Si quedó marcado como tratamiento 0 (versión anterior), se corrige."""
-        row = self.query_one("SELECT * FROM varieties WHERE treatment=-1") \
-            or self.query_one("SELECT * FROM varieties WHERE name=?", (self.UNIT_NAME,))
-        if row is None and create:
-            vid = self.add_variety(self.UNIT_NAME, code="ENS", sort_order=-1, log=False)
-            row = self.get_variety(vid)
-        if row is not None and row.get("treatment") != -1:
-            self.execute("UPDATE varieties SET treatment=-1, rep=0, updated_at=? WHERE id=?", (_now(), row["id"]))
-            row = self.get_variety(row["id"])
-        return row
+    def pheno_config(self) -> dict:
+        """{"scope": "trial" | "treatment", "names": [nombre de cada punto]}.
+        scope trial: los puntos valen para todo el ensayo; treatment: se repiten en cada
+        tratamiento. Un solo punto sin nombre = «Fenología del ensayo»."""
+        scope = self.get_setting("trial_unit_scope", "trial")
+        names = [str(n).strip() for n in (self.get_setting("trial_unit_names", None) or [""])]
+        return {"scope": scope if scope in ("trial", "treatment") else "trial", "names": names or [""]}
 
-    def set_unified_pheno(self, on: bool) -> None:
-        """Activa o quita la fenología unificada. Nada se borra: los registros por parcela y
-        los del ensayo se conservan; solo cambia cuáles se muestran."""
+    @property
+    def unified_single(self) -> bool:
+        """Fenología unificada con un solo punto para todo el ensayo (una curva)."""
+        cfg = self.pheno_config()
+        return self.unified_pheno and cfg["scope"] == "trial" and len(cfg["names"]) == 1
+
+    def _unit_name(self, scope: str, names: list[str], t: int | None, i: int) -> str:
+        label = names[i - 1] or (f"Punto {i}" if len(names) > 1 else "")
+        if scope == "trial":
+            return f"Ensayo · {label}" if label else self.UNIT_NAME
+        return f"T{t} · {label}" if label else f"T{t} · Fenología"
+
+    def _want_units(self) -> dict:
+        """{(tratamiento o None, n.º de punto): nombre} de los puntos vigentes."""
+        cfg = self.pheno_config()
+        groups = [None] if cfg["scope"] == "trial" else self.trial_nums()
+        return {(t, i): self._unit_name(cfg["scope"], cfg["names"], t, i)
+                for t in groups for i in range(1, len(cfg["names"]) + 1)}
+
+    def sync_pheno_units(self) -> list[dict]:
+        """Crea, renombra, activa o archiva los puntos según la configuración (nada se
+        borra: los puntos que sobran se archivan con sus registros)."""
+        on = self.unified_pheno
+        want = self._want_units() if on else {}
+        have = self.query("SELECT * FROM varieties WHERE pheno_unit=1")
+        by_key = {(v["treatment"], v["rep"]): v for v in have}
+        # Fuera del camino los nombres que van a cambiar (el nombre es único).
+        for key, v in by_key.items():
+            if key in want and v["name"] != want[key]:
+                self.execute("UPDATE varieties SET name=? WHERE id=?", (f"~{v['id']}~{v['name']}", v["id"]))
+        for (t, i), name in want.items():
+            sort = (-100 if t is None else t * 100 - 50) + i
+            v = by_key.get((t, i))
+            if v is None:
+                clash = self.query_one("SELECT id, pheno_unit FROM varieties WHERE name=?", (name,))
+                if clash and clash["pheno_unit"]:
+                    v = self.get_variety(clash["id"])
+                else:
+                    if clash:   # una parcela o variedad con ese nombre: el punto lleva otro
+                        name = f"{name} (fenología)"
+                    cur = self.execute(
+                        "INSERT INTO varieties(name, code, notes, sort_order, created_at, updated_at, pheno_unit) "
+                        "VALUES (?,?,?,?,?,?,1)", (name, "ENS", "", sort, _now(), _now()))
+                    v = {"id": cur.lastrowid}
+            self.execute("UPDATE varieties SET name=?, treatment=?, rep=?, active=1, sort_order=?, "
+                         "pheno_unit=1, updated_at=? WHERE id=?", (name, t, i, sort, _now(), v["id"]))
+        for key, v in by_key.items():
+            if key not in want and v["active"]:
+                self.execute("UPDATE varieties SET active=0, updated_at=? WHERE id=?", (_now(), v["id"]))
+        return self.pheno_units()
+
+    def trial_unit(self, create: bool = True) -> dict | None:
+        """El primer punto de fenología (con un solo punto: «Fenología del ensayo»)."""
+        units = self.query("SELECT * FROM varieties WHERE pheno_unit=1 AND active=1 ORDER BY sort_order")
+        if not units and create and self.unified_pheno:
+            units = self.sync_pheno_units()
+        return units[0] if units else None
+
+    def set_unified_pheno(self, on: bool, scope: str | None = None, names: list[str] | None = None) -> None:
+        """Activa o quita la fenología unificada (y, si se indican, sus puntos). Nada se
+        borra: los registros por parcela y los de los puntos se conservan."""
         self.set_setting("trial_unified", bool(on))
-        unit = self.trial_unit(create=bool(on))
-        if unit:
-            self.execute("UPDATE varieties SET active=?, treatment=-1, rep=0, updated_at=? WHERE id=?",
-                         (int(bool(on)), _now(), unit["id"]))
-        self.log("update", "trial", None, "Fenología unificada" if on else "Fenología por parcela")
+        if scope is not None:
+            self.set_setting("trial_unit_scope", scope)
+        if names is not None:
+            names = [str(n).strip() for n in names][:self.MAX_REPS] or [""]
+            self.set_setting("trial_unit_names", names)
+        self.sync_pheno_units()
+        cfg = self.pheno_config()
+        self.log("update", "trial", None,
+                 (f"Fenología unificada: {len(cfg['names'])} punto(s) "
+                  f"{'por tratamiento' if cfg['scope'] == 'treatment' else 'del ensayo'}") if on
+                 else "Fenología por parcela")
+
+    def parcel_unit_map(self) -> dict[int, dict]:
+        """{parcela: punto de fenología} para pasar lo registrado por parcela a la fenología
+        unificada: el punto de su tratamiento (si van por tratamiento) con el mismo n.º que la
+        repetición (R1 → 1.er punto…); si hay menos puntos que repeticiones, el primero."""
+        units = self.pheno_units() if self.unified_pheno else []
+        if not units:
+            return {}
+        by = {}
+        for u in units:
+            by.setdefault(u["treatment"], {})[u["rep"]] = u
+        out = {}
+        for p in self.list_varieties():
+            if not self.is_parcel(p):
+                continue
+            group = by.get(None) or by.get(p["treatment"])
+            if group:
+                out[p["id"]] = group.get(p["rep"]) or group[min(group)]
+        return out
+
+    def parcels_to_units_summary(self) -> dict:
+        """Cuánto hay por parcela que se puede pasar: {"photos", "records", "weeks"}."""
+        ids = list(self.parcel_unit_map())
+        if not ids:
+            return {"photos": 0, "records": 0, "weeks": 0}
+        q = ",".join(str(i) for i in ids)
+        photos = self.query_one(f"SELECT COUNT(*) AS n FROM photos p JOIN observations o ON o.id = p.observation_id "
+                                f"WHERE o.variety_id IN ({q})")["n"]
+        recs = self.query_one(f"SELECT COUNT(*) AS n, COUNT(DISTINCT week_id) AS w FROM observations o "
+                              f"WHERE o.variety_id IN ({q}) AND {self._OBS_FILLED}")
+        return {"photos": photos, "records": recs["n"], "weeks": recs["w"]}
+
+    def move_parcels_to_units(self) -> dict:
+        """Pasa las FOTOS de los registros por parcela a los puntos de la fenología unificada
+        (misma semana). El estado BBCH del punto, si no tenía, queda en el más repetido de sus
+        parcelas esa semana (a igualdad, el más avanzado). Los registros por parcela
+        conservan su estado y notas (si vuelve a la fenología por parcela, siguen ahí)."""
+        mapping = self.parcel_unit_map()
+        if not mapping:
+            raise ValueError("Active primero la fenología unificada.")
+        q = ",".join(str(i) for i in mapping)
+        obs = self.query(f"SELECT * FROM observations o WHERE o.variety_id IN ({q}) AND {self._OBS_FILLED}")
+        moved = units_set = 0
+        codes: dict[tuple, list] = {}
+        for o in obs:
+            u = mapping[o["variety_id"]]
+            target = self.get_or_create_observation(u["id"], o["week_id"])
+            if o["bbch_code"] is not None:
+                codes.setdefault((target["id"], target["bbch_code"]), []).append(o)
+            for p in self.query("SELECT * FROM photos WHERE observation_id=?", (o["id"],)):
+                primary = p["is_primary"] and not self.query_one(
+                    "SELECT 1 FROM photos WHERE observation_id=? AND kind=? AND is_primary=1",
+                    (target["id"], p["kind"]))
+                self.execute("UPDATE photos SET observation_id=?, is_primary=? WHERE id=?",
+                             (target["id"], int(bool(primary)), p["id"]))
+                moved += 1
+        for (tid, current), rows in codes.items():
+            if current is not None:
+                continue
+            count: dict[int, int] = {}
+            for r in rows:
+                count[r["bbch_code"]] = count.get(r["bbch_code"], 0) + 1
+            code = max(count, key=lambda c: (count[c], ph.bbch_value(c) or 0))
+            label = next(r["bbch_label"] for r in rows if r["bbch_code"] == code)
+            self.execute("UPDATE observations SET bbch_code=?, bbch_label=?, updated_at=? WHERE id=?",
+                         (code, label or "", _now(), tid))
+            units_set += 1
+        self.log("update", "trial", None, f"Fotos de las parcelas a la fenología unificada: {moved}")
+        return {"photos": moved, "states": units_set}
 
     def pheno_units(self, include_archived: bool = False) -> list[dict]:
         """Lo que se registra en el muestreo y muestran la vista previa y los informes de
-        fenología: el ensayo completo (fenología unificada) o cada variedad/sector/parcela."""
+        fenología: los puntos de la fenología unificada o cada variedad/sector/parcela."""
         if self.unified_pheno:
-            unit = self.trial_unit()
-            return [unit] if unit else []
+            sql = "SELECT * FROM varieties WHERE pheno_unit=1"
+            if not include_archived:
+                sql += " AND active=1"
+            units = self.query(sql + " ORDER BY sort_order, name")
+            if not units and not include_archived:
+                units = self.sync_pheno_units()
+            return units
         return self.list_varieties(include_archived=include_archived)
 
     def get_variety(self, variety_id: int) -> dict | None:
@@ -722,7 +860,7 @@ class Database:
     def is_parcel(v: dict | None) -> bool:
         """¿Es una parcela TxRy de un ensayo (incluida T0)? (no la «Fenología del ensayo»)."""
         t = (v or {}).get("treatment")
-        return t is not None and t >= 0
+        return t is not None and t >= 0 and not (v or {}).get("pheno_unit")
 
     def setup_trial(self, n_treatments: int, n_reps: int, t0: bool | None = None) -> dict:
         """Crea (o ajusta) las parcelas T1R1 … TnRm (con `t0`: T0R1 … Tn-1Rm). Al reducir, las
@@ -738,8 +876,9 @@ class Database:
             self.execute("INSERT OR IGNORE INTO treatments(num, name) VALUES (?, '')", (t,))
             for r in range(1, nr + 1):
                 name = f"T{t}R{r}"
-                cur = self.query_one("SELECT * FROM varieties WHERE treatment=? AND rep=?", (t, r)) \
-                    or self.query_one("SELECT * FROM varieties WHERE name=?", (name,))
+                cur = self.query_one("SELECT * FROM varieties WHERE treatment=? AND rep=? AND pheno_unit=0",
+                                     (t, r)) \
+                    or self.query_one("SELECT * FROM varieties WHERE name=? AND pheno_unit=0", (name,))
                 if cur is None:
                     vid = self.add_variety(name, code=name, sort_order=t * 100 + r, log=False)
                     added += 1
@@ -749,7 +888,7 @@ class Database:
                         restored += 1
                 self.execute("UPDATE varieties SET treatment=?, rep=?, active=1, sort_order=?, "
                              "updated_at=? WHERE id=?", (t, r, t * 100 + r, _now(), vid))
-        for v in self.query("SELECT id FROM varieties WHERE active=1 AND treatment >= 0 "
+        for v in self.query("SELECT id FROM varieties WHERE active=1 AND treatment >= 0 AND pheno_unit=0 "
                             "AND (treatment<? OR treatment>? OR rep>?)", (first, last, nr)):
             self.execute("UPDATE varieties SET active=0, updated_at=? WHERE id=?", (_now(), v["id"]))
             archived += 1
@@ -758,6 +897,8 @@ class Database:
         self.set_setting("trial_t0", t0)
         self.log("update", "trial", None, f"{nt} tratamientos (T{first}–T{last}) × {nr} repeticiones "
                                           f"(+{added}, restauradas {restored}, archivadas {archived})")
+        if self.unified_pheno:      # puntos de fenología por tratamiento: siguen a los tratamientos
+            self.sync_pheno_units()
         return {"added": added, "restored": restored, "archived": archived}
 
     @staticmethod
@@ -800,7 +941,7 @@ class Database:
                             (nums[0], nums[-1])):
             t["label"] = self.treatment_label(t)
             t["variety"] = (t.get("cultivar") or "").strip() or default
-            t["parcels"] = self.query("SELECT * FROM varieties WHERE active=1 AND treatment=? "
+            t["parcels"] = self.query("SELECT * FROM varieties WHERE active=1 AND pheno_unit=0 AND treatment=? "
                                       "ORDER BY rep", (t["num"],))
             out.append(t)
         return out

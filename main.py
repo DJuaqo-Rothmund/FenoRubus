@@ -283,6 +283,7 @@ class FenoRubusApp(MDApp):
         r = self.reports
         r.include_all_photos = bool(self.db.get_setting("report_all_photos", False))
         r.photo_mode = self.db.get_setting("report_photo_mode", "both")
+        r.plain_pdf = bool(self.db.get_setting("report_plain_pdf", False))
         return r
 
     @cached_property

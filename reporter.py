@@ -383,7 +383,7 @@ class ReportGenerator:
         if package == "pdf":
             import pdf_report
             path = base + ".pdf"
-            data = pdf_report.render(template, dict(ctx, title=title, generated=generated),
+            data = pdf_report.render(template, dict(ctx, title=title, generated=generated, plain=self.plain_pdf),
                                      self.db.bbch_names(), self._num)
             with open(path, "wb") as f:
                 f.write(data)
@@ -395,6 +395,7 @@ class ReportGenerator:
         return ReportResult(path, title, kind, max(1, os.path.getsize(path) // 1024))
 
     include_all_photos = False  # True: agrega las fotos no principales como miniaturas
+    plain_pdf = False           # True: PDF simple, sin logo ni marca (solo información e imágenes)
     # Fotos de los informes: "both" (Full: general + detalle), "detail" o "canopy" (general).
     # Siempre la foto representativa (principal) de cada tipo.
     photo_mode = "both"
@@ -726,10 +727,20 @@ class ReportGenerator:
         wl = self._wlabel(season)
         num = self._num
         parcels = [p for t in trts for p in t["parcels"]]
+        # Fenología: por parcela, o en los puntos de la fenología unificada. Con puntos por
+        # tratamiento (p. ej. caña gruesa/media/delgada), esos puntos hacen de repeticiones
+        # en la comparación fenológica; las mediciones siguen con las parcelas.
+        unified = self.db.unified_pheno
+        cfg = self.db.pheno_config()
+        per_trt = unified and cfg["scope"] == "treatment"
+        units = self.db.pheno_units() if unified else []
+        if per_trt:
+            ptrts = [dict(t, parcels=[u for u in units if u["treatment"] == t["num"]]) for t in trts]
+        else:
+            ptrts = trts
+        pparcels = [p for t in ptrts for p in t["parcels"]]
         # Solo el tramo con datos (sin las semanas vacías del inicio y del final).
-        ids = {p["id"] for p in parcels}
-        if self.db.unified_pheno:           # fenología del ensayo (una sola)
-            ids |= {u["id"] for u in self.db.pheno_units()}
+        ids = {p["id"] for p in parcels} | {u["id"] for u in units}
         used = {wn for (vid, wn), o in matrix.items() if vid in ids and o["bbch_code"] is not None}
         used |= {e["week_number"] for m in self.db.list_measures()
                  for e in self.db.list_entries(m["id"], season=season) if e["variety_id"] in ids}
@@ -748,10 +759,10 @@ class ReportGenerator:
             return ("< 0,001" if p_ < 0.001 else num(p_, 3)) + f" {a['stars']}"
 
         # Promedio BBCH por tratamiento y semana (+ ANOVA de cada semana).
-        rows = [{"t": t, "cells": [], "pts": []} for t in trts]
+        rows = [{"t": t, "cells": [], "pts": []} for t in ptrts]
         tests = []
         for w in weeks:
-            data = {(p["treatment"], p["rep"]): v for p in parcels for v in [bbch_at(p, w)] if v is not None}
+            data = {(p["treatment"], p["rep"]): v for p in pparcels for v in [bbch_at(p, w)] if v is not None}
             a = st.anova(data)
             for row in rows:
                 vals = [data[(row["t"]["num"], p["rep"])] for p in row["t"]["parcels"]
@@ -792,7 +803,7 @@ class ReportGenerator:
         for code, name in MILESTONES:
             target = ph.bbch_value(code)
             hit = {}
-            for p in parcels:
+            for p in pparcels:
                 wk = next((w for w in weeks if (v := bbch_at(p, w)) is not None and v >= target), None)
                 if wk is not None:
                     hit[(p["treatment"], p["rep"])] = ph.week_of_year(wk)
@@ -800,7 +811,7 @@ class ReportGenerator:
                 continue
             a = st.anova(hit)
             cells = []
-            for t in trts:
+            for t in ptrts:
                 vals = [hit[(t["num"], p["rep"])] for p in t["parcels"] if (t["num"], p["rep"]) in hit]
                 m, _se = st.mean_se(vals)
                 cells.append({"text": (f"S{num(m)}" + (f" {a['letters'].get(t['num'], '')}"
@@ -851,8 +862,12 @@ class ReportGenerator:
         return self._render(
             "treatments.html", f"tratamientos_{season}", "tratamientos", title, images, package,
             weeks=weeks, rows=rows, tests=tests, compare=compare, ranking=ranking, max_abs=max_abs,
-            milestones=milestones, measures=measures, treatments=trts, unified=self.db.unified_pheno,
-            heat=self._heatmap(season, weeks, self.db.pheno_units() if self.db.unified_pheno else parcels),
+            milestones=milestones, measures=measures, treatments=trts, unified=unified and not per_trt,
+            unit_note=("Fenología unificada en " + str(len(cfg["names"])) + " punto(s) por tratamiento ("
+                       + ", ".join(n or f"Punto {i}" for i, n in enumerate(cfg["names"], 1))
+                       + "): hacen de repeticiones en la comparación fenológica; las mediciones "
+                         "siguen por parcela." if per_trt else ""),
+            heat=self._heatmap(season, weeks, units if unified else parcels),
             n_t=nt or len(trts), n_r=nr,
             subtitle=f"{nt or len(trts)} tratamientos × {nr} repeticiones · {ph.season_title(season)} · "
                      f"Semanas {ph.week_of_year(weeks[0])}–{ph.week_of_year(weeks[-1])}")

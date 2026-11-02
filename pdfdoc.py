@@ -320,7 +320,7 @@ class PDFDoc:
         objs[catalog] = f"<< /Type /Catalog /Pages {pages_id} 0 R{names} >>".encode("latin-1")
         now = _dt.datetime.now().strftime("D:%Y%m%d%H%M%S")
         info = new(f"<< /Title {_pdf_text_string(self.title)} /Author {_pdf_text_string(self.author)} "
-                   f"/Producer (PhenoRubus) /CreationDate ({now}) >>".encode("latin-1"))
+                   f"{'' if getattr(self, 'plain', False) else '/Producer (PhenoRubus) '}/CreationDate ({now}) >>".encode("latin-1"))
 
         out = io.BytesIO()
         out.write(b"%PDF-1.4\n%\xe2\xe3\xcf\xd3\n")

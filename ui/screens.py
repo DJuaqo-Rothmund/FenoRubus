@@ -1581,7 +1581,7 @@ class WorkspacesScreen(MDScreen):
         parts = [KINDS.get(ws["kind"], ws["kind"])]
         try:
             db = a.open_db(ws)
-            n = db.query_one("SELECT COUNT(*) AS n FROM varieties WHERE active=1")["n"]
+            n = db.query_one("SELECT COUNT(*) AS n FROM varieties WHERE active=1 AND pheno_unit=0")["n"]
             one, many = {"tratamientos": ("parcela", "parcelas"), "predio": ("sector", "sectores")
                          }.get(ws["kind"], ("variedad", "variedades"))
             parts.append(f"{n} {one if n == 1 else many}")
@@ -2435,14 +2435,104 @@ class VarietiesTab(MDScreen):
         app().open_variety(variety_id)
 
     # ------------------------------------------- tratamientos × repeticiones
-    def _toggle_unified(self, on: bool):
+    def unified_dialog(self):
+        """Fenología unificada: activar, para todo el ensayo o en cada tratamiento, cuántos
+        puntos y el nombre de cada uno."""
+        from kivy.factory import Factory
+        from kivy.uix.scrollview import ScrollView
         a = app()
-        a.db.set_unified_pheno(on)
-        a.toast("Fenología unificada: un registro por semana para todo el ensayo" if on
-                else "Fenología por parcela: un registro por tratamiento y repetición")
-        self.refresh()
-        if a.home is not None:
-            a.refresh_home()
+        db = a.db
+        cfg = db.pheno_config()
+        st = {"scope": cfg["scope"], "fields": []}
+        form = MDBoxLayout(orientation="vertical", adaptive_height=True, spacing=dp(8),
+                           padding=(0, dp(12), 0, 0))
+        on_row, on_cb = check_row("Usar fenología unificada", db.unified_pheno)
+        form.add_widget(on_row)
+        seg = MDBoxLayout(adaptive_height=True, spacing=dp(8))
+        b_all = SegButton(text="Para todo\nel ensayo", height=dp(50), shorten=False, font_size="13sp")
+        b_trt = SegButton(text="En cada\ntratamiento", height=dp(50), shorten=False, font_size="13sp")
+        seg.add_widget(b_all)
+        seg.add_widget(b_trt)
+        form.add_widget(seg)
+        f_n = Factory.Field(hint_text="N.º de puntos (plantas o grupos)", input_filter="int",
+                            text=str(len(cfg["names"])))
+        form.add_widget(f_n)
+        names_box = MDBoxLayout(orientation="vertical", adaptive_height=True, spacing=dp(6))
+        scroll = ScrollView(size_hint_y=None, height=0, do_scroll_x=False, bar_width=dp(3))
+        scroll.add_widget(names_box)
+        form.add_widget(scroll)
+        info = MDLabel(font_style="Caption", adaptive_height=True, theme_text_color="Custom",
+                       text_color=c(theme.MUTED))
+        form.add_widget(info)
+        old = list(cfg["names"])
+
+        def build(*_):
+            try:
+                n = max(1, min(int(f_n.text or 1), db.MAX_REPS))
+            except ValueError:
+                n = 1
+            keep = [f.text for f in st["fields"]] or old
+            fast_clear(names_box)
+            st["fields"] = []
+            if n > 1 or st["scope"] == "treatment":
+                for i in range(n):
+                    f = Factory.Field(hint_text=f"Punto {i + 1} (ej.: {('Caña gruesa', 'Caña media', 'Caña delgada')[i % 3]})",
+                                      text=keep[i] if i < len(keep) else "")
+                    names_box.add_widget(f)
+                    st["fields"].append(f)
+            Clock.schedule_once(lambda *_: setattr(scroll, "height", min(dp(200), names_box.height)), 0)
+            nt, nr = db.trial_size()
+            total = n * (len(db.trial_nums()) if st["scope"] == "treatment" else 1)
+            info.text = (f"{total} registro(s) de fenología por semana"
+                         + (f" ({n} por tratamiento)" if st["scope"] == "treatment" else "")
+                         + f". Las mediciones siguen en las {nt * nr} parcelas ({nt} tratamientos × {nr} repeticiones).")
+
+        def set_scope(scope):
+            st["scope"] = scope
+            b_all.selected, b_trt.selected = scope == "trial", scope == "treatment"
+            build()
+
+        b_all.bind(on_release=lambda *_: set_scope("trial"))
+        b_trt.bind(on_release=lambda *_: set_scope("treatment"))
+        f_n.bind(text=build)
+        set_scope(st["scope"])
+
+        def ok(_f):
+            names = [f.text.strip() for f in st["fields"]] or [""]
+            db.set_unified_pheno(on_cb.active, st["scope"], names)
+            if on_cb.active:
+                n = len(db.pheno_units())
+                a.toast(f"Fenología unificada: {n} registro(s) por semana")
+            else:
+                a.toast("Fenología por parcela: un registro por tratamiento y repetición")
+            self.refresh()
+            if a.home is not None:
+                a.refresh_home()
+
+        form_dialog("Fenología del ensayo", form, ok)
+
+    def _move_to_units(self):
+        a = app()
+        info = a.db.parcels_to_units_summary()
+        cfg = a.db.pheno_config()
+        rule = ("Van al punto de la fenología del ensayo" if len(a.db.pheno_units()) == 1 else
+                "Cada parcela va al punto de su tratamiento con el mismo número que su repetición "
+                "(R1 → punto 1…; si hay menos puntos, al primero)" if cfg["scope"] == "treatment" else
+                "Cada parcela va al punto con el número de su repetición (R1 → punto 1…; si hay "
+                "menos puntos, al primero)")
+
+        def go():
+            res = a.db.move_parcels_to_units()
+            a.toast(f"Pasadas {res['photos']} foto(s); estado BBCH puesto en {res['states']} registro(s)")
+            self.refresh()
+            if a.home is not None:
+                a.refresh_home()
+        confirm("Pasar fotos a la fenología unificada",
+                f"{info['photos']} foto(s) de {info['records']} registro(s) por parcela "
+                f"({info['weeks']} semana(s)). {rule}, en la misma semana. Si el punto no tiene "
+                "estado BBCH, se le pone el más repetido de sus parcelas. Los registros por parcela "
+                "conservan su estado y notas.",
+                [("Pasar fotos", go)])
 
     def _catalog_card(self, box):
         import catalog
@@ -2488,24 +2578,40 @@ class VarietiesTab(MDScreen):
         card.add_widget(b3)
         box.add_widget(card)
         box.add_widget(Widget(size_hint_y=None, height=dp(8)))
-        # Fenología unificada: una sola fenología para todo el ensayo (ningún tratamiento la
-        # cambia); los tratamientos y repeticiones siguen para las mediciones.
+        # Fenología unificada: la fenología se registra en puntos propios (uno para todo el
+        # ensayo, varios comunes o varios por tratamiento); las parcelas T×R siguen para las
+        # mediciones.
         card = Factory.PaperCard()
         card.add_widget(Factory.SectionLabel(text="FENOLOGÍA DEL ENSAYO"))
         on = db.unified_pheno
-        card.add_widget(Factory.Body(
-            text="[b]Unificada[/b]: un solo estado BBCH por semana para todo el ensayo." if on else
-                 "[b]Por parcela[/b]: el estado BBCH se registra en cada tratamiento y repetición.",
-            markup=True))
-        b4 = Factory.GhostButton(icon="sprout" if on else "grid",
-                                 text="Pasar a fenología por parcela" if on else "Usar fenología unificada")
-        b4.bind(on_release=lambda *_: self._toggle_unified(not on))
+        cfg = db.pheno_config()
+        n = len(cfg["names"])
+        labels = ", ".join(x or f"Punto {i}" for i, x in enumerate(cfg["names"], 1))
+        if not on:
+            state = "[b]Por parcela[/b]: el estado BBCH se registra en cada tratamiento y repetición."
+        elif cfg["scope"] == "treatment":
+            state = (f"[b]Unificada[/b]: {n} punto(s) en cada tratamiento ({labels}) = "
+                     f"{n * len(db.trial_nums())} registros por semana.")
+        elif n == 1:
+            state = "[b]Unificada[/b]: un solo estado BBCH por semana para todo el ensayo."
+        else:
+            state = f"[b]Unificada[/b]: {n} puntos comunes a todo el ensayo ({labels})."
+        card.add_widget(Factory.Body(text=state, markup=True))
+        b4 = Factory.GhostButton(icon="tune-variant", text="Configurar fenología")
+        b4.bind(on_release=lambda *_: self.unified_dialog())
         card.add_widget(b4)
+        if on:
+            info = db.parcels_to_units_summary()
+            if info["photos"] or info["records"]:
+                b5 = Factory.GhostButton(icon="image-move",
+                                         text=f"Pasar fotos de las parcelas ({info['photos']})")
+                b5.bind(on_release=lambda *_: self._move_to_units())
+                card.add_widget(b5)
         card.add_widget(Factory.Muted(
-            text="Úsela cuando ningún tratamiento cambia la fenología (p. ej. corte de mulch): en "
-                 "Muestreo queda una sola tarjeta «Fenología del ensayo» y los informes muestran una "
-                 "sola curva. Las mediciones siguen por tratamiento y repetición (con ANOVA). Nada se "
-                 "borra al cambiar: los registros por parcela vuelven a verse al desactivarla."))
+            text="Unificada: la fenología se registra en puntos propios (uno para todo el ensayo, "
+                 "varios comunes o varios en cada tratamiento, p. ej. caña gruesa, media y "
+                 "delgada). Las mediciones siguen por tratamiento y repetición (con ANOVA). "
+                 "Nada se borra al cambiar."))
         box.add_widget(card)
         box.add_widget(Widget(size_hint_y=None, height=dp(8)))
         # Qué significa cada tratamiento: se ve en la ficha de muestreo y en los informes.
@@ -4078,12 +4184,16 @@ class ReportsTab(MDScreen):
     sel_variety = ObjectProperty(None, allownone=True)
     sel_month = ObjectProperty(None, allownone=True)
 
+    def set_plain_pdf(self, active):
+        app().db.set_setting("report_plain_pdf", bool(active))
+
     def set_all_photos(self, active: bool):
         app().db.set_setting("report_all_photos", bool(active))
 
     def refresh(self):
         a = app()
         self.ids.all_photos.active = bool(a.db.get_setting("report_all_photos", False))
+        self.ids.plain_pdf.active = bool(a.db.get_setting("report_plain_pdf", False))
         self._photo_mode_label()
         weeks = a.db.list_weeks(a.season)
         if not weeks:

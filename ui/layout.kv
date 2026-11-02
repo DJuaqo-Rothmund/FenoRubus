@@ -1625,6 +1625,20 @@
                     Body:
                         text: "Incluir todas las fotos (no solo la principal)"
                         pos_hint: {"center_y": .5}
+                MDBoxLayout:
+                    adaptive_height: True
+                    spacing: dp(6)
+                    MDCheckbox:
+                        id: plain_pdf
+                        size_hint: None, None
+                        size: dp(40), dp(40)
+                        pos_hint: {"center_y": .5}
+                        selected_color: c(theme.BERRY)
+                        unselected_color: c(theme.LEAF_DARK, .5)
+                        on_active: root.set_plain_pdf(self.active)
+                    Body:
+                        text: "PDF simple: sin logo ni marca (solo la información e imágenes)"
+                        pos_hint: {"center_y": .5}
                 GhostButton:
                     id: photo_mode_btn
                     icon: "image-multiple-outline"

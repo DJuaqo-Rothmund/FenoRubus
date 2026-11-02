@@ -2579,7 +2579,7 @@ def test_trial_with_t0(tmp_path):
     t0 = db.list_varieties()[0]
     assert db.is_parcel(t0) and db.display_name(t0) == "Testigo (T0R1)"
     db.set_unified_pheno(True)
-    assert len(db.list_varieties()) == 14 and db.trial_unit()["treatment"] == -1
+    assert len(db.list_varieties()) == 14 and db.trial_unit()["pheno_unit"] == 1
     db.set_unified_pheno(False)
     res = db.setup_trial(7, 2, t0=False)                        # sin T0: T1 … T7
     assert res["archived"] == 2 and res["added"] == 2
@@ -2595,15 +2595,17 @@ def test_trial_with_t0(tmp_path):
     wss.close()
 
 
-def test_old_unit_row_becomes_minus_one(tmp_path):
-    """La «Fenología del ensayo» guardada como tratamiento 0 (antes) pasa a -1 al abrir."""
+def test_old_unit_row_becomes_pheno_unit(tmp_path):
+    """La «Fenología del ensayo» guardada como tratamiento 0 o -1 (antes) pasa a punto de
+    fenología al abrir."""
     path = str(tmp_path / "t.sqlite3")
     d = Database(path)
     vid = d.add_variety("Fenología del ensayo", code="ENS")
     d.execute("UPDATE varieties SET treatment=0, rep=0 WHERE id=?", (vid,))
     d.close()
     d = Database(path)
-    assert d.get_variety(vid)["treatment"] == -1
+    v = d.get_variety(vid)
+    assert v["pheno_unit"] == 1 and v["treatment"] is None
     assert vid not in [v["id"] for v in d.list_varieties(include_archived=True)]
     d.close()
 
@@ -2662,3 +2664,73 @@ def test_move_week_syncs_over_empty_record(tmp_path):
     bw2 = b.query_one("SELECT id FROM sampling_weeks WHERE start_date='2026-10-19'")["id"]
     assert b.get_observation(bv["id"], bw2)["bbch_code"] == 61
     assert b.get_observation(bv["id"], bw1) is None
+
+
+def test_unified_points_per_treatment_and_move_photos(tmp_path):
+    """Fenología unificada en 3 puntos por tratamiento (caña gruesa, media, delgada): las
+    parcelas T×R siguen para las mediciones; las fotos por parcela pasan a los puntos."""
+    from workspaces import Workspaces
+    wss = Workspaces(str(tmp_path / "data"))
+    db = wss.open(wss.create("id", "tratamientos", "Corte de mulch", "CM"))
+    db.setup_trial(2, 4)
+    w = db.current_week(dt.date(2026, 10, 5))
+    photo = str(tmp_path / "f.jpg")
+    open(photo, "wb").write(b"jpg")
+    for v in db.list_varieties():
+        o = db.get_or_create_observation(v["id"], w["id"])
+        db.update_observation(o["id"], bbch_code=61 if v["rep"] != 4 else 65, bbch_label="x")
+        db.add_photo(o["id"], "detail", photo)
+    db.set_unified_pheno(True, "treatment", ["Caña gruesa", "Caña media", "Caña delgada"])
+    units = db.pheno_units()
+    assert [u["name"] for u in units][:3] == ["T1 · Caña gruesa", "T1 · Caña media", "T1 · Caña delgada"]
+    assert len(units) == 6 and len(db.list_varieties()) == 8
+    assert all(len(t["parcels"]) == 4 for t in db.list_treatments())
+    assert db.parcels_to_units_summary() == {"photos": 8, "records": 8, "weeks": 1}
+    res = db.move_parcels_to_units()
+    assert res == {"photos": 8, "states": 6}
+    t1 = [u for u in units if u["treatment"] == 1]
+    o1 = db.get_observation(t1[0]["id"], w["id"])           # R1 y R4 -> punto 1
+    assert o1["bbch_code"] in (61, 65)
+    assert db.query_one("SELECT COUNT(*) AS n FROM photos WHERE observation_id=?", (o1["id"],))["n"] == 2
+    assert db.get_observation(db.list_varieties()[0]["id"], w["id"])["bbch_code"] == 61   # se conserva
+    # Más tratamientos: los puntos siguen; menos puntos: se archivan (no se borran).
+    db.setup_trial(3, 4)
+    assert len(db.pheno_units()) == 9
+    db.set_unified_pheno(True, "treatment", ["Caña gruesa", "Caña media"])
+    assert len(db.pheno_units()) == 6 and len(db.pheno_units(include_archived=True)) == 9
+    m = db.add_measure("Cañas", "table", ["N"])
+    for v in db.list_varieties():
+        db.add_entry(m, w["id"], v["id"], data={"N": str(v["treatment"] * 2 + v["rep"])})
+    rep = ReportGenerator(db, str(tmp_path / "out"))
+    html = open(rep.treatments(w["season"]).path, encoding="utf-8").read()
+    assert "punto(s) por tratamiento" in html and "Estado BBCH medio por tratamiento" in html
+    assert "T1R1" in html and "Cañas" in html
+    assert open(rep.treatments(w["season"], package="pdf").path, "rb").read(5) == b"%PDF-"
+    # Puntos comunes: una sección para el ensayo.
+    db.set_unified_pheno(True, "trial", ["Gruesa", "Delgada"])
+    assert [u["name"] for u in db.pheno_units()] == ["Ensayo · Gruesa", "Ensayo · Delgada"]
+    html = open(rep.treatments(w["season"]).path, encoding="utf-8").read()
+    assert "Fenología del ensayo (unificada)" in html
+    db.set_unified_pheno(False)
+    assert len(db.pheno_units()) == 12
+    db.close()
+    wss.close()
+
+
+def test_plain_pdf_has_no_brand(db, tmp_path):
+    """PDF simple: sin logo ni nombre de la app."""
+    import crops
+    w = db.current_week(dt.date(2026, 10, 5))
+    v = db.list_varieties()[0]
+    db.update_observation(db.get_or_create_observation(v["id"], w["id"])["id"], bbch_code=61)
+    rep = ReportGenerator(db, str(tmp_path / "out"))
+    app_name = crops.current().app
+    branded = open(rep.weekly(w["id"], package="pdf").path, "rb").read()
+    rep.plain_pdf = True
+    plain = open(rep.weekly(w["id"], package="pdf").path, "rb").read()
+    from pypdf import PdfReader
+    import io
+    text_b = "".join(p.extract_text() for p in PdfReader(io.BytesIO(branded)).pages)
+    text_p = "".join(p.extract_text() for p in PdfReader(io.BytesIO(plain)).pages)
+    assert app_name.upper() in text_b.upper() and app_name.upper() not in text_p.upper()
+    assert b"/Producer" not in plain and len(plain) < len(branded)
