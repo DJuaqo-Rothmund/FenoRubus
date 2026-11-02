@@ -15,6 +15,8 @@ const UPLOAD = "https://www.googleapis.com/upload/drive/v3/files?uploadType=mult
 // Carpeta del módulo en Drive: «App Fenología/PhenoRubus» (como la app). La antigua
 // «PhenoRubus · Imágenes de Fenología» se mueve ahí la primera vez (con todo lo que tenía).
 const TOP = "App Fenología", MODULE = "PhenoRubus", LEGACY_ROOT = "PhenoRubus · Imágenes de Fenología";
+// IA+ entrena cada cultivo por separado: el módulo elegido en su página (train.js).
+let trainMod = MODULE;
 const SYNC = "Sincronización";
 const FOLDER = "application/vnd.google-apps.folder";
 const PROFILES = { id: "I+D", predio: "Predio" };
@@ -121,25 +123,23 @@ async function folder(name, parent, create = true) {
   return id;
 }
 
-async function rootFolder(create = true) {
-  if (S.folders.has("module")) return S.folders.get("module");
-  const top = await folder(TOP, null, create);
-  let id = top && await folder(MODULE, top, false);
-  if (!id) {
-    const old = (await list(`name='${q(LEGACY_ROOT)}' and mimeType='${FOLDER}' and trashed=false`, "files(id,parents)"))[0];
-    if (old && top) {
-      const qs = new URLSearchParams({ addParents: top, removeParents: (old.parents || []).join(","), fields: "id" });
-      await api("PATCH", `${API}/${old.id}?${qs}`, JSON.stringify({ name: MODULE }), "application/json");
-      id = old.id;
-    } else if (old) {
-      id = old.id;          // solo lectura: se usa donde está
-    } else if (top) {
-      id = await folder(MODULE, top, create);
-    }
+// Carpeta de un módulo (cultivo) en Drive, esté donde esté: «AeonCrop/<módulo>» (la app
+// AeonCrop), «App Fenología/<módulo>» o, para PhenoRubus, la de siempre. No mueve nada.
+async function moduleRoot(mod = MODULE, create = true) {
+  const key = `module/${mod}`;
+  if (S.folders.has(key)) return S.folders.get(key);
+  let id = null;
+  for (const top of ["AeonCrop", TOP]) {
+    const t = await folder(top, null, false);
+    id = t && await folder(mod, t, false);
+    if (id) break;
   }
-  if (id) S.folders.set("module", id);
+  if (!id && mod === MODULE) id = await folder(LEGACY_ROOT, null, false);
+  if (!id && create) id = await folder(mod, await folder("AeonCrop", null, true), true);
+  if (id) S.folders.set(key, id);
   return id;
 }
+const rootFolder = (create = true) => moduleRoot(MODULE, create);
 
 async function upload(parent, name, blob, mime) {
   const b = "pr" + C.newUid();
@@ -162,13 +162,14 @@ async function updateFile(id, blob, mime) {
 // marcas.json», aparte de los registros. Los archivos por ensayo de la primera versión
 // (<código>.json) se suman al leer.
 const TRAIN_DIR = "Entrenamiento IA", TRAIN_FILE = "marcas.json";
+const trainKey = () => (trainMod === MODULE ? "train/all" : `train/${trainMod}`);
 async function trainDir(create) {
-  const root = await rootFolder(create);
+  const root = await moduleRoot(trainMod, create);
   return root && await folder(TRAIN_DIR, root, create);
 }
 async function loadLabels() {
   const dir = await trainDir(false);
-  if (!dir) return (await cacheGet("train/all")) || null;
+  if (!dir) return (await cacheGet(trainKey())) || null;
   const files = (await list(`'${dir}' in parents and trashed=false`, "files(id,name)")).filter((f) => f.name.endsWith(".json"));
   const main = files.find((f) => f.name === TRAIN_FILE);
   const out = main ? await (await download(main.id)).json() : { version: 1, photos: {} };
@@ -178,7 +179,7 @@ async function loadLabels() {
     const old = await (await download(f.id)).json().catch(() => null);
     for (const [k, v] of Object.entries(old?.photos || {})) if (!out.photos[k] || (v.ts || "") > (out.photos[k].ts || "")) out.photos[k] = v;
   }
-  cachePut("train/all", out);
+  cachePut(trainKey(), out);
   return out;
 }
 // Antes de escribir se suma lo que otro equipo (teléfono o PC) guardó entretanto: por foto
@@ -192,7 +193,7 @@ async function saveLabels(data) {
       if (!data.photos[k] || (v.ts || "") > (data.photos[k].ts || "")) data.photos[k] = v;
     }
   }
-  cachePut("train/all", data);
+  cachePut(trainKey(), data);
   const blob = new Blob([JSON.stringify(data)], { type: "application/json" });
   if (f[0]) await updateFile(f[0].id, blob, "application/json");
   else await upload(dir, TRAIN_FILE, blob, "application/json");
@@ -203,7 +204,7 @@ async function saveLabels(data) {
 // clave de cada foto en marcas.json es «ext/<subcarpetas>/<nombre>».
 const EXTRA_DIR = "IA+ Conocimiento ampliado";
 async function extraDir(create) {
-  const root = await rootFolder(create);
+  const root = await moduleRoot(trainMod, create);
   return root && await folder(EXTRA_DIR, root, create);
 }
 async function extraList() {
@@ -222,11 +223,12 @@ async function extraList() {
   return out.sort((a, b) => a.folder.localeCompare(b.folder) || a.name.localeCompare(b.name));
 }
 async function extraUrl(p) {
-  if (S.photoUrls.has(p.key)) return S.photoUrls.get(p.key);
-  let blob = await cacheGet(p.key, "photos");
-  if (!blob) { blob = await (await download(p.id)).blob(); cachePut(p.key, blob, "photos"); }
+  const ck = trainMod === MODULE ? p.key : `${trainMod}:${p.key}`;   // «ext/…» se repite entre cultivos
+  if (S.photoUrls.has(ck)) return S.photoUrls.get(ck);
+  let blob = await cacheGet(ck, "photos");
+  if (!blob) { blob = await (await download(p.id)).blob(); cachePut(ck, blob, "photos"); }
   const url = URL.createObjectURL(blob);
-  S.photoUrls.set(p.key, url);
+  S.photoUrls.set(ck, url);
   return url;
 }
 // Sube fotos (o carpetas enteras, con sus subcarpetas) a la carpeta de fotos extra. Las que
@@ -283,6 +285,7 @@ async function resizeTo(file, side, quality) {
 // Registros de TODOS los ensayos y predios (para entrenar con las fotos de todos): lo
 // guardado en el navegador y, si hay conexión, lo nuevo de Drive.
 async function allStates(progress = () => {}) {
+  if (trainMod !== MODULE) return moduleStates(trainMod, progress);
   const out = [];
   let i = 0;
   for (const ws of S.workspaces) {
@@ -307,6 +310,34 @@ async function allStates(progress = () => {}) {
         cachePut(`${ws.code}/__index`, files.map((f) => f.name));
       }
     } catch { /* sin conexión: lo guardado */ }
+    out.push({ ws, state: st });
+  }
+  return out;
+}
+
+// Registros de otro cultivo (PhenoBlue, PhenoCran) para IA+: sus paquetes de sincronización.
+async function moduleStates(mod, progress) {
+  const out = [];
+  const root = await moduleRoot(mod, false);
+  const sync = root && await folder(SYNC, root, false);
+  if (!sync) return out;
+  const items = await list(`'${sync}' in parents and trashed=false`);
+  const dirs = items.filter((f) => f.mimeType === FOLDER);
+  let i = 0;
+  for (const d of dirs) {
+    progress(`Leyendo ${mod} · ${d.name} (${++i}/${dirs.length})…`);
+    const ws = { code: d.name, name: d.name, profile: "" };
+    const st = C.emptyState();
+    const files = (await list(`'${d.id}' in parents and trashed=false`))
+      .filter((f) => f.name.endsWith(".json")).sort((a, b) => a.name.localeCompare(b.name));
+    const got = new Array(files.length);
+    await pool(files, 8, async (f, k) => {
+      const key = `${mod}:${d.name}/${f.name}`;
+      let b = await cacheGet(key);
+      if (!b) { b = await (await download(f.id)).json(); cachePut(key, b); }
+      got[k] = b;
+    });
+    files.forEach((f, k) => C.applyBundle(st, f.name, got[k]));
     out.push({ ws, state: st });
   }
   return out;
@@ -1725,6 +1756,7 @@ async function boot() {
   $("aifabs").hidden = !TR.enabled();
   document.body.classList.toggle("withfabs", TR.enabled());      // se activa abriendo la web con «#lab» una vez
   TR.init({ S, photoUrl, loadLabels, saveLabels, allStates, extraList, extraUrl, extraUpload,
+    setCrop: (mod) => { trainMod = mod; },
     email: () => store.get("pr_email") });
   $("dsave").onclick = saveDetail;
   $("msave").onclick = saveMeasure;

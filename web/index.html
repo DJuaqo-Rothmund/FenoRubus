@@ -366,12 +366,14 @@
   <dialog id="tpage" class="tpage">
     <div class="tpagebar">
       <img src="iaplus.png" alt="" width="40" height="40">
-      <div class="grow"><b>IA+</b><div class="small">Fotos de detalle de todos los ensayos y predios, y fotos extra · una sola meta</div></div>
+      <div class="grow"><b>IA+</b> <span id="tcropname" class="small"></span><div class="small">Fotos de detalle de todos los ensayos y predios, y fotos extra · una sola meta por cultivo</div></div>
       <button type="button" id="treload" class="ghost" title="Volver a leer las fotos de Drive">⟳</button>
       <button type="button" id="tpageclose" class="round" aria-label="Cerrar">✕</button>
     </div>
     <div class="tpagebody">
       <section class="card">
+        <div class="row-h"><div class="label">CULTIVO A ENTRENAR</div>
+          <div class="chips" id="tcrop"><button data-m="PhenoRubus">PhenoRubus · frambuesa</button><button data-m="PhenoBlue">PhenoBlue · arándano</button><button data-m="PhenoCran">PhenoCran · cranberry</button></div></div>
         <div class="row-h"><div class="label">MARCAR YEMAS, BROTES, LATERALES, FLORES Y FRUTOS</div>
           <div class="chips" id="tfilter"><button data-f="todo" class="on">Todas</button><button data-f="sin">Sin marcar</button><button data-f="con">Marcadas</button></div></div>
         <div class="chips" id="tws"></div>

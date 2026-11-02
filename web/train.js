@@ -1,24 +1,40 @@
 // PhenoRubus Web · «IA+»: marcar con cajas las estructuras de la planta (brotes,
 // botones, flores, frutos…) en las fotos de detalle, para entrenar el detector que contará
-// flores y frutos y estimará la etapa BBCH. Es una sola especie: se trabaja con las fotos de
-// TODOS los ensayos y predios y las marcas van a un solo archivo en Drive («PhenoRubus ·
-// Imágenes de Fenología/Entrenamiento IA/marcas.json»), aparte de los registros.
+// flores y frutos y estimará la etapa BBCH. Se elige el cultivo (PhenoRubus, PhenoBlue o
+// PhenoCran): se trabaja con las fotos de TODOS sus ensayos y predios y las marcas van a un
+// solo archivo en su carpeta de Drive («…/<módulo>/Entrenamiento IA/marcas.json»).
 import * as C from "./core.js";
 
-export const CLASSES = [            // la tecla de cada clase es su posición (0–9)
-  ["yema", "Yema", "#A1887F"],
-  ["brote", "Brote", "#8BC34A"],
-  ["lateral", "Lateral", "#5C6BC0"],
-  ["boton", "Botón", "#00897B"],
-  ["boton_blanco", "Botón blanco", "#78909C"],
-  ["flor", "Flor", "#F9A825"],
-  ["flor_pasada", "Flor pasada", "#8D6E63"],
-  ["fruto_verde", "Fruto verde", "#2E7D32"],
-  ["fruto_pinton", "Fruto pintón", "#EC407A"],
-  ["fruto_maduro", "Fruto maduro", "#B71C1C"],
-];
-const COLOR = Object.fromEntries(CLASSES.map(([k, , c]) => [k, c]));
-const NAME = Object.fromEntries(CLASSES.map(([k, n]) => [k, n]));
+// Clases de cajas de cada cultivo (= training_labels.py de AeonCrop). La tecla de cada
+// clase es su posición (0–9). IA+ entrena cada cultivo por separado (su carpeta en Drive).
+const CROP_CLASSES = {
+  PhenoRubus: [
+    ["yema", "Yema", "#A1887F"], ["brote", "Brote", "#8BC34A"], ["lateral", "Lateral", "#5C6BC0"],
+    ["boton", "Botón", "#00897B"], ["boton_blanco", "Botón blanco", "#78909C"], ["flor", "Flor", "#F9A825"],
+    ["flor_pasada", "Flor pasada", "#8D6E63"], ["fruto_verde", "Fruto verde", "#2E7D32"],
+    ["fruto_pinton", "Fruto pintón", "#EC407A"], ["fruto_maduro", "Fruto maduro", "#B71C1C"]],
+  PhenoBlue: [
+    ["yema", "Yema", "#A1887F"], ["brote", "Brote", "#8BC34A"], ["boton", "Yema floral", "#00897B"],
+    ["racimo", "Racimo floral", "#5C6BC0"], ["flor", "Flor", "#F9A825"], ["flor_pasada", "Flor pasada", "#8D6E63"],
+    ["fruto_verde", "Fruto verde", "#2E7D32"], ["fruto_pinton", "Fruto rosado", "#EC407A"],
+    ["fruto_maduro", "Fruto azul (maduro)", "#283593"]],
+  PhenoCran: [
+    ["yema", "Yema", "#A1887F"], ["upright", "Brote vertical", "#8BC34A"], ["estolon", "Estolón", "#6D8B3A"],
+    ["gancho", "Gancho", "#00897B"], ["flor", "Flor", "#F48FB1"], ["flor_pasada", "Flor pasada", "#8D6E63"],
+    ["fruto_verde", "Fruto verde", "#2E7D32"], ["fruto_pinton", "Fruto blush", "#FB8C00"],
+    ["fruto_maduro", "Fruto rojo (maduro)", "#B71C1C"]],
+};
+const CROP_NAMES = { PhenoRubus: "Frambuesa", PhenoBlue: "Arándano", PhenoCran: "Cranberry" };
+export const CLASSES = [...CROP_CLASSES.PhenoRubus];
+const COLOR = {}, NAME = {};
+let crop = "PhenoRubus";
+function useCrop(mod) {
+  crop = CROP_CLASSES[mod] ? mod : "PhenoRubus";
+  CLASSES.splice(0, CLASSES.length, ...CROP_CLASSES[crop]);
+  for (const o of [COLOR, NAME]) for (const k of Object.keys(o)) delete o[k];
+  for (const [k, n, c] of CLASSES) { COLOR[k] = c; NAME[k] = n; }
+}
+useCrop("PhenoRubus");
 const GOAL = 300;
 const $ = (id) => document.getElementById(id);
 const base = (p) => (p || "").split(/[\\/]/).pop();
@@ -46,7 +62,8 @@ export function init(ctx) {
     document.querySelectorAll("#tfilter button").forEach((x) => x.classList.toggle("on", x === b));
     renderList();
   }));
-  $("iaplusfab").onclick = () => { wsFilter = ""; $("tpage").showModal(); load(false); };
+  $("iaplusfab").onclick = () => { wsFilter = ""; $("tpage").showModal(); setCrop(savedCrop()); };
+  document.querySelectorAll("#tcrop button").forEach((b) => (b.onclick = () => setCrop(b.dataset.m)));
   $("tpageclose").onclick = () => $("tpage").close();
   $("treload").onclick = () => load(true);
   // Fotos extra (IA+ Conocimiento ampliado): fotos sueltas o una carpeta con subcarpetas.
@@ -73,6 +90,23 @@ export function init(ctx) {
     }
   };
   Ed.init();
+}
+
+function savedCrop() {
+  try { return localStorage.getItem("pr_iaplus_crop") || "PhenoRubus"; } catch { return "PhenoRubus"; }
+}
+
+// Cultivo de IA+: sus clases, sus fotos y sus marcas (carpeta del módulo en Drive).
+function setCrop(mod) {
+  const changed = mod !== crop || !data;
+  useCrop(mod);
+  try { localStorage.setItem("pr_iaplus_crop", crop); } catch { /* sin almacenamiento */ }
+  X.setCrop(crop);
+  document.querySelectorAll("#tcrop button").forEach((b) => b.classList.toggle("on", b.dataset.m === crop));
+  $("tcropname").textContent = `${crop} · ${CROP_NAMES[crop]}`;
+  if (changed) { data = null; photos = null; wsFilter = ""; }
+  Ed.renderClasses?.();
+  load(false);
 }
 
 async function load(fresh) {
@@ -187,10 +221,11 @@ function renderList() {
 
 // ------------------------------------------------------------------ editor de cajas
 const Ed = {
-  init() {
-    this.cv = $("tcanvas");
-    this.g = this.cv.getContext("2d");
+  // Botones de clase del cultivo elegido (cambian con el cultivo).
+  renderClasses() {
     const bar = $("tclassbar");
+    if (!bar) return;
+    bar.innerHTML = "";
     CLASSES.forEach(([k, n, c], i) => {
       const b = document.createElement("button");
       b.type = "button"; b.dataset.k = k;
@@ -199,6 +234,11 @@ const Ed = {
       bar.appendChild(b);
     });
     this.setClass("flor");
+  },
+  init() {
+    this.cv = $("tcanvas");
+    this.g = this.cv.getContext("2d");
+    this.renderClasses();
     $("tprev").onclick = () => this.go(-1);
     $("tnext").onclick = () => this.go(1);
     $("tdel").onclick = () => this.deleteSel();
