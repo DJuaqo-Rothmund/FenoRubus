@@ -207,7 +207,7 @@ BBCH_RUBUS: list[tuple[int, str, str, str]] = sorted(
     key=lambda e: _scale_value(e[0]))
 
 
-MACRO_STAGES_RUBUS: dict[int, str] = {
+MACRO_STAGES: dict[int, str] = {
     0: "Brotación",
     1: "Desarrollo de las hojas",
     3: "Desarrollo del brote",
@@ -219,7 +219,7 @@ MACRO_STAGES_RUBUS: dict[int, str] = {
 }
 
 # Colores por estadio principal (usados en reportes / chips de UI).
-MACRO_COLORS_RUBUS: dict[int, str] = {
+MACRO_COLORS: dict[int, str] = {
     0: "#8B7355",   # pardo yema
     1: "#9BAF6A",   # verde claro hoja
     3: "#6E8B3D",   # verde oliva brote
@@ -229,134 +229,6 @@ MACRO_COLORS_RUBUS: dict[int, str] = {
     8: "#B03A55",   # frambuesa
     9: "#A07D4F",   # senescencia
 }
-
-
-# ---------------------------------------------------------------------------
-# Escala BBCH — arándano alto (Vaccinium corymbosum), según Wichura et al. (2024).
-# El estadio principal 4 no se usa en este cultivo. Los rangos de la tabla («27-29»)
-# quedan como sus códigos extremos; los intermedios del fruto (75, 85) son el punto medio.
-# ---------------------------------------------------------------------------
-def _entries(rows):
-    """(código, nombre, descripción) -> (código, nombre, descripción, palabras clave)."""
-    import re
-    import unicodedata
-    out = []
-    for code, label, desc in rows:
-        words = unicodedata.normalize("NFKD", f"{label} {desc}".lower())
-        words = "".join(ch for ch in words if not unicodedata.combining(ch))
-        kw = " ".join(dict.fromkeys(w for w in re.findall(r"[a-z0-9]+", words) if len(w) > 2))
-        out.append((code, label, desc, kw))
-    return out
-
-
-BBCH_BLUE = _entries([
-    (0, "Latencia (dormancia)", "Las yemas vegetativas y florales están completamente cerradas."),
-    (1, "Inicio del hinchamiento de las yemas vegetativas", "Primer hinchamiento visible."),
-    (7, "Inicio de la brotación vegetativa", "Primeras puntas de hojas verdes visibles."),
-    (9, "Las puntas de las hojas emergen", "Se extienden aprox. 5 mm por encima de las escamas."),
-    (10, "Puntas de las hojas a 10 mm", "Puntas de las hojas a unos 10 mm por encima de la escama de la yema."),
-    (11, "Primeras hojas desplegadas", "Primeras hojas desplegadas."),
-    (15, "Hojas desplegándose", "Las hojas se están desplegando, pero aún no alcanzan su tamaño final."),
-    (19, "Hojas completamente expandidas", "Alcanzan el tamaño típico de la variedad."),
-    (21, "Inicio del crecimiento de brotes laterales",
-     "Desde yemas de la madera del año anterior."),
-    (25, "Brotes laterales al 50 %", "Los primeros brotes laterales alcanzan el 50 % de su longitud máxima esperada."),
-    (27, "Crecimiento episódico de brotes laterales", "Crecimiento episódico continuo de los brotes laterales."),
-    (29, "Fin del crecimiento de brotes laterales", "Fin del crecimiento de brotes laterales."),
-    (32, "Flujos de crecimiento con aborto apical",
-     "Flujos de crecimiento del brote principal terminan en aborto apical natural («black tip»)."),
-    (33, "Aborto apical («black tip»)", "Flujos de crecimiento terminan en aborto apical natural («black tip stage»)."),
-    (39, "Último flujo de crecimiento desarrollado", "Último flujo de crecimiento desarrollado completamente."),
-    (51, "Inicio del hinchamiento de las yemas florales", "Inducido por alza térmica."),
-    (55, "Las yemas florales se abren", "Las yemas florales se abren revelando los primordios."),
-    (59, "Separación de racimos", "Las yemas florales abiertas; separación de los racimos florales."),
-    (61, "Inicio de la floración", "Alrededor del 10 % de las flores están abiertas."),
-    (65, "Plena floración", "Al menos el 50 % de las flores están abiertas; primeros pétalos caen."),
-    (69, "Fin de la floración", "Todos los pétalos (corolas) han caído."),
-    (71, "Cuajado", "Inicio del desarrollo del fruto: cuajado."),
-    (75, "Fruto en desarrollo", "El fruto crece, a medio camino de su tamaño final (verde)."),
-    (79, "Fruto a tamaño final", "El fruto alcanza su tamaño final varietal."),
-    (81, "Inicio del cambio de color", "Inicio de la maduración: cambio de color del fruto."),
-    (85, "Coloración avanzada", "Maduración a medio camino: frutos rosados a azules."),
-    (89, "Fruto completamente maduro", "Desarrolla la pruina y la coloración azul/negra típica."),
-])
-MACRO_STAGES_BLUE: dict[int, str] = {
-    0: "Desarrollo de yemas (brotación)",
-    1: "Desarrollo de las hojas",
-    2: "Desarrollo de brotes laterales",
-    3: "Desarrollo del brote principal",
-    5: "Emergencia de la inflorescencia",
-    6: "Floración",
-    7: "Desarrollo del fruto",
-    8: "Maduración del fruto",
-}
-MACRO_COLORS_BLUE: dict[int, str] = {
-    0: "#8B7355", 1: "#9BAF6A", 2: "#7E9B52", 3: "#6E8B3D", 5: "#D8C8D8",
-    6: "#EEE8F0", 7: "#8FB07A", 8: "#4A5E9E",
-}
-
-# ---------------------------------------------------------------------------
-# Escala BBCH homologada — cranberry (Vaccinium macrocarpon), adaptada de Vaccinium spp.
-# (Wichura et al., 2024) y Villata & Ribera (2019). Entre paréntesis, el código interno
-# V (vegetativo) / UP (brote vertical, «upright»).
-# ---------------------------------------------------------------------------
-BBCH_CRAN = _entries([
-    (0, "V1 · Yema apretada", "Latencia invernal de las yemas apicales en los brotes verticales (uprights). Hojas perennes."),
-    (7, "V2 · Yema blanca", "Hinchamiento y elongación de la yema terminal."),
-    (9, "V3 · Repollo", "Yema terminal en «cabeza de repollo» (cabbage head)."),
-    (11, "V4 · Apertura de yema", "Despliegue de nuevas hojas en brotes vegetativos."),
-    (15, "V5 · Inicio de elongación", "Las hojas nuevas se despliegan y el brote empieza a alargarse."),
-    (19, "V6 · Elongación", "Hojas de los brotes vegetativos en su expansión final."),
-    (21, "Inicio de estolones", "Inicio del crecimiento horizontal de tallos rastreros (runners)."),
-    (25, "Estolones en elongación", "Elongación de los tallos rastreros, de los que emergerán futuros uprights."),
-    (29, "Estolones desarrollados", "Fin de la elongación de los tallos rastreros."),
-    (51, "V7 · Cuello rugoso · UP1 Pre gancho",
-     "Hinchamiento visible de la yema mixta apical en los brotes fructíferos; botón erguido sobre pedicelo recto."),
-    (55, "UP2 · Gancho", "Emergencia del pedicelo curvo: los botones florales apuntan hacia abajo (gancho)."),
-    (59, "UP2 · Gancho avanzado", "Botones en gancho a punto de abrir."),
-    (61, "UP3 · Inicio de floración", "Apertura inicial: los pétalos empiezan a separarse en la punta."),
-    (65, "UP4 · Plena floración · V8 Floración general",
-     "Flor abierta, pétalos recurvados hacia atrás exponiendo las anteras («umbrella bloom»)."),
-    (69, "Fin de floración (transición)", "Caída total de corolas, estilo visible remanente."),
-    (71, "UP5 · Cabeza de alfiler", "Cuajado temprano: fruto verde diminuto con resto del pistilo («pinhead»)."),
-    (73, "UP6 · Inicio de cuaja", "El fruto empieza a engrosar."),
-    (75, "UP7 · Arveja", "El fruto alcanza unos 7 mm de diámetro (tamaño arveja, «pea size»)."),
-    (79, "UP8 · Fruta chica", "El fruto alcanza volumen (7 a 12,5 mm), verde amarillento."),
-    (81, "UP9 · Fruta grande · inicio de coloración",
-     "Más de 12,5 mm; epidermis amarilla con primeros tonos rojizos («blush»)."),
-    (85, "UP9 · Coloración avanzada", "Más de la mitad de la epidermis roja."),
-    (89, "UP10 · Madurez de cosecha", "Baya de tamaño final, rojo cranberry entero."),
-    (93, "UP11 · Aborto", "Frutos secos y arrugados (aborto)."),
-    (99, "UP12 · Pedúnculo sin nada", "Caída del fruto o de la flor dejando solo el pedicelo."),
-])
-MACRO_STAGES_CRAN: dict[int, str] = {
-    0: "Desarrollo de yemas",
-    1: "Desarrollo de las hojas",
-    2: "Desarrollo de estolones (runners)",
-    5: "Desarrollo del meristemo floral",
-    6: "Floración",
-    7: "Desarrollo del fruto",
-    8: "Maduración",
-    9: "Senescencia",
-}
-MACRO_COLORS_CRAN: dict[int, str] = {
-    0: "#8B7355", 1: "#9BAF6A", 2: "#7E9B52", 5: "#D9B8A8", 6: "#F2DDE3",
-    7: "#A6B86A", 8: "#B0263E", 9: "#8A6A4A",
-}
-
-# Semana de muestreo (semana 1 = 7 de septiembre) -> BBCH esperado, hemisferio sur.
-EXPECTED_BLUE: list[tuple[int, int]] = [
-    (1, 51), (3, 61), (5, 65), (8, 69), (9, 71), (14, 79), (15, 81), (20, 89), (30, 89),
-]
-EXPECTED_CRAN: list[tuple[int, int]] = [
-    (1, 7), (6, 11), (10, 51), (12, 55), (15, 61), (17, 65), (20, 69), (21, 71), (24, 75),
-    (27, 79), (29, 81), (32, 89), (38, 93),
-]
-
-# Escala del cultivo activo (crops.activate -> set_crop). Por defecto, frambuesa.
-BBCH_SCALE = BBCH_RUBUS
-MACRO_STAGES = MACRO_STAGES_RUBUS
-MACRO_COLORS = MACRO_COLORS_RUBUS
 
 
 def macro_of(code: int | None) -> int | None:
@@ -398,7 +270,7 @@ def bbch_label(code: int | None, catalog: dict[int, str] | None = None) -> str:
     """'BBCH 65: Plena floración'."""
     if code is None:
         return ""
-    names = catalog or {c: n for c, n, _d, _k in BBCH_SCALE}
+    names = catalog or {c: n for c, n, _d, _k in BBCH_RUBUS}
     name = names.get(int(code))
     if name is None:
         # Código no catalogado: devolver el estadio principal.
@@ -587,7 +459,7 @@ EXPECTED_CALENDAR: list[tuple[int, int]] = [
 
 
 def expected_bbch_for_week(week_number: int) -> float:
-    pts = _expected
+    pts = EXPECTED_CALENDAR
     if week_number <= pts[0][0]:
         return float(pts[0][1])
     if week_number >= pts[-1][0]:
@@ -719,24 +591,3 @@ def photo_basename(variety: dict, week_start, kind: str, seq: int = 1, legacy: b
     base = f"{date}-{variety_tag(variety.get('cultivar') or variety.get('name', ''), variety.get('code'))}" \
            f"{location_tag(variety)}{PHOTO_KIND_LETTER.get(kind, 'X')}"
     return base if seq <= 1 else f"{base}-{seq}"
-
-
-_expected = EXPECTED_CALENDAR
-_RUBUS_FIXES = (set(BBCH_REMOVED), dict(BBCH_RENAMED))
-
-
-def set_crop(crop_id: str) -> None:
-    """Escala, estadios, colores y calendario esperado del cultivo (crops.activate)."""
-    global BBCH_SCALE, MACRO_STAGES, MACRO_COLORS, _expected, BBCH_REMOVED, BBCH_RENAMED
-    if crop_id == "arandano":
-        BBCH_SCALE, MACRO_STAGES, MACRO_COLORS, _expected = (
-            BBCH_BLUE, MACRO_STAGES_BLUE, MACRO_COLORS_BLUE, EXPECTED_BLUE)
-        BBCH_REMOVED, BBCH_RENAMED = set(), {}
-    elif crop_id == "cranberry":
-        BBCH_SCALE, MACRO_STAGES, MACRO_COLORS, _expected = (
-            BBCH_CRAN, MACRO_STAGES_CRAN, MACRO_COLORS_CRAN, EXPECTED_CRAN)
-        BBCH_REMOVED, BBCH_RENAMED = set(), {}
-    else:
-        BBCH_SCALE, MACRO_STAGES, MACRO_COLORS, _expected = (
-            BBCH_RUBUS, MACRO_STAGES_RUBUS, MACRO_COLORS_RUBUS, EXPECTED_CALENDAR)
-        BBCH_REMOVED, BBCH_RENAMED = set(_RUBUS_FIXES[0]), dict(_RUBUS_FIXES[1])

@@ -87,7 +87,7 @@ def main() -> None:
         for w in db.list_weeks(args.season):
             n = w["week_number"]
             code = int(round(ph.expected_bbch_for_week(n + offset * 0.6)))
-            code = min(ph.BBCH_SCALE, key=lambda s: abs(s[0] - code))[0]
+            code = min(ph.BBCH_RUBUS, key=lambda s: abs(s[0] - code))[0]
             obs = db.get_or_create_observation(v["id"], w["id"])
             for kind in ("canopy", "detail"):
                 path = os.path.join(photo_dir, f"v{v['id']}_s{n:02d}_{kind}.jpg")

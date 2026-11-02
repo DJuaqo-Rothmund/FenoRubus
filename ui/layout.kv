@@ -70,12 +70,12 @@
             pos: self.x, self.y - dp(3)
             size: self.size
         Color:
-            rgba: c(theme.SURFACE, .70) if self.state == "down" else c(theme.SURFACE, .86)
+            rgba: (1, 1, 1, .70) if self.state == "down" else (1, 1, 1, .86)
         Ellipse:
             pos: self.pos
             size: self.size
         Color:
-            rgba: c(theme.SURFACE, .95)
+            rgba: 1, 1, 1, .95
         Line:
             ellipse: self.x, self.y, self.width, self.height
             width: dp(1.2)
@@ -111,7 +111,7 @@
     color: c(theme.WARN) if self.warn else c(theme.LEAF_DARK)
     canvas.before:
         Color:
-            rgba: c(theme.SURFACE, .70) if self.state == "down" else c(theme.SURFACE, .86)
+            rgba: (1, 1, 1, .70) if self.state == "down" else (1, 1, 1, .86)
         RoundedRectangle:
             pos: self.pos
             size: self.size
@@ -124,7 +124,7 @@
     padding: dp(12), dp(6)
     spacing: dp(12)
     radius: [dp(14)]
-    md_bg_color: c(theme.SURFACE, .7)
+    md_bg_color: 1, 1, 1, .7
     line_color: c(theme.LINE)
     Widget:
         size_hint: None, None
@@ -180,7 +180,7 @@
     padding: dp(12), dp(4), dp(8), dp(4)
     spacing: dp(10)
     radius: [dp(14)]
-    md_bg_color: root.accent if root.expanded else c(theme.SURFACE, .7)
+    md_bg_color: root.accent if root.expanded else (1, 1, 1, .7)
     line_color: c(theme.LINE)
     Widget:
         size_hint: None, None
@@ -228,7 +228,7 @@
     padding: dp(10), dp(10), dp(12), dp(10)
     spacing: dp(12)
     radius: [dp(12)]
-    md_bg_color: c(theme.BERRY, .12) if root.current else c(theme.SURFACE, .78)
+    md_bg_color: c(theme.BERRY, .12) if root.current else (1, 1, 1, .78)
     line_color: c(theme.BERRY) if root.current else c(theme.LINE)
     MDLabel:
         text: root.code
@@ -283,7 +283,7 @@
             size: self.size
             radius: [dp(10)]
         Color:
-            rgba: c(theme.SURFACE, .7)
+            rgba: 1, 1, 1, .7
         Line:
             rounded_rectangle: (self.x, self.y, self.width, self.height, dp(10))
             width: dp(.8)
@@ -301,7 +301,7 @@
     text_color: c(theme.LEAF_DARK)
     icon_color: c(theme.LEAF_DARK)
     line_color: c(theme.LINE)
-    md_bg_color: c(theme.SURFACE, .45)
+    md_bg_color: 1, 1, 1, .45
     rounded_button: True
     size_hint_x: 1
 
@@ -310,11 +310,11 @@
     line_color_normal: c(theme.LINE)
     line_color_focus: c(theme.BERRY)
     hint_text_color_focus: c(theme.BERRY)
-    fill_color_normal: c(theme.SURFACE, .5)
+    fill_color_normal: 1, 1, 1, .5
 
 <TopBar>:
     elevation: 0
-    md_bg_color: c(theme.SURFACE, .5)
+    md_bg_color: 1, 1, 1, .5
 
 # ---------------------------------------------------------------------------
 # Barra de navegación inferior (azulejos de vidrio con iconos propios)
@@ -331,13 +331,13 @@
             size: dp(52), dp(52)
             canvas.before:
                 Color:
-                    rgba: c(theme.BERRY_SOFT, .95) if root.active else c(theme.NAV_TILE, theme.nav_tile_alpha())
+                    rgba: c(theme.BERRY_SOFT, .95) if root.active else (1, 1, 1, .55)
                 RoundedRectangle:
                     pos: self.pos
                     size: self.size
                     radius: [dp(16)]
                 Color:
-                    rgba: c(theme.BERRY_LIGHT, .9) if root.active else c(theme.SURFACE, .95)
+                    rgba: c(theme.BERRY_LIGHT, .9) if root.active else (1, 1, 1, .95)
                 Line:
                     rounded_rectangle: (self.x, self.y, self.width, self.height, dp(16))
                     width: dp(1.2)
@@ -363,13 +363,13 @@
     spacing: dp(6)
     canvas.before:
         Color:
-            rgba: c(theme.SURFACE, .62)
+            rgba: 1, 1, 1, .62
         RoundedRectangle:
             pos: self.x + dp(10), self.y + dp(8)
             size: self.width - dp(20), self.height - dp(12)
             radius: [dp(28)]
         Color:
-            rgba: c(theme.SURFACE, .95)
+            rgba: 1, 1, 1, .95
         Line:
             rounded_rectangle: (self.x + dp(10), self.y + dp(8), self.width - dp(20), self.height - dp(12), dp(28))
             width: dp(1.1)
@@ -377,138 +377,6 @@
 # ---------------------------------------------------------------------------
 # Pantalla de inicio
 # ---------------------------------------------------------------------------
-# ---------------------------------------------------------------------------
-# Pantalla de cultivos: lo primero al abrir la app (y la cuenta de Google, una para todos)
-# ---------------------------------------------------------------------------
-<CropCard>:
-    orientation: "horizontal"
-    size_hint_y: None
-    height: dp(96)
-    padding: dp(12), dp(8), dp(14), dp(8)
-    spacing: dp(14)
-    radius: [dp(26)]
-    md_bg_color: c(theme.GLASS_STRONG)
-    line_color: c(root.accent, .55)
-    Image:
-        source: root.logo
-        size_hint: None, None
-        size: dp(78), dp(78)
-        pos_hint: {"center_y": .5}
-        mipmap: True
-        fit_mode: "contain"
-    MDBoxLayout:
-        orientation: "vertical"
-        pos_hint: {"center_y": .5}
-        adaptive_height: True
-        spacing: dp(2)
-        MDLabel:
-            text: root.app_name
-            font_style: "H6"
-            bold: True
-            adaptive_height: True
-            theme_text_color: "Custom"
-            text_color: c(root.accent)
-        MDLabel:
-            text: root.crop_name
-            font_style: "Subtitle2"
-            adaptive_height: True
-            theme_text_color: "Custom"
-            text_color: c(theme.INK)
-        MDLabel:
-            text: "[i]" + root.species + "[/i]"
-            markup: True
-            font_style: "Caption"
-            adaptive_height: True
-            theme_text_color: "Custom"
-            text_color: c(theme.MUTED)
-    MDIcon:
-        icon: "chevron-right"
-        size_hint: None, None
-        size: dp(28), dp(28)
-        pos_hint: {"center_y": .5}
-        theme_text_color: "Custom"
-        text_color: c(root.accent)
-
-<CropScreen>:
-    md_bg_color: 0, 0, 0, 0
-    MDBoxLayout:
-        orientation: "vertical"
-        padding: dp(20), dp(26), dp(20), dp(18)
-        spacing: dp(10)
-        Image:
-            source: theme.APP_LOGO
-            fit_mode: "contain"
-            mipmap: True
-            size_hint_y: None
-            height: dp(132)
-        MDLabel:
-            text: "App Fenología"
-            halign: "center"
-            font_style: "H5"
-            bold: True
-            adaptive_height: True
-            theme_text_color: "Custom"
-            text_color: c(theme.LEAF_DARK)
-        MDLabel:
-            text: "Elija el cultivo"
-            halign: "center"
-            font_style: "Body2"
-            adaptive_height: True
-            theme_text_color: "Custom"
-            text_color: c(theme.MUTED)
-        Widget:
-            size_hint_y: None
-            height: dp(4)
-        MDBoxLayout:
-            id: cards
-            orientation: "vertical"
-            adaptive_height: True
-            spacing: dp(12)
-        Widget:
-        MDLabel:
-            id: account
-            halign: "center"
-            font_style: "Caption"
-            adaptive_height: True
-            theme_text_color: "Custom"
-            text_color: c(theme.MUTED)
-        GoogleButton:
-            id: google_btn
-            on_release: root.connect_google()
-        MDLabel:
-            text: "By DJuaqo, potenciado con Claude AI"
-            halign: "center"
-            font_style: "Caption"
-            adaptive_height: True
-            theme_text_color: "Custom"
-            text_color: c(theme.MUTED, .8)
-    MDIconButton:
-        icon: "palette-outline"
-        icon_size: "26sp"
-        theme_icon_color: "Custom"
-        icon_color: c(theme.LEAF_DARK, .8)
-        pos_hint: {"right": .99, "top": .99}
-        on_release: app.pick_style()
-
-<LaunchScreen>:
-    md_bg_color: c(theme.SPLASH_BG)
-    Image:
-        source: theme.APP_LOGO
-        fit_mode: "contain"
-        mipmap: True
-        size_hint: .6, .3
-        pos_hint: {"center_x": .5, "center_y": .56}
-    MDLabel:
-        text: "App Fenología"
-        halign: "center"
-        font_style: "H5"
-        bold: True
-        theme_text_color: "Custom"
-        text_color: c(theme.LEAF_DARK)
-        size_hint: 1, None
-        height: dp(40)
-        pos_hint: {"center_x": .5, "center_y": .36}
-
 <SplashScreen>:
     md_bg_color: c(theme.SPLASH_BG)
     FloatLayout:
@@ -595,7 +463,7 @@
     width: dp(26) + lbl.texture_size[0]
     canvas.before:
         Color:
-            rgba: c(theme.SURFACE, .78)
+            rgba: 1, 1, 1, .78
         RoundedRectangle:
             pos: self.pos
             size: self.size
@@ -701,7 +569,7 @@
                 opacity: 1 if week_lbl.text else 0
                 canvas.before:
                     Color:
-                        rgba: c(theme.SURFACE, .8)
+                        rgba: 1, 1, 1, .8
                     RoundedRectangle:
                         pos: self.pos
                         size: self.size
@@ -751,7 +619,7 @@
                 source: theme.START_ID
                 bubble: theme.BLOB_ID
                 label: "I+D"
-                color: theme.on_bg("#AB1D59")
+                color: c("#AB1D59")
                 diameter: dp(112)
                 on_release: root.open_profile("id")
             StartIcon:
@@ -759,7 +627,7 @@
                 source: theme.START_PREDIO
                 bubble: theme.BLOB_PREDIO
                 label: "Predio"
-                color: theme.on_bg("#2F5643")
+                color: c("#2F5643")
                 diameter: dp(112)
                 on_release: root.open_profile("predio")
         MDBoxLayout:
@@ -773,7 +641,7 @@
                 bubble: theme.BLOB_AI
                 glow: theme.AI_GLOW
                 label: "Entrenador IA"
-                color: theme.on_bg("#3A5AE6")
+                color: c("#3A5AE6")
                 diameter: dp(112)
                 on_release: root.open_ai()
             StartIcon:
@@ -781,7 +649,7 @@
                 source: theme.START_NOTEBOOK
                 bubble: theme.BLOB_NOTEBOOK
                 label: "Cuaderno de campo"
-                color: theme.on_bg("#6B4423")
+                color: c("#6B4423")
                 diameter: dp(112)
                 on_release: app.open_notebook()
         Widget:
@@ -802,13 +670,13 @@
         Widget:
             size_hint_y: None
             height: dp(4)
-        # La cuenta de Google se conecta en la pantalla de cultivos (una para todos).
-        GhostButton:
-            id: crops_btn
-            icon: "fruit-grapes-outline"
-            text: "Cambiar de cultivo"
-            height: dp(46)
-            on_release: app.open_crops()
+        GoogleButton:
+            id: google_btn
+            on_release: root.connect_google()
+        PrimaryButton:
+            text: "Continuar de forma local"
+            height: dp(50)
+            on_release: root.continue_local()
     # Ajustes generales: solo el engranaje, arriba a la izquierda (el post-it va a la derecha)
     MDIconButton:
         id: gear
@@ -1063,7 +931,7 @@
     height: dp(36)
     padding: dp(16), 0, dp(12), 0
     spacing: dp(8)
-    md_bg_color: c(theme.FILL_DARK)
+    md_bg_color: c(theme.LEAF_DARK)
     radius: [0]
     line_color: 0, 0, 0, 0
     MDIcon:
@@ -1370,7 +1238,7 @@
         text_color: 1, 1, 1, 1
         canvas.before:
             Color:
-                rgba: c(theme.FILL_DARK) if root.profile == "id" else c(theme.BERRY)
+                rgba: c(theme.LEAF_DARK) if root.profile == "id" else c(theme.BERRY)
             RoundedRectangle:
                 pos: self.pos
                 size: self.size
@@ -1430,7 +1298,7 @@
                     pos: self.x - dp(6), self.y - dp(6)
                     size: self.width + dp(12), self.height + dp(12)
                 Color:
-                    rgba: c(theme.FILL_DARK) if root.profile == "id" else c(theme.BERRY)
+                    rgba: c(theme.LEAF_DARK) if root.profile == "id" else c(theme.BERRY)
                 Ellipse:
                     pos: self.pos
                     size: self.size
@@ -1803,17 +1671,6 @@
             spacing: dp(12)
             PaperCard:
                 SectionLabel:
-                    text: "ESTILO DE LA APP"
-                Body:
-                    id: style_text
-                GhostButton:
-                    icon: "palette-outline"
-                    text: "Cambiar estilo"
-                    on_release: app.pick_style()
-                Muted:
-                    text: "Vale para todos los cultivos. Al cambiarlo, la app se vuelve a dibujar (los datos no cambian)."
-            PaperCard:
-                SectionLabel:
                     text: "RECORDATORIO DE MUESTREO"
                 MDBoxLayout:
                     adaptive_height: True
@@ -1958,7 +1815,7 @@
                         text: "Desconectar"
                         on_release: root.drive_disconnect()
                 Muted:
-                    text: "Cada foto nueva queda en el teléfono y además se sube a «Mi unidad › App Fenología › (PhenoRubus, PhenoBlue o PhenoCran)», por ensayo y semana. Sin señal, se guarda en cola y se sube sola al volver la conexión."
+                    text: "Cada foto nueva queda en el teléfono y además se sube a «Mi unidad › PhenoRubus · Imágenes de Fenología», por ensayo y semana. Sin señal, se guarda en cola y se sube sola al volver la conexión."
             PaperCard:
                 SectionLabel:
                     text: "INTELIGENCIA ARTIFICIAL (EDGE AI)"
@@ -2001,7 +1858,7 @@
     orientation: "vertical"
     padding: dp(12), dp(10)
     radius: [dp(18)]
-    md_bg_color: c(theme.SURFACE, .6)
+    md_bg_color: 1, 1, 1, .6
     size_hint_y: None
     height: dp(78)
     value: ""
@@ -2039,7 +1896,7 @@
     orientation: "vertical"
     padding: dp(6), dp(8)
     radius: [dp(16)]
-    md_bg_color: c(theme.SURFACE, .6)
+    md_bg_color: 1, 1, 1, .6
     icon: "circle"
     caption: ""
     text: "—"
@@ -2342,7 +2199,7 @@
     size: dp(44), dp(44)
     padding: dp(2)
     radius: [dp(9)]
-    md_bg_color: c(theme.SURFACE, .6)
+    md_bg_color: 1, 1, 1, .6
     line_color: c(theme.BERRY) if self.primary else c(theme.GLASS_EDGE)
 
 <ObservationScreen>:
@@ -3421,7 +3278,7 @@
     text_color: c(theme.LEAF_DARK)
     canvas.before:
         Color:
-            rgba: c(theme.SURFACE, .88)
+            rgba: 1, 1, 1, .88
         Ellipse:
             pos: self.pos
             size: self.size

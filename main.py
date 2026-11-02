@@ -83,8 +83,7 @@ theme.install_palette()  # antes de cargar widgets KivyMD con color
 from android_bridge import create_media, make_thumbnail, request_runtime_permissions  # noqa: E402
 from notifications import ReminderManager  # noqa: E402
 from platform_utils import data_subdir, get_data_dir, resource_path  # noqa: E402
-from ui.screens import (AILabScreen, CropScreen, HomeScreen, LaunchScreen,  # noqa: E402
-                        MeasureScreen, ObservationScreen,
+from ui.screens import (AILabScreen, HomeScreen, MeasureScreen, ObservationScreen,  # noqa: E402
                         PinForm, SectorsScreen, SettingsScreen, SplashScreen, StartScreen, TimelineScreen,
                         VarietyScreen,
                         WorkspacesScreen, form_dialog)
@@ -107,13 +106,6 @@ class FenoRubusApp(MDApp):
         self.safe_mode = crashguard.previous_failure() is not None
         import native_input
         native_input.install()   # Android: campos de texto con el teclado real del teléfono
-        # Cultivo (PhenoRubus, PhenoBlue o PhenoCran) y estilo: los últimos elegidos. Al abrir
-        # se muestra igual la pantalla de cultivos; el último queda precargado detrás.
-        import crops
-        from platform_utils import global_get
-        crops.activate(global_get("crop", crops.DEFAULT))
-        theme.configure(crops.current().id, global_get("style", theme.DEFAULT_STYLE))
-        self._loaded = (crops.current().id, theme.style)
         theme.apply(self.theme_cls)
         theme.speed_up_theme_bindings()   # crear pantallas no se vuelve más lento con el uso
         Clock.schedule_interval(lambda *_: theme.purge_theme_observers(self.theme_cls), 20)
@@ -139,126 +131,17 @@ class FenoRubusApp(MDApp):
         # Cambio de pantalla instantáneo: un fundido dibuja las DOS pantallas en texturas
         # intermedias en cada cuadro, lo más costoso para GPUs modestas.
         self.sm = MDScreenManager(transition=NoTransition())
-        # Primero solo la pantalla de apertura (los tres frutos, igual a la de Android): el
-        # primer cuadro aparece de inmediato; la de cultivos se arma en on_start.
-        self.sm.add_widget(LaunchScreen(name="launch"))
+        # Primero solo la pantalla de inicio (logo): el primer cuadro aparece de inmediato
+        # y la pantalla principal se construye detrás, en on_start.
+        self.sm.add_widget(SplashScreen(name="splash"))
         self.home = None
         Window.bind(on_keyboard=self._on_keyboard)
         Window.clearcolor = theme.c(theme.SPLASH_BG)  # sin destello entre presplash e inicio
-        # Fondo difuminado (color de la fruta o del estilo) detrás de las pantallas translúcidas.
+        # Fondo difuminado verde/frambuesa detrás de todas las pantallas translúcidas.
         root = FloatLayout()
-        self._bg = Image(source=theme.BACKGROUND, fit_mode="fill")
-        root.add_widget(self._bg)
+        root.add_widget(Image(source=theme.BACKGROUND, fit_mode="fill"))
         root.add_widget(self.sm)
         return root
-
-    # ------------------------------------------------------- cultivos y estilos
-    def _load_module(self, crop_id: str) -> None:
-        """Abre los datos del cultivo y rehace la interfaz con sus colores (las pantallas
-        se vuelven a construir: precarga en _preload_steps)."""
-        import crops
-        # Las bases del cultivo anterior no se cierran a la fuerza: una subida a Drive en
-        # curso podría estar usándolas (se liberan solas).
-        self._dbs = {}
-        for name in ("classifier", "reports", "drive", "pin", "sync"):
-            self.__dict__.pop(name, None)
-        for name in list(self.sm.screen_names):
-            if name not in ("crops", "launch", "splash"):
-                self.sm.remove_widget(self.sm.get_screen(name))
-        self.home = None
-        self._history = []
-        crops.activate(crop_id)
-        theme.configure(crop_id, None)
-        theme.apply(self.theme_cls)
-        self._bg.source = theme.BACKGROUND
-        Window.clearcolor = theme.c(theme.SPLASH_BG)
-        self.workspaces = Workspaces(get_data_dir())
-        self.workspace = self.workspaces.last()
-        self.db = self.open_db(self.workspace)
-        self.reminders = ReminderManager(self.db)
-        self.week = self.db.current_week()
-        self.season = self.week["season"]
-        self._loaded = (crop_id, theme.style)
-        self._preloaded = False
-        self._preload = self._preload_steps()
-
-    def open_crops(self):
-        """Pantalla de cultivos (desde el inicio de un módulo o con «atrás»)."""
-        self._history = []
-        if not self.sm.has_screen("crops"):
-            self.sm.add_widget(CropScreen(name="crops"))
-        self.sm.current = "crops"
-
-    def choose_crop(self, crop_id: str) -> None:
-        """Entra al módulo del cultivo: su pantalla de carga (con su logo animado) y luego
-        su inicio. Si es otro cultivo, sus datos e interfaz se preparan detrás."""
-        import crops
-        from platform_utils import global_set
-        global_set("crop", crop_id)
-        if self._loaded != (crop_id, theme.style):
-            self._load_module(crop_id)
-        if self.sm.has_screen("splash"):
-            self.sm.remove_widget(self.sm.get_screen("splash"))
-        splash = SplashScreen(name="splash")
-        self.sm.add_widget(splash)
-        self.sm.current = "splash"
-        splash.ids.logo.start(0.0)
-        self._t_enter = time.monotonic()
-        self.title = crops.current().app
-        Clock.schedule_once(self._enter_next, 0)
-
-    def _enter_next(self, *_):
-        """Un paso de precarga por cuadro mientras se ve el logo; luego, el inicio."""
-        if self._preload and time.monotonic() - self._t_enter < self.SPLASH_MAX_S:
-            self._run_preload_step()
-            Clock.schedule_once(self._enter_next, 0)
-            return
-        if self.home is None:          # se agotó el tiempo: lo mínimo para entrar
-            self.home = HomeScreen(name="home")
-            self.sm.add_widget(self.home)
-            self.home.refresh_current()
-        wait = self.SPLASH_MIN_S - (time.monotonic() - self._t_enter)
-        Clock.schedule_once(self._enter_module, max(0, wait))
-
-    def _enter_module(self, *_):
-        self.sm.get_screen("splash").ids.logo.stop()
-        self.sm.transition = FadeTransition(duration=0.25)
-        self.open_start()
-        Clock.schedule_once(lambda *_: setattr(self.sm, "transition", NoTransition()), 0.3)
-        Clock.schedule_once(lambda *_: self.sm.has_screen("splash")
-                            and self.sm.remove_widget(self.sm.get_screen("splash")), 0.6)
-        Clock.schedule_once(lambda *_: _gc_freeze(), 1)
-        self._after_enter()
-
-    def pick_style(self):
-        """Ajustes › Estilo de la app (también en la pantalla de cultivos)."""
-        from ui.screens import pick_dialog
-        opts = []
-        for key, (name, desc) in theme.STYLES.items():
-            mark = "✓ " if key == theme.style else ""
-            opts.append((mark + name, desc, lambda key=key: self.set_style(key)))
-        pick_dialog("Estilo de la app", opts)
-
-    def set_style(self, style: str) -> None:
-        from platform_utils import global_set
-        if style == theme.style:
-            return
-        global_set("style", style)
-        inside = self.sm.current not in ("crops", "launch")
-        theme.configure(None, style)
-        theme.apply(self.theme_cls)
-        self._bg.source = theme.BACKGROUND
-        Window.clearcolor = theme.c(theme.SPLASH_BG)
-        if self.sm.has_screen("crops"):
-            self.sm.remove_widget(self.sm.get_screen("crops"))
-        self.sm.add_widget(CropScreen(name="crops"))
-        if inside:
-            import crops
-            self.choose_crop(crops.current().id)     # se rehace el módulo con el estilo nuevo
-        else:
-            self._load_module(theme.crop_id)
-            self.sm.current = "crops"
-            Clock.schedule_once(self._preload_idle, 0.5)
 
     # --------------------------------------- carga diferida (arranque rápido)
     @cached_property
@@ -541,48 +424,25 @@ class FenoRubusApp(MDApp):
         return self._screen(SettingsScreen, "settings")
 
     # --------------------------------------------- apertura y precarga
-    SPLASH_MIN_S = 1.8    # el logo completa su entrada aunque la carga sea instantánea
+    SPLASH_MIN_S = 1.5    # el logo completa su entrada aunque la carga sea instantánea
     SPLASH_MAX_S = 12.0   # pase lo que pase, a los 12 s se entra a la app
+    SPLASH_TAIL_S = .45   # logo de Kivy a la vista antes del fundido al inicio
 
     def on_start(self):
-        """La pantalla de carga de Android (los tres frutos) se quita apenas está lista la
-        pantalla de cultivos. El módulo elegido la última vez se precarga detrás, de a un
-        paso por cuadro, para entrar al instante si se vuelve a elegir."""
+        """Mientras corre la animación del logo (nativa de Android encima y la de Kivy
+        detrás, en el mismo cuadro) se arma y precarga la app de a un paso por cuadro.
+        Los tirones de cada paso no se ven: la animación nativa la dibuja Android en su
+        propio hilo. Al terminar, se quita la nativa y sigue la de Kivy hasta el inicio."""
         self._t_start = time.monotonic()
         # Seguro: pase lo que pase, la pantalla de carga nativa no tapa la app para siempre.
         Clock.schedule_once(lambda *_: splash_native.remove(), self.SPLASH_MAX_S + 3)
+        logo = self.sm.get_screen("splash").ids.logo
+        logo.start(splash_native.lottie_time() or 0.0)
+        # Lo que no toca la interfaz (numpy de la IA, Jinja2 de los informes) se importa
+        # en paralelo.
         self.workers.submit(self._preload_modules)
-        self._preloaded = False
         self._preload = self._preload_steps()
-        self.sm.add_widget(CropScreen(name="crops"))
-        Clock.schedule_once(self._show_crops, 0)
-
-    def _show_crops(self, *_):
-        _step("cultivos")
-        splash_native.remove()
-        self.sm.transition = FadeTransition(duration=0.25)
-        self.sm.current = "crops"
-        Clock.schedule_once(lambda *_: setattr(self.sm, "transition", NoTransition()), 0.3)
-        Clock.schedule_once(lambda *_: self.sm.has_screen("launch")
-                            and self.sm.remove_widget(self.sm.get_screen("launch")), 0.6)
-        Clock.schedule_once(lambda *_: self._after_launch(), 0.4)
-        Clock.schedule_once(self._preload_idle, 0.8)
-
-    def _run_preload_step(self):
-        step = self._preload.pop(0)
-        _step(f"precarga {len(self._preload)}")
-        try:
-            step()
-        except Exception as exc:  # noqa: BLE001 (la precarga nunca debe cerrar la app)
-            print("preload:", exc)
-        if not self._preload:
-            self._preloaded = True
-
-    def _preload_idle(self, *_):
-        """Precarga del módulo mientras se ve la pantalla de cultivos (un paso cada tanto)."""
-        if self._preload and self.sm.current == "crops":
-            self._run_preload_step()
-            Clock.schedule_once(self._preload_idle, 0.05)
+        Clock.schedule_once(self._preload_next, 0)
 
     def _preload_steps(self):
         """Pasos de la precarga, del más necesario al menos (uno por cuadro)."""
@@ -618,31 +478,66 @@ class FenoRubusApp(MDApp):
                     except Exception:  # noqa: BLE001
                         pass
 
-    def _after_launch(self):
-        """Una vez, al ver la pantalla de cultivos."""
+    def _sync_logo(self) -> bool:
+        t = splash_native.lottie_time()
+        if t is not None:
+            self.sm.get_screen("splash").ids.logo.sync(t)
+        return t is not None
+
+    def _preload_next(self, *_):
+        self._sync_logo()
+        late = time.monotonic() - self._t_start > self.SPLASH_MAX_S
+        if self._preload and not late:
+            step = self._preload.pop(0)
+            _step(f"precarga {len(self._preload)}")
+            try:
+                step()
+            except Exception as exc:  # noqa: BLE001 (la precarga nunca debe cerrar la app)
+                print("preload:", exc)
+            Clock.schedule_once(self._preload_next, 0)
+            return
+        if self.home is None:          # se agotó el tiempo: lo mínimo para entrar
+            self.home = HomeScreen(name="home")
+            self.sm.add_widget(self.home)
+            self.home.refresh_current()
+        self._reveal_logo()
+
+    def _reveal_logo(self, *_):
+        """Quita la animación nativa justo cuando el logo de Kivy va en su mismo cuadro."""
+        logo = self.sm.get_screen("splash").ids.logo
+        if logo.t < self.SPLASH_MIN_S and time.monotonic() - self._t_start < self.SPLASH_MAX_S:
+            self._sync_logo()
+            Clock.schedule_once(self._reveal_logo, 0)
+            return
+        # El cuadro de Kivy ya quedó igual al nativo: se quita en el próximo cuadro. Siempre
+        # se quita (también la imagen fija de respaldo, si Android no pudo mostrar la
+        # animación): ni Kivy ni el sistema la quitan solos (ver splash_native.hold).
+        self._sync_logo()
+        Clock.schedule_once(lambda *_: splash_native.remove(), 0)
+        Clock.schedule_once(self._leave_splash, self.SPLASH_TAIL_S)
+
+    def _leave_splash(self, *_):
+        _step("inicio")
+        # Lo cargado al abrir ya no lo revisa el recolector de basura: sin esto, cada
+        # tanto una revisión completa de ~900 mil objetos congelaba la app 1-3 s.
+        Clock.schedule_once(lambda *_: _gc_freeze(), 1)
+        self.sm.get_screen("splash").ids.logo.stop()
+        self.sm.transition = FadeTransition(duration=0.25)   # solo logo -> inicio
+        self.start   # la pantalla de inicio es siempre lo primero al abrir la app
+        self.sm.current = "start"
+        Clock.schedule_once(lambda *_: setattr(self.sm, "transition", NoTransition()), 0.3)
+        # Libera la pantalla de inicio (y su textura) cuando termina el fundido.
+        Clock.schedule_once(lambda *_: self.sm.remove_widget(self.sm.get_screen("splash")), 0.6)
         _step("permisos")
         request_runtime_permissions()
+        _step("recordatorios")
+        self.reminders.apply()
+        Clock.schedule_interval(lambda *_: self._check_reminder(), 60)
         if self.safe_mode:
             # La apertura anterior se cerró a medias: esta vez nada automático en segundo
             # plano (Drive, sincronización, renombres) y se muestra dónde se quedó.
             Clock.schedule_once(lambda *_: self._show_safe_mode(), 1.5)
             Clock.schedule_once(lambda *_: self._finish_start(), 20)
-            return
-        # La apertura termina cuando acabó la primera sincronización (o a los 45 s).
-        Clock.schedule_once(lambda *_: self._finish_start(), 45)
-
-    def _after_enter(self):
-        """Cada vez que se entra a un módulo (cultivo)."""
-        _step("inicio")
-        _step("recordatorios")
-        self.reminders.apply()
-        if not getattr(self, "_timers", False):
-            self._timers = True
-            Clock.schedule_interval(lambda *_: self._check_reminder(), 60)
-            if not self.safe_mode:
-                # Sincronización con el PC: cada 10 minutos (la del módulo abierto).
-                Clock.schedule_interval(lambda *_: self.run_sync(), 600)
-        if self.safe_mode:
             return
         # Nombres de foto «ddmmaaaa-…» (hasta la 1.1.30) -> «aaaammdd-…»: archivos de la app,
         # galería del teléfono y (al respaldar) Google Drive.
@@ -651,7 +546,11 @@ class FenoRubusApp(MDApp):
         # y respalda la base en Drive una vez al día (las fotos ya se suben solas).
         if self.db.get_setting("drive_enabled", False):
             Clock.schedule_once(lambda *_: self.workers.submit(self._drive_daily), 6)
+        # Sincronización con el PC: al abrir y luego cada 10 minutos.
         Clock.schedule_once(lambda *_: self.run_sync(), 10)
+        Clock.schedule_interval(lambda *_: self.run_sync(), 600)
+        # La apertura termina cuando acabó la primera sincronización (o a los 45 s).
+        Clock.schedule_once(lambda *_: self._finish_start(), 45)
 
     def _finish_start(self):
         import crashguard
@@ -755,12 +654,7 @@ class FenoRubusApp(MDApp):
             if self.sm.current == "home":   # desde el inicio de un ensayo -> pantalla de inicio
                 self.open_start()
                 return True
-            if self.sm.current == "start":  # del inicio del módulo -> pantalla de cultivos
-                self.open_crops()
-                return True
-            if self.sm.current in ("splash", "launch"):
-                return True
-            if self.sm.current != "crops":
+            if self.sm.current not in ("home", "start"):
                 self.back()
                 return True
             if platform == "android":
@@ -820,7 +714,7 @@ class FenoRubusApp(MDApp):
     # ---------------------------------------------------------- utilidades
     def toast(self, text: str):
         MDSnackbar(MDLabel(text=text, theme_text_color="Custom", text_color=(1, 1, 1, 1)),
-                   md_bg_color=theme.c(theme.FILL_DARK, .94), radius=[dp(18)] * 4,
+                   md_bg_color=theme.c(theme.LEAF_DARK, .94), radius=[dp(18)] * 4,
                    y=dp(108), pos_hint={"center_x": .5}, size_hint_x=.9, duration=2.5).open()
 
     def _thumb_dest(self, path: str, size: int) -> str | None:
@@ -898,7 +792,7 @@ class FenoRubusApp(MDApp):
             ("WhatsApp", "Enviar como documento", lambda: self.share_file(path, target="whatsapp")),
             ("Correo electrónico", mail_note, lambda: self.send_email(path)),
             ("Guardar en el teléfono", "Descargas › PhenoRubus", lambda: self.save_file(path)),
-            ("Guardar en Google Drive", "Carpeta de la semana en «App Fenología»"
+            ("Guardar en Google Drive", "Carpeta de la semana en «PhenoRubus · Imágenes de Fenología»"
              if self.db.get_setting("drive_enabled", False) else "Primero conecte Drive en Ajustes",
              lambda: self.save_to_drive(path)),
             ("Ver informe", "Abrir en el lector de PDF" if path.endswith(".pdf") else "Abrir en el navegador",

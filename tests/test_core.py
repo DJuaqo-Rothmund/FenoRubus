@@ -379,7 +379,7 @@ def test_historical_import_zip(db, tmp_path):
 
 def test_drive_backup_queue_with_fake_api(db, tmp_path):
     import json
-    from drive_backup import DriveBackup, Offline
+    from drive_backup import DriveBackup, Offline, ROOT_FOLDER
 
     week = db.current_week()
     v = db.list_varieties()[0]
@@ -439,7 +439,7 @@ def test_drive_backup_queue_with_fake_api(db, tmp_path):
     names = [m["name"] for m in folders.values()]
     start = dt.date.fromisoformat(week["start_date"])
     iso_w, iso_y = start.isocalendar()[1], start.isocalendar()[0]
-    assert names[:2] == ["App Fenología", "PhenoRubus"] and f"Año {iso_y}" in names
+    assert ROOT_FOLDER in names and f"Año {iso_y}" in names
     week_dir = f"Semana {iso_w:02d} · {start:%d-%m-%Y}"
     assert week_dir in names                      # carpeta por semana de muestreo
     wk = next(fid for fid, m in folders.items() if m["name"] == week_dir)
@@ -2311,105 +2311,26 @@ def test_extra_sampling_from_web_bundle(tmp_path):
     assert db.query_one("SELECT bbch_code FROM observations WHERE week_id=?", (week["id"],)) is None
 
 
-def test_drive_root_moves_legacy_folder(db):
-    """La carpeta antigua «PhenoRubus · Imágenes de Fenología» pasa a «App Fenología/PhenoRubus»
-    (se mueve y se renombra: todo lo respaldado sigue ahí); arándano usa «App Fenología/PhenoBlue»."""
+def test_drive_root_found_where_aeoncrop_left_it(db):
+    """AeonCrop (app Lab) ordena la carpeta en «AeonCrop/PhenoRubus»: PhenoRubus la encuentra
+    ahí, sin moverla ni crear otra."""
     import json
     import urllib.parse
-    import crops
-    from drive_backup import DriveBackup, ROOT_FOLDER
+    from drive_backup import DriveBackup
 
-    tree = {"old": {"name": ROOT_FOLDER, "parents": ["root"]}}
-    patched = []
+    tree = {"top": {"name": "AeonCrop", "parents": ["root"]}, "rub": {"name": "PhenoRubus", "parents": ["top"]}}
 
     def transport(method, url, headers, body):
-        if method == "GET" and "fields=parents" in url:
-            fid = url.split("/files/")[1].split("?")[0]
-            return 200, json.dumps({"parents": tree[fid]["parents"]}).encode()
-        if method == "GET":
-            q = urllib.parse.parse_qs(urllib.parse.urlsplit(url).query)["q"][0]
-            name = q.split("name='")[1].split("' and")[0]
-            par = q.split("' in parents")[0].rsplit("'", 1)[1] if "in parents" in q else None
-            hits = [k for k, v in tree.items() if v["name"] == name and (par is None or par in v["parents"])]
-            return 200, json.dumps({"files": [{"id": k} for k in hits]}).encode()
-        if method == "PATCH":
-            fid = url.split("/files/")[1].split("?")[0]
-            qs = urllib.parse.parse_qs(urllib.parse.urlsplit(url).query)
-            tree[fid]["parents"] = [qs["addParents"][0]]
-            tree[fid]["name"] = json.loads(body)["name"]
-            patched.append(fid)
-            return 200, b'{"id": "%s"}' % fid.encode()
-        meta = json.loads(body)
-        fid = f"n{len(tree)}"
-        tree[fid] = {"name": meta["name"], "parents": meta.get("parents", ["root"])}
-        return 200, json.dumps({"id": fid}).encode()
+        assert method == "GET", "no debe crear ni mover carpetas"
+        q = urllib.parse.parse_qs(urllib.parse.urlsplit(url).query)["q"][0]
+        name = q.split("name='")[1].split("' and")[0]
+        par = q.split("' in parents")[0].rsplit("'", 1)[1] if "in parents" in q else None
+        hits = [k for k, v in tree.items() if v["name"] == name and (par is None or par in v["parents"])]
+        return 200, json.dumps({"files": [{"id": k} for k in hits]}).encode()
 
     class Auth:
         def get_token(self, interactive, timeout=None):
             return "t"
 
     drive = DriveBackup(db, authorizer=Auth(), transport=transport, metered=lambda: False)
-    rid = drive.root_id()
-    assert rid == "old" and patched == ["old"]
-    top = tree["old"]["parents"][0]
-    assert tree[top]["name"] == "App Fenología" and tree["old"]["name"] == "PhenoRubus"
-    assert drive.root_id() == "old" and patched == ["old"]          # en caché: una sola vez
-    try:
-        crops.activate("arandano")
-        db.set_setting("drive_folders", {})
-        blue = drive.root_id()
-        assert tree[blue] == {"name": "PhenoBlue", "parents": [top]}
-    finally:
-        crops.activate("frambuesa")
-
-
-def test_crops_have_own_data_scale_and_shared_drive_account(tmp_path):
-    """Cada cultivo con su carpeta de datos, su escala BBCH y sus variedades; la cuenta de
-    Drive es una sola para todos (se conecta en la pantalla de cultivos)."""
-    import crops
-    import platform_utils
-    from workspaces import Workspaces
-
-    rub = Workspaces(platform_utils.get_data_dir())
-    rub_db = rub.open(rub.last())
-    rub_db.set_setting("drive_enabled", True)
-    rub_db.set_setting("drive_account", "ana@gmail.com")
-    assert {v["name"] for v in rub_db.list_varieties()} >= {"Meeker", "Regina"}
-    assert len(rub.list()) == 3                                  # NV, AM, LE
-    try:
-        crops.activate("arandano")
-        base = platform_utils.get_base_dir()
-        assert platform_utils.get_data_dir() == os.path.join(base, "cultivos", "arandano")
-        blue = Workspaces(platform_utils.get_data_dir())
-        assert [w["code"] for w in blue.list()] == ["NV"]
-        db = blue.open(blue.last())
-        assert [v["name"] for v in db.list_varieties()][:2] == ["Duke", "Legacy"]
-        codes = {r["code"] for r in db.ai_db.query("SELECT code FROM bbch_stages")}
-        assert {0, 33, 59, 89} <= codes and 891 not in codes      # escala del arándano
-        assert ph.bbch_label(89).endswith("Fruto completamente maduro")
-        assert ph.MACRO_STAGES[2] == "Desarrollo de brotes laterales"
-        assert db.get_setting("drive_enabled") is True and db.get_setting("drive_account") == "ana@gmail.com"
-        crops.activate("cranberry")
-        cran = Workspaces(platform_utils.get_data_dir())
-        cdb = cran.open(cran.last())
-        assert "UP2" in ph.bbch_label(55) and cdb.get_setting("drive_account") == "ana@gmail.com"
-        assert [v["name"] for v in cdb.list_varieties()][0] == "Stevens"
-    finally:
-        crops.activate("frambuesa")
-    assert ph.bbch_label(891).startswith("BBCH 89-1")
-    assert platform_utils.global_get("drive_account") == "ana@gmail.com"
-
-
-def test_blueberry_color_prior_prefers_ripe_when_blue():
-    import crops
-    import numpy as np
-    from ai_classifier import PhenologyClassifier
-    prof = {"white": 0, "pink": .02, "red": 0, "dark_red": 0, "green": .1, "yellow_green": 0,
-            "yellow": 0, "brown": 0, "blue": .35}
-    try:
-        crops.activate("arandano")
-        codes = np.array([float(c) for c, *_ in ph.BBCH_SCALE])
-        s, _ = PhenologyClassifier._color(codes, prof)
-        assert int(codes[int(np.argmax(s))]) in (85, 89)
-    finally:
-        crops.activate("frambuesa")
+    assert drive.root_id() == "rub"

@@ -33,8 +33,7 @@ from jinja2 import Environment, FileSystemLoader, select_autoescape
 from PIL import Image, ImageOps
 
 import phenology as ph
-import crops
-from platform_utils import resource_path, slugify
+from platform_utils import APP_NAME, resource_path, slugify
 
 PHOTO_KINDS = (("canopy", "Canopia / planta completa"), ("detail", "Detalle / macro"))
 MILESTONES = [(51, "Botón floral"), (61, "Inicio floración"), (65, "50 % de flores"),
@@ -340,8 +339,7 @@ class ReportGenerator:
         self.env.filters["wks"] = ph.week_short     # «S33»
         self.env.globals.update(macro_name=lambda c: ph.MACRO_STAGES.get(ph.macro_of(c), ""),
                                 macro_color=lambda c: ph.MACRO_COLORS.get(ph.macro_of(c), "#ccc"),
-                                app_name=crops.current().app, species=crops.current().species,
-                                fruit=crops.current().fruit)
+                                app_name=APP_NAME)
 
     @staticmethod
     def _num(v, digits: int = 1) -> str:

@@ -27,7 +27,7 @@ import phenology as ph
 from platform_utils import IS_ANDROID
 
 SCOPE = "https://www.googleapis.com/auth/drive.file"
-ROOT_FOLDER = "PhenoRubus · Imágenes de Fenología"   # raíz antigua (hasta la 1.1.151)
+ROOT_FOLDER = "PhenoRubus · Imágenes de Fenología"
 FOLDER_MIME = "application/vnd.google-apps.folder"
 API = "https://www.googleapis.com/drive/v3/files"
 UPLOAD = "https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=id"
@@ -704,31 +704,25 @@ class DriveBackup:
         self.db.set_setting("drive_folders", cache)
         return fid
 
+    # Dónde puede estar la carpeta de PhenoRubus: AeonCrop (la app Lab) la ordena en
+    # «AeonCrop/PhenoRubus»; una versión de prueba usó «App Fenología/PhenoRubus».
+    MODULE_PATHS = (("AeonCrop", "PhenoRubus"), ("App Fenología", "PhenoRubus"))
+
     def root_id(self) -> str:
-        """Carpeta del módulo en Drive: «App Fenología/<PhenoRubus|PhenoBlue|PhenoCran>».
-        Frambuesa: la primera vez, la carpeta antigua «PhenoRubus · Imágenes de Fenología»
-        (con todo lo respaldado) se mueve ahí y pasa a llamarse «PhenoRubus»."""
-        import crops
-        crop = crops.current()
+        """Carpeta de PhenoRubus en Drive, esté donde esté (no mueve nada); si no hay
+        ninguna, se crea con el nombre de siempre."""
         cache = self.db.get_setting("drive_folders") or {}
-        key = f"module/{crop.drive_folder}"
-        if key in cache:
-            return cache[key]
-        top = self._folder(crops.DRIVE_TOP, None)
-        fid = self._find_folder(crop.drive_folder, top)
-        if fid is None and crop.id == "frambuesa":
-            old = self._find_folder(ROOT_FOLDER, None)
-            if old is not None:
-                parents = self._call("GET", f"{API}/{old}?fields=parents").get("parents", [])
-                self._call("PATCH", f"{API}/{old}?" + urllib.parse.urlencode(
-                    {"addParents": top, "removeParents": ",".join(parents), "fields": "id"}),
-                    json.dumps({"name": crop.drive_folder}).encode(), "application/json; charset=UTF-8")
-                fid = old
-                self.log(f"Drive: «{ROOT_FOLDER}» pasa a «{crops.DRIVE_TOP}/{crop.drive_folder}»")
-        if fid is None:
-            fid = self._folder(crop.drive_folder, top)
+        if "module/PhenoRubus" in cache:
+            return cache["module/PhenoRubus"]
+        fid = None
+        for top, name in self.MODULE_PATHS:
+            t = self._find_folder(top, None)
+            fid = t and self._find_folder(name, t)
+            if fid:
+                break
+        fid = fid or self._folder(ROOT_FOLDER, None)
         cache = self.db.get_setting("drive_folders") or {}
-        cache[key] = fid
+        cache["module/PhenoRubus"] = fid
         self.db.set_setting("drive_folders", cache)
         return fid
 
