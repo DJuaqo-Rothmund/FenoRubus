@@ -107,6 +107,53 @@ class GlassCard(BoxLayout):
             self.height = self.minimum_height
 
 
+class WeekTitle(ButtonBehavior, MDLabel):
+    """Título «Semana del …»: tocar = calendario; mantener presionado 3 s = on_long_press
+    (y entonces no se abre el calendario)."""
+    HOLD = 3.0
+    __events__ = ("on_long_press",)
+
+    def __init__(self, **kw):
+        super().__init__(**kw)
+        self._hold = None
+        self._fired = False
+
+    def on_touch_down(self, touch):
+        if self.collide_point(*touch.pos) and not self.disabled:
+            self._fired = False
+            self._cancel()
+            self._hold = Clock.schedule_once(lambda *_: self._fire(touch), self.HOLD)
+        return super().on_touch_down(touch)
+
+    def on_touch_move(self, touch):
+        if self._hold and touch.grab_current is self and \
+                (abs(touch.x - touch.ox) > dp(16) or abs(touch.y - touch.oy) > dp(16)):
+            self._cancel()           # se está desplazando la pantalla
+        return super().on_touch_move(touch)
+
+    def on_touch_up(self, touch):
+        self._cancel()
+        if self._fired and touch.grab_current is self:   # fue un mantener presionado: sin calendario
+            self._fired = False
+            touch.ungrab(self)
+            self.state = "normal"
+            return True
+        return super().on_touch_up(touch)
+
+    def _cancel(self):
+        if self._hold:
+            self._hold.cancel()
+            self._hold = None
+
+    def _fire(self, _touch):
+        self._hold = None
+        self._fired = True
+        self.dispatch("on_long_press")
+
+    def on_long_press(self):
+        pass
+
+
 class GlassButton(ButtonBehavior, GlassCard):
     """Tarjeta pulsable con realce al tocar (sin animación de ripple)."""
 
@@ -1690,6 +1737,8 @@ class WorkspacesScreen(MDScreen):
             n_r = Factory.Field(hint_text="N.º repeticiones", input_filter="int", text="4")
             trt.add_widget(n_t)
             trt.add_widget(n_r)
+            t0_row, t0_cb = check_row("El ensayo tiene T0 (tratamiento 0): T0 … Tn-1",
+                                      on_change=lambda *_: (update_info(), build_meanings()))
             # Alto fijo: el diálogo no cambia de tamaño al elegir el tipo (KivyMD no lo reajusta).
             info = MDLabel(font_style="Caption", size_hint_y=None, height=dp(48), valign="top",
                            theme_text_color="Custom", text_color=c(theme.MUTED))
@@ -1698,6 +1747,7 @@ class WorkspacesScreen(MDScreen):
                                     theme_text_color="Custom", text_color=c(theme.MUTED)))
             form.add_widget(seg)
             form.add_widget(trt)
+            form.add_widget(t0_row)
             form.add_widget(info)
             # Qué es cada tratamiento (T1 = Testigo…): opcional, también en Ajustes › Registros.
             from kivy.uix.scrollview import ScrollView
@@ -1720,9 +1770,11 @@ class WorkspacesScreen(MDScreen):
                 old = [f.text for f in state["meanings"]]
                 fast_clear(meanings)
                 state["meanings"] = []
-                for i in range(1, t + 1):
-                    f = Factory.Field(hint_text=f"T{i} = (ej.: {'Testigo' if i == 1 else 'producto, dosis…'})",
-                                      text=old[i - 1] if i <= len(old) else "")
+                first = 0 if t0_cb.active else 1
+                for j in range(t):
+                    i = first + j
+                    f = Factory.Field(hint_text=f"T{i} = (ej.: {'Testigo' if j == 0 else 'producto, dosis…'})",
+                                      text=old[j] if j < len(old) else "")
                     meanings.add_widget(f)
                     state["meanings"].append(f)
                 m_title.opacity = 1 if t else 0
@@ -1733,8 +1785,8 @@ class WorkspacesScreen(MDScreen):
             def set_kind(kind):
                 state["kind"] = kind
                 b_var.selected, b_trt.selected = kind == "variedades", kind == "tratamientos"
-                trt.disabled = kind != "tratamientos"
-                trt.opacity = 1 if kind == "tratamientos" else .35
+                trt.disabled = t0_row.disabled = kind != "tratamientos"
+                trt.opacity = t0_row.opacity = 1 if kind == "tratamientos" else .35
                 update_info()
                 build_meanings()
 
@@ -1747,7 +1799,8 @@ class WorkspacesScreen(MDScreen):
                     t, r = int(n_t.text or 0), int(n_r.text or 0)
                 except ValueError:
                     t = r = 0
-                info.text = (f"Se crearán {t * r} parcelas: T1R1 … T{t}R{r}. Los informes promedian las "
+                f0 = 0 if t0_cb.active else 1
+                info.text = (f"Se crearán {t * r} parcelas: T{f0}R1 … T{f0 + t - 1}R{r}. Los informes promedian las "
                              "repeticiones y comparan los tratamientos (ANOVA)." if t and r else
                              "Indique cuántos tratamientos y repeticiones tiene el ensayo.")
 
@@ -1778,8 +1831,8 @@ class WorkspacesScreen(MDScreen):
             named = 0
             if size:
                 db = a.open_db(ws)
-                db.setup_trial(*size)
-                for i, f in enumerate(state.get("meanings", [])[:size[0]], 1):
+                db.setup_trial(*size, t0=t0_cb.active)
+                for i, f in enumerate(state.get("meanings", [])[:size[0]], 0 if t0_cb.active else 1):
                     if f.text.strip():
                         db.update_treatment(i, f.text)
                         named += 1
@@ -2065,6 +2118,84 @@ class SamplingTab(MDBoxLayout):
             self.refresh()
         pick_date(start, go, "Ir a la semana de…")
 
+    def move_week_dialog(self):
+        """Mantener 3 s «Semana del …»: mover TODO lo de esta semana a otra (se muestreó
+        esta semana pero se anotó en la hoja de otra)."""
+        a = app()
+        src = a.week
+        info = a.db.week_data_summary(src["id"])
+        if not info["total"]:
+            a.toast("Esta semana no tiene datos para mover.")
+            return
+
+        def name(w):
+            return f"{w['label']} · {ph.week_title(w).split(',')[0]}"
+
+        def ask(dst):
+            if dst["id"] == src["id"]:
+                a.toast("Elija una semana distinta.")
+                return
+            have = a.db.week_data_summary(dst["id"])
+            what = self._week_what(info)
+            if not have["total"]:
+                confirm("Mover datos de semana",
+                        f"Pasar {what} de «{name(src)}» a «{name(dst)}» (que está vacía).",
+                        [("Mover", lambda: self._do_move(src, dst))])
+                return
+            names = ", ".join(have["names"][:6]) + ("…" if len(have["names"]) > 6 else "")
+            confirm("¿Está seguro?",
+                    f"«{name(dst)}» YA TIENE DATOS: {self._week_what(have)}"
+                    + (f" ({names})" if names else "") + ".\n\n"
+                    f"Si mueve igual, {what} pasan allá; si una parcela tiene registro en ambas "
+                    "semanas, se conserva el de destino y el de origen queda en su semana. "
+                    "No se borra nada.",
+                    [("Revisar destino", lambda: self._go(dst)),
+                     ("Mover igual", lambda: self._do_move(src, dst))])
+
+        def pick_other():
+            from android_bridge import pick_date
+            start = _dt.date.fromisoformat(src["start_date"][:10])
+
+            def go(day):
+                if day < ph.FIRST_BROWSE or day > ph.LAST_BROWSE:
+                    a.toast("Las semanas van de 2020 a 2050.")
+                    return
+                ask(a.db.week_for_date(day))
+            pick_date(start, go, "Mover a la semana de…")
+
+        prev, nxt = a.db.next_week(src, -1), a.db.next_week(src, 1)
+
+        def sub(w):
+            n = a.db.week_data_summary(w["id"])["total"]
+            return "Vacía" if not n else f"Tiene {n} dato(s): pedirá confirmación"
+        pick_dialog(f"Mover {self._week_what(info)}", [
+            (f"A la anterior: {name(prev)}", sub(prev), lambda: ask(prev)),
+            (f"A la siguiente: {name(nxt)}", sub(nxt), lambda: ask(nxt)),
+            ("Elegir otra semana…", "Calendario: cualquier día de la semana de destino", pick_other),
+        ])
+
+    @staticmethod
+    def _week_what(info: dict) -> str:
+        parts = [f"{info['records']} registro(s)" if info["records"] else "",
+                 f"{info['photos']} foto(s)" if info["photos"] else "",
+                 f"{info['entries']} medición(es)" if info["entries"] else "",
+                 f"{info['attachments']} adjunto(s)" if info["attachments"] else ""]
+        return ", ".join(p for p in parts if p) or "sin datos"
+
+    def _do_move(self, src, dst):
+        a = app()
+        try:
+            res = a.db.move_week_data(src["id"], dst["id"])
+        except ValueError as exc:
+            a.toast(str(exc))
+            return
+        self._go(a.db.get_week(dst["id"]))
+        a.toast(f"Movidos a {dst['label']}: {res['records']} registro(s), {res['entries']} medición(es)"
+                + (f". {res['kept']} quedaron en la semana original (destino ya tenía datos)"
+                   if res["kept"] else ""))
+        if a.home is not None:
+            a.refresh_home()
+
     def go_current(self):
         a = app()
         a.week = a.db.current_week()
@@ -2081,6 +2212,27 @@ class VarietyCatalogRow(GlassButton):
     summary = StringProperty()
     variety_id = NumericProperty()
     tab = ObjectProperty()
+
+
+def check_row(text: str, active: bool = False, on_change=None):
+    """Casilla de verificación con su texto (tocar el texto también la marca).
+    Devuelve (fila, casilla)."""
+    from kivy.uix.behaviors import ButtonBehavior
+    from kivymd.uix.selectioncontrol import MDCheckbox
+
+    class _Tap(ButtonBehavior, MDLabel):
+        pass
+
+    row = MDBoxLayout(adaptive_height=True, spacing=dp(4))
+    cb = MDCheckbox(active=active, size_hint=(None, None), size=(dp(40), dp(40)),
+                    pos_hint={"center_y": .5})
+    lbl = _Tap(text=text, adaptive_height=True, pos_hint={"center_y": .5})
+    lbl.bind(on_release=lambda *_: setattr(cb, "active", not cb.active))
+    if on_change:
+        cb.bind(active=lambda _w, v: on_change(v))
+    row.add_widget(cb)
+    row.add_widget(lbl)
+    return row, cb
 
 
 def pick_number(title: str, values, current, callback):
@@ -2269,7 +2421,7 @@ class VarietiesTab(MDScreen):
                 parts.insert(0, ph.unit_place(v))
             elif v.get("cultivar"):
                 parts.insert(0, v["cultivar"])
-            if v.get("treatment"):
+            if a.db.is_parcel(v):
                 t = trts.get(v["treatment"])
                 parts.insert(0, f"{t['label'] if t else 'T' + str(v['treatment'])} · Repetición {v['rep']}")
             n_custom = len(a.db.list_custom_fields(v["id"], season))
@@ -2322,8 +2474,9 @@ class VarietiesTab(MDScreen):
         nt, nr = db.trial_size()
         card = Factory.PaperCard()
         card.add_widget(Factory.SectionLabel(text="TRATAMIENTOS × REPETICIONES"))
-        card.add_widget(Factory.Body(text=f"{nt} tratamientos × {nr} repeticiones = {nt * nr} parcelas"
-                                     if nt else "Aún sin definir"))
+        nums = db.trial_nums()
+        card.add_widget(Factory.Body(text=f"{nt} tratamientos (T{nums[0]} a T{nums[-1]}) × {nr} repeticiones "
+                                          f"= {nt * nr} parcelas" if nt else "Aún sin definir"))
         b1 = Factory.GhostButton(icon="grid", text="Cambiar número")
         b1.bind(on_release=lambda *_: self.trial_size_dialog())
         card.add_widget(b1)
@@ -2387,14 +2540,16 @@ class VarietiesTab(MDScreen):
         row.add_widget(f_t)
         row.add_widget(f_r)
         form.add_widget(row)
+        t0_row, t0_cb = check_row("El ensayo tiene T0 (tratamiento 0): T0 … Tn-1", a.db.trial_has_t0)
+        form.add_widget(t0_row)
         form.add_widget(MDLabel(
-            text="Si reduce el número, las parcelas que sobran se archivan con sus registros "
+            text="Con T0, 7 tratamientos son T0 a T6. Si reduce el número, las parcelas que sobran se archivan con sus registros "
                  "(no se borra nada); si lo vuelve a aumentar, reaparecen.",
             font_style="Caption", adaptive_height=True, theme_text_color="Custom", text_color=c(theme.MUTED)))
 
         def ok(_f):
             try:
-                res = a.db.setup_trial(int(f_t.text or 0), int(f_r.text or 0))
+                res = a.db.setup_trial(int(f_t.text or 0), int(f_r.text or 0), t0=t0_cb.active)
             except ValueError as exc:
                 a.toast(str(exc))
                 return False

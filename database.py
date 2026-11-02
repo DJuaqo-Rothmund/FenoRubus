@@ -359,6 +359,9 @@ class Database:
             for name, typ in cols:
                 if name not in have:
                     self.conn.execute(f"ALTER TABLE {table} ADD COLUMN {name} {typ}")
+        # «Fenología del ensayo»: antes tratamiento 0 (ahora el 0 es T0). Las parcelas
+        # siempre tienen repetición ≥ 1.
+        self.conn.execute("UPDATE varieties SET treatment=-1 WHERE treatment=0 AND rep=0")
         self.conn.execute("UPDATE meta SET value=? WHERE key='schema_version'", (str(SCHEMA_VERSION),))
 
     def _migrate_seasons_apr(self) -> None:
@@ -544,7 +547,7 @@ class Database:
     def list_varieties(self, include_archived: bool = False) -> list[dict]:
         """Variedades, sectores o parcelas (sin el registro «Fenología del ensayo», que es
         solo para la fenología unificada: ver pheno_units)."""
-        sql = "SELECT * FROM varieties WHERE IFNULL(treatment, -1) != 0"
+        sql = "SELECT * FROM varieties WHERE IFNULL(treatment, 0) != -1"
         if not include_archived:
             sql += " AND active = 1"
         sql += " ORDER BY sort_order, name"
@@ -561,13 +564,16 @@ class Database:
         return self.is_trial and bool(self.get_setting("trial_unified", False))
 
     def trial_unit(self, create: bool = True) -> dict | None:
-        """El registro «Fenología del ensayo» (tratamiento 0, repetición 0)."""
-        row = self.query_one("SELECT * FROM varieties WHERE treatment=0 AND rep=0") \
+        """El registro «Fenología del ensayo» (tratamiento -1, repetición 0: el 0 es T0).
+        Si quedó marcado como tratamiento 0 (versión anterior), se corrige."""
+        row = self.query_one("SELECT * FROM varieties WHERE treatment=-1") \
             or self.query_one("SELECT * FROM varieties WHERE name=?", (self.UNIT_NAME,))
         if row is None and create:
             vid = self.add_variety(self.UNIT_NAME, code="ENS", sort_order=-1, log=False)
-            self.execute("UPDATE varieties SET treatment=0, rep=0, updated_at=? WHERE id=?", (_now(), vid))
             row = self.get_variety(vid)
+        if row is not None and row.get("treatment") != -1:
+            self.execute("UPDATE varieties SET treatment=-1, rep=0, updated_at=? WHERE id=?", (_now(), row["id"]))
+            row = self.get_variety(row["id"])
         return row
 
     def set_unified_pheno(self, on: bool) -> None:
@@ -576,7 +582,7 @@ class Database:
         self.set_setting("trial_unified", bool(on))
         unit = self.trial_unit(create=bool(on))
         if unit:
-            self.execute("UPDATE varieties SET active=?, treatment=0, rep=0, updated_at=? WHERE id=?",
+            self.execute("UPDATE varieties SET active=?, treatment=-1, rep=0, updated_at=? WHERE id=?",
                          (int(bool(on)), _now(), unit["id"]))
         self.log("update", "trial", None, "Fenología unificada" if on else "Fenología por parcela")
 
@@ -701,14 +707,34 @@ class Database:
     def trial_size(self) -> tuple[int, int]:
         return int(self.get_setting("trial_treatments", 0) or 0), int(self.get_setting("trial_reps", 0) or 0)
 
-    def setup_trial(self, n_treatments: int, n_reps: int) -> dict:
-        """Crea (o ajusta) las parcelas T1R1 … TnRm. Al reducir, las parcelas que sobran se
-        ARCHIVAN (sus registros se conservan); al volver a aumentar, reaparecen."""
+    @property
+    def trial_has_t0(self) -> bool:
+        """El ensayo numera los tratamientos desde T0 (T0 … Tn-1) en vez de T1 … Tn."""
+        return bool(self.get_setting("trial_t0", False))
+
+    def trial_nums(self) -> list[int]:
+        """Números de los tratamientos vigentes: [0 … n-1] con T0, si no [1 … n]."""
+        nt, _nr = self.trial_size()
+        first = 0 if self.trial_has_t0 else 1
+        return list(range(first, first + nt))
+
+    @staticmethod
+    def is_parcel(v: dict | None) -> bool:
+        """¿Es una parcela TxRy de un ensayo (incluida T0)? (no la «Fenología del ensayo»)."""
+        t = (v or {}).get("treatment")
+        return t is not None and t >= 0
+
+    def setup_trial(self, n_treatments: int, n_reps: int, t0: bool | None = None) -> dict:
+        """Crea (o ajusta) las parcelas T1R1 … TnRm (con `t0`: T0R1 … Tn-1Rm). Al reducir, las
+        parcelas que sobran se ARCHIVAN (sus registros se conservan); al volver a aumentar,
+        reaparecen."""
         nt, nr = int(n_treatments), int(n_reps)
         if not (1 <= nt <= self.MAX_TREATMENTS) or not (1 <= nr <= self.MAX_REPS):
             raise ValueError(f"Tratamientos: 1 a {self.MAX_TREATMENTS} · repeticiones: 1 a {self.MAX_REPS}.")
+        t0 = self.trial_has_t0 if t0 is None else bool(t0)
+        first, last = (0, nt - 1) if t0 else (1, nt)
         added = restored = archived = 0
-        for t in range(1, nt + 1):
+        for t in range(first, last + 1):
             self.execute("INSERT OR IGNORE INTO treatments(num, name) VALUES (?, '')", (t,))
             for r in range(1, nr + 1):
                 name = f"T{t}R{r}"
@@ -723,13 +749,14 @@ class Database:
                         restored += 1
                 self.execute("UPDATE varieties SET treatment=?, rep=?, active=1, sort_order=?, "
                              "updated_at=? WHERE id=?", (t, r, t * 100 + r, _now(), vid))
-        for v in self.query("SELECT id FROM varieties WHERE active=1 AND treatment IS NOT NULL "
-                            "AND (treatment>? OR rep>?)", (nt, nr)):
+        for v in self.query("SELECT id FROM varieties WHERE active=1 AND treatment >= 0 "
+                            "AND (treatment<? OR treatment>? OR rep>?)", (first, last, nr)):
             self.execute("UPDATE varieties SET active=0, updated_at=? WHERE id=?", (_now(), v["id"]))
             archived += 1
         self.set_setting("trial_treatments", nt)
         self.set_setting("trial_reps", nr)
-        self.log("update", "trial", None, f"{nt} tratamientos × {nr} repeticiones "
+        self.set_setting("trial_t0", t0)
+        self.log("update", "trial", None, f"{nt} tratamientos (T{first}–T{last}) × {nr} repeticiones "
                                           f"(+{added}, restauradas {restored}, archivadas {archived})")
         return {"added": added, "restored": restored, "archived": archived}
 
@@ -747,7 +774,7 @@ class Database:
         """(título, etiqueta chica) de una fila: en un ensayo de tratamientos con el
         tratamiento definido, («Testigo», «T1R1»); si no, (nombre, «»)."""
         t = v.get("treatment")
-        if t and names and names.get(t):
+        if t is not None and t >= 0 and names and names.get(t):
             return names[t], v["name"]
         return v["name"], ""
 
@@ -762,10 +789,15 @@ class Database:
         return self.get_setting("trial_cultivar", "") or ""
 
     def list_treatments(self) -> list[dict]:
-        nt, _nr = self.trial_size()
+        nums = self.trial_nums()
+        if not nums:
+            return []
+        for n in nums:   # T0 (o un número nuevo) llega a existir aunque nadie lo haya nombrado
+            self.execute("INSERT OR IGNORE INTO treatments(num, name) VALUES (?, '')", (n,))
         out = []
         default = self.trial_cultivar
-        for t in self.query("SELECT * FROM treatments WHERE num<=? ORDER BY num", (nt,)):
+        for t in self.query("SELECT * FROM treatments WHERE num BETWEEN ? AND ? ORDER BY num",
+                            (nums[0], nums[-1])):
             t["label"] = self.treatment_label(t)
             t["variety"] = (t.get("cultivar") or "").strip() or default
             t["parcels"] = self.query("SELECT * FROM varieties WHERE active=1 AND treatment=? "
@@ -1289,6 +1321,71 @@ class Database:
         for t in self.WEEK_TABLES:
             self.conn.execute(f"UPDATE OR IGNORE {t} SET week_id=? WHERE week_id=?", (dst, src))
         self.conn.execute("DELETE FROM sampling_weeks WHERE id=?", (src,))
+
+    # ------------------------------------- mover los datos de una semana a otra
+    _OBS_FILLED = ("(o.bbch_code IS NOT NULL OR o.ai_code IS NOT NULL OR IFNULL(o.notes, '') != '' "
+                   "OR o.latitude IS NOT NULL OR EXISTS (SELECT 1 FROM photos p WHERE p.observation_id = o.id))")
+
+    def observation_is_empty(self, obs_id: int) -> bool:
+        """Registro creado al abrir la ficha, sin estado, nota, ubicación ni fotos."""
+        return not self.query_one(f"SELECT 1 FROM observations o WHERE o.id=? AND {self._OBS_FILLED}",
+                                  (obs_id,))
+
+    def week_data_summary(self, week_id: int) -> dict:
+        """Lo registrado en una semana: {"records", "photos", "entries", "attachments",
+        "total", "names"} (names: las parcelas/variedades con registro)."""
+        recs = self.query(f"SELECT o.id, v.name FROM observations o JOIN varieties v ON v.id = o.variety_id "
+                          f"WHERE o.week_id=? AND {self._OBS_FILLED} ORDER BY v.sort_order, v.name", (week_id,))
+        photos = self.query_one("SELECT COUNT(*) AS n FROM photos p JOIN observations o ON o.id = p.observation_id "
+                                "WHERE o.week_id=?", (week_id,))["n"]
+        entries = self.query_one("SELECT COUNT(*) AS n FROM measure_entries WHERE week_id=?", (week_id,))["n"]
+        att = self.query_one("SELECT COUNT(*) AS n FROM variety_attachments WHERE week_id=?", (week_id,))["n"]
+        return {"records": len(recs), "photos": photos, "entries": entries, "attachments": att,
+                "total": len(recs) + entries + att, "names": [r["name"] for r in recs]}
+
+    def move_week_data(self, src_id: int, dst_id: int) -> dict:
+        """Pasa TODO lo registrado en la semana `src_id` (estados, fotos, notas, mediciones y
+        adjuntos) a la semana `dst_id` (p. ej. se muestreó esta semana pero se anotó en la
+        hoja de la siguiente). Nada se borra: si una parcela ya tiene un registro con datos en
+        la semana de destino, el de origen se queda donde estaba (se cuenta en "kept"); los
+        registros vacíos del destino se reemplazan. Viaja a los otros equipos."""
+        if src_id == dst_id:
+            raise ValueError("Elija una semana distinta.")
+        src, dst = self.get_week(src_id), self.get_week(dst_id)
+        if not src or not dst:
+            raise ValueError("Semana no encontrada.")
+        moved = kept = 0
+        photo_ids = []
+        for o in self.query("SELECT id, variety_id FROM observations WHERE week_id=?", (src_id,)):
+            other = self.get_observation(o["variety_id"], dst_id)
+            src_empty = self.observation_is_empty(o["id"])
+            if other is not None:
+                if self.observation_is_empty(other["id"]):
+                    self.execute("DELETE FROM observations WHERE id=?", (other["id"],))
+                elif src_empty:
+                    self.execute("DELETE FROM observations WHERE id=?", (o["id"],))
+                    continue
+                else:
+                    kept += 1
+                    continue
+            self.execute("UPDATE observations SET week_id=?, updated_at=? WHERE id=?", (dst_id, _now(), o["id"]))
+            if not src_empty:
+                moved += 1
+            photo_ids += [p["id"] for p in self.query("SELECT id FROM photos WHERE observation_id=?", (o["id"],))]
+        entries = self.execute("UPDATE measure_entries SET week_id=? WHERE week_id=?", (dst_id, src_id)).rowcount
+        att = self.execute("UPDATE variety_attachments SET week_id=? WHERE week_id=?", (dst_id, src_id)).rowcount
+        # Fotos aún por subir: van a la carpeta de Drive de la nueva semana.
+        if photo_ids:
+            try:
+                from drive_backup import DriveBackup
+                old_f, new_f = DriveBackup.week_folder(src["start_date"]), DriveBackup.week_folder(dst["start_date"])
+                self.execute(f"UPDATE drive_queue SET name=REPLACE(name, ?, ?) WHERE status!='done' "
+                             f"AND photo_id IN ({','.join(str(i) for i in photo_ids)})", (old_f, new_f))
+            except Exception:   # noqa: BLE001 — Drive es opcional
+                pass
+        self.log("update", "week_move", dst_id, f"{src['start_date']} → {dst['start_date']}: "
+                                                f"{moved} registros, {entries} mediciones, {att} adjuntos")
+        return {"records": moved, "entries": entries, "attachments": att, "kept": kept}
 
     def ensure_week(self, season: int, number: int) -> dict:
         """Semana n.º `number` de la temporada (se crea si no existe). Puede ser 0 o negativa:

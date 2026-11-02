@@ -644,7 +644,7 @@ def unit_name(sector, irrigation) -> str:
 def is_unit(v: dict) -> bool:
     """¿Es una unidad de predio (variedad + equipo de riego/sector)?"""
     return bool((v.get("cultivar") or "").strip() and (v.get("sector") or v.get("irrigation"))
-                and not v.get("treatment"))
+                and v.get("treatment") is None)
 
 
 def unit_main(v: dict) -> str:

@@ -927,8 +927,6 @@
                 VarietiesTab:
                     id: varieties
 
-<WeekTitle@ButtonBehavior+MDLabel>:
-
 <ExtraChip@ButtonBehavior+Label>:
     on: False
     font_size: "12.5sp"
@@ -983,6 +981,7 @@
                             text: "SEMANA"
                             text_color: c(theme.BERRY) if root.extra else c(theme.LEAF)
                         # Tocar el título: calendario para ir a la semana de cualquier día.
+                        # Mantenerlo 3 s: mover todos los datos de la semana a otra.
                         WeekTitle:
                             id: week_title
                             text: "Semana del 7 de septiembre"
@@ -992,6 +991,7 @@
                             text_color: c(theme.BERRY_DARK if root.extra else theme.INK, .6 if self.state == "down" else 1)
                             adaptive_height: True
                             on_release: root.pick_week_date()
+                            on_long_press: root.move_week_dialog()
                         Muted:
                             id: week_range
                             halign: "center"

@@ -291,7 +291,7 @@ class LabeledDB:
         return self._db.treatment_names() if getattr(self._db, "is_trial", False) else {}
 
     def _label(self, v, names):
-        if v and names and v.get("treatment"):
+        if v and names and self._db.is_parcel(v):
             v = dict(v)
             v["name"] = self._db.display_name(v, names)
         return v
@@ -321,7 +321,7 @@ class LabeledDB:
             by_id = {v["id"]: v for v in self._db.list_varieties(include_archived=True)}
             for e in rows:
                 v = by_id.get(e.get("variety_id"))
-                if v and v.get("treatment"):
+                if v and self._db.is_parcel(v):
                     e["variety_name"] = self._db.display_name(v, names)
         return rows
 

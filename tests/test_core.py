@@ -2562,3 +2562,103 @@ def test_unified_phenology_trial(tmp_path):
     assert len(db.pheno_units()) == 8 and db.get_observation(p["id"], w["id"])["bbch_code"] == 55
     db.close()
     wss.close()
+
+
+def test_trial_with_t0(tmp_path):
+    """Casilla «El ensayo tiene T0»: 7 tratamientos son T0 … T6 (no T1 … T7); la fenología
+    unificada no se confunde con T0."""
+    from workspaces import Workspaces
+    wss = Workspaces(str(tmp_path / "data"))
+    db = wss.open(wss.create("id", "tratamientos", "Urea", "UR"))
+    db.setup_trial(7, 2, t0=True)
+    assert db.trial_has_t0 and db.trial_nums() == list(range(7))
+    names = [v["name"] for v in db.list_varieties()]
+    assert names[:2] == ["T0R1", "T0R2"] and names[-1] == "T6R2" and len(names) == 14
+    assert [t["num"] for t in db.list_treatments()] == list(range(7))
+    db.update_treatment(0, "Testigo")
+    t0 = db.list_varieties()[0]
+    assert db.is_parcel(t0) and db.display_name(t0) == "Testigo (T0R1)"
+    db.set_unified_pheno(True)
+    assert len(db.list_varieties()) == 14 and db.trial_unit()["treatment"] == -1
+    db.set_unified_pheno(False)
+    res = db.setup_trial(7, 2, t0=False)                        # sin T0: T1 … T7
+    assert res["archived"] == 2 and res["added"] == 2
+    assert [t["num"] for t in db.list_treatments()] == list(range(1, 8))
+    w = db.current_week(dt.date(2026, 10, 5))
+    rep = ReportGenerator(db, str(tmp_path / "out"))
+    db.setup_trial(7, 2, t0=True)
+    for v in db.list_varieties():
+        db.update_observation(db.get_or_create_observation(v["id"], w["id"])["id"], bbch_code=55 + v["treatment"])
+    html = open(rep.treatments(w["season"]).path, encoding="utf-8").read()
+    assert "T0 · Testigo" in html
+    db.close()
+    wss.close()
+
+
+def test_old_unit_row_becomes_minus_one(tmp_path):
+    """La «Fenología del ensayo» guardada como tratamiento 0 (antes) pasa a -1 al abrir."""
+    path = str(tmp_path / "t.sqlite3")
+    d = Database(path)
+    vid = d.add_variety("Fenología del ensayo", code="ENS")
+    d.execute("UPDATE varieties SET treatment=0, rep=0 WHERE id=?", (vid,))
+    d.close()
+    d = Database(path)
+    assert d.get_variety(vid)["treatment"] == -1
+    assert vid not in [v["id"] for v in d.list_varieties(include_archived=True)]
+    d.close()
+
+
+def test_move_week_data(db, tmp_path):
+    """Mover datos de semana: todo pasa a la semana elegida; si allá ya hay un registro con
+    datos de la misma parcela, el de origen se queda; los vacíos se reemplazan."""
+    db.set_season_start(2026, dt.date(2026, 9, 7))
+    v1, v2 = db.list_varieties()[:2]
+    w1 = db.week_for_date(dt.date(2026, 10, 12))
+    w2 = db.week_for_date(dt.date(2026, 10, 19))
+    o = db.get_or_create_observation(v1["id"], w1["id"])
+    db.update_observation(o["id"], bbch_code=61, notes="flor")
+    photo = str(tmp_path / "f.jpg")
+    open(photo, "wb").write(b"jpg")
+    db.add_photo(o["id"], "detail", photo)
+    m = db.add_measure("Brotes", "table", ["Largo"])
+    db.add_entry(m, w1["id"], v1["id"], data={"Largo": "12"})
+    db.get_or_create_observation(v1["id"], w2["id"])             # vacío en destino
+    assert db.week_data_summary(w2["id"])["total"] == 0
+    assert db.week_data_summary(w1["id"]) == {"records": 1, "photos": 1, "entries": 1,
+                                              "attachments": 0, "total": 2, "names": [v1["name"]]}
+    res = db.move_week_data(w1["id"], w2["id"])
+    assert res == {"records": 1, "entries": 1, "attachments": 0, "kept": 0}
+    assert db.week_data_summary(w1["id"])["total"] == 0
+    moved = db.get_observation(v1["id"], w2["id"])
+    assert moved["bbch_code"] == 61 and moved["id"] == o["id"]
+    assert db.query_one("SELECT COUNT(*) AS n FROM photos WHERE observation_id=?", (o["id"],))["n"] == 1
+    # Destino con datos: se conserva el de destino.
+    db.update_observation(db.get_or_create_observation(v1["id"], w1["id"])["id"], bbch_code=55)
+    db.update_observation(db.get_or_create_observation(v2["id"], w1["id"])["id"], bbch_code=57)
+    res = db.move_week_data(w1["id"], w2["id"])
+    assert res["records"] == 1 and res["kept"] == 1
+    assert db.get_observation(v1["id"], w2["id"])["bbch_code"] == 61
+    assert db.get_observation(v1["id"], w1["id"])["bbch_code"] == 55
+    assert db.get_observation(v2["id"], w2["id"])["bbch_code"] == 57
+    with pytest.raises(ValueError):
+        db.move_week_data(w2["id"], w2["id"])
+
+
+def test_move_week_syncs_over_empty_record(tmp_path):
+    """El otro equipo recibe el registro movido aunque allá ya existiera uno vacío de la
+    misma parcela en la semana de destino (no se cae la sincronización)."""
+    a, b, da, dbdir = _two_devices(tmp_path)
+    a.set_season_start(2026, dt.date(2026, 9, 7))
+    v = a.list_varieties()[0]
+    w1 = a.week_for_date(dt.date(2026, 10, 12))
+    w2 = a.week_for_date(dt.date(2026, 10, 19))
+    a.update_observation(a.get_or_create_observation(v["id"], w1["id"])["id"], bbch_code=61)
+    a.get_or_create_observation(v["id"], w2["id"])
+    _send(a, b, da, dbdir)
+    a.move_week_data(w1["id"], w2["id"])
+    _send(a, b, da, dbdir)
+    bv = next(x for x in b.list_varieties() if x["name"] == v["name"])
+    bw1 = b.query_one("SELECT id FROM sampling_weeks WHERE start_date='2026-10-12'")["id"]
+    bw2 = b.query_one("SELECT id FROM sampling_weeks WHERE start_date='2026-10-19'")["id"]
+    assert b.get_observation(bv["id"], bw2)["bbch_code"] == 61
+    assert b.get_observation(bv["id"], bw1) is None

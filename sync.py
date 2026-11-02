@@ -284,6 +284,15 @@ def _upsert(db, table, ch, data_dir, week_for_date, stats) -> bool:
         db.execute(f"INSERT INTO {table}({', '.join(names)}) VALUES ({', '.join('?' * len(names))})",
                    (*data.values(), ch["uid"]))
     else:
+        if table == "observations":
+            # Registro movido a otra semana (Mover datos de semana): si allá ya hay uno de la
+            # misma parcela, se reemplaza solo si está vacío; si tiene datos, se conserva.
+            other = db.query_one("SELECT id FROM observations WHERE variety_id=? AND week_id=? AND id!=?",
+                                 (data.get("variety_id"), data.get("week_id"), current))
+            if other:
+                if not hasattr(db, "observation_is_empty") or not db.observation_is_empty(other["id"]):
+                    return False
+                db.execute("DELETE FROM observations WHERE id=?", (other["id"],))
         sets = ", ".join(f"{k}=?" for k in data if k != "num")
         vals = [v for k, v in data.items() if k != "num"]
         if sets:
