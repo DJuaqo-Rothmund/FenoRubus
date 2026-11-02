@@ -2523,3 +2523,42 @@ def test_drive_duplicate_folders_are_merged(db):
     assert drive.root_id() == "b1"
     assert tree["b2"].get("trashed") and tree["s2"].get("trashed")
     assert tree["f1"]["parents"] == ["s1"] and tree["f2"]["parents"] == ["b1"]
+
+
+def test_unified_phenology_trial(tmp_path):
+    """Fenología unificada: un solo registro BBCH por semana para todo el ensayo; las
+    parcelas T×R siguen para las mediciones (ANOVA) y nada se borra al cambiar."""
+    from workspaces import Workspaces
+    wss = Workspaces(str(tmp_path / "data"))
+    db = wss.open(wss.create("id", "tratamientos", "Corte de mulch", "CM"))
+    db.setup_trial(2, 4)
+    w = db.current_week(dt.date(2026, 10, 5))
+    p = db.list_varieties()[0]
+    db.update_observation(db.get_or_create_observation(p["id"], w["id"])["id"], bbch_code=55)
+    assert not db.unified_pheno and len(db.pheno_units()) == 8
+
+    db.set_unified_pheno(True)
+    assert db.unified_pheno and db.get_setting("trial_unified") is True
+    units = db.pheno_units()
+    assert [u["name"] for u in units] == ["Fenología del ensayo"]
+    assert len(db.list_varieties()) == 8                        # parcelas intactas (mediciones)
+    assert all(t["parcels"] and len(t["parcels"]) == 4 for t in db.list_treatments())
+    unit = units[0]
+    db.update_observation(db.get_or_create_observation(unit["id"], w["id"])["id"], bbch_code=61)
+    over = db.week_overview(w["id"])
+    assert [r["variety"]["name"] for r in over] == ["Fenología del ensayo"]
+    assert over[0]["observation"]["bbch_code"] == 61
+    m = db.add_measure("Largo de brotes", "table", ["Largo (cm)"])
+    for v in db.list_varieties():
+        db.add_entry(m, w["id"], v["id"], data={"Largo (cm)": str(10 + v["treatment"] + v["rep"] * .1)})
+
+    rep = ReportGenerator(db, str(tmp_path / "out"))
+    html = open(rep.treatments(w["season"]).path, encoding="utf-8").read()
+    assert "Fenología del ensayo (unificada)" in html and "Largo de brotes" in html
+    assert "Estado BBCH medio por tratamiento" not in html
+    assert open(rep.treatments(w["season"], package="pdf").path, "rb").read(5) == b"%PDF-"
+
+    db.set_unified_pheno(False)                                  # vuelve: lo de cada parcela sigue
+    assert len(db.pheno_units()) == 8 and db.get_observation(p["id"], w["id"])["bbch_code"] == 55
+    db.close()
+    wss.close()

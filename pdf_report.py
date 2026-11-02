@@ -787,71 +787,78 @@ def treatments(ctx: dict, names: dict, num=None) -> Report:
             [[{"text": t["label"], "bold": True}, t.get("variety") or "—", t.get("description") or "—",
               ", ".join(p["name"] for p in t["parcels"])] for t in ctx["treatments"]], [1.5, 1.3, 2.6, 2.2], 8)
 
-    r.h2("Estado BBCH medio por tratamiento",
-         "Promedio de las repeticiones en cada semana. Letras distintas = diferencias significativas "
-         "(LSD de Fisher, p < 0,05), solo en las semanas en que el ANOVA es significativo.")
-    per = 12
-    for i in range(0, max(1, len(weeks)), per):
-        chunk = weeks[i:i + per]
-        trows = []
-        for row in rows:
-            cells = [{"text": row["t"]["label"], "bold": True}]
-            for c in row["cells"][i:i + per]:
-                if c["mean"] is None:
-                    cells.append({"text": "·", "color": MUTED})
-                else:
-                    fill, fg = seq_color(int(round(c["mean"])))
-                    cells.append({"text": c["text"] + (f" {c['letter']}" if c["letter"] else ""),
-                                  "fill": fill, "color": fg, "bold": True})
-            trows.append(cells)
-        r.table(["Tratamiento"] + [ph.week_short(w) for w in chunk], trows, [2.6] + [1] * len(chunk), 7.4,
-                ["left"] + ["center"] * len(chunk))
-    if ctx.get("compare"):
-        r.h2("Evolución BBCH por tratamiento")
-        r.chart(ctx["compare"]["raw"])
-
-    r.h2("ANOVA por semana",
-         "Bloques completos al azar (repetición = bloque); si faltan parcelas, ANOVA de un factor. "
-         "ns = sin diferencias; * p < 0,05; ** p < 0,01; *** p < 0,001.")
-    if ctx["tests"]:
-        r.table(["Semana", "F", "gl", "p", "CV", "LSD 5 %"],
-                [[ph.week_title(a["week"]), a["f"], a["df"], {"text": a["p"], "bold": True}, a["cv"], a["lsd"]]
-                 for a in ctx["tests"]], [2.4, 1, 1, 1.3, 1, 1], 8)
+    if ctx.get("unified"):
+        # Fenología unificada: ningún tratamiento la cambia; una sola fila para el ensayo.
+        r.h2("Fenología del ensayo (unificada)",
+             "En este ensayo ningún tratamiento cambia la fenología: el estado BBCH se registra una "
+             "vez para todo el ensayo. La comparación de tratamientos queda en las mediciones.")
+        r.heatmap(ctx["heat"], weeks, label="Ensayo")
     else:
-        r.para("Se necesitan al menos dos tratamientos con repeticiones registradas en una misma semana.", 9, MUTED)
+        r.h2("Estado BBCH medio por tratamiento",
+             "Promedio de las repeticiones en cada semana. Letras distintas = diferencias significativas "
+             "(LSD de Fisher, p < 0,05), solo en las semanas en que el ANOVA es significativo.")
+        per = 12
+        for i in range(0, max(1, len(weeks)), per):
+            chunk = weeks[i:i + per]
+            trows = []
+            for row in rows:
+                cells = [{"text": row["t"]["label"], "bold": True}]
+                for c in row["cells"][i:i + per]:
+                    if c["mean"] is None:
+                        cells.append({"text": "·", "color": MUTED})
+                    else:
+                        fill, fg = seq_color(int(round(c["mean"])))
+                        cells.append({"text": c["text"] + (f" {c['letter']}" if c["letter"] else ""),
+                                      "fill": fill, "color": fg, "bold": True})
+                trows.append(cells)
+            r.table(["Tratamiento"] + [ph.week_short(w) for w in chunk], trows, [2.6] + [1] * len(chunk), 7.4,
+                    ["left"] + ["center"] * len(chunk))
+        if ctx.get("compare"):
+            r.h2("Evolución BBCH por tratamiento")
+            r.chart(ctx["compare"]["raw"])
 
-    r.h2("Precocidad relativa",
-         "Diferencia media, en unidades BBCH, entre cada tratamiento y el promedio de todos los "
-         "tratamientos en las mismas semanas. Positivo = adelantado; negativo = tardío.")
-    max_abs = ctx.get("max_abs") or 1.0
+        r.h2("ANOVA por semana",
+             "Bloques completos al azar (repetición = bloque); si faltan parcelas, ANOVA de un factor. "
+             "ns = sin diferencias; * p < 0,05; ** p < 0,01; *** p < 0,001.")
+        if ctx["tests"]:
+            r.table(["Semana", "F", "gl", "p", "CV", "LSD 5 %"],
+                    [[ph.week_title(a["week"]), a["f"], a["df"], {"text": a["p"], "bold": True}, a["cv"], a["lsd"]]
+                     for a in ctx["tests"]], [2.4, 1, 1, 1.3, 1, 1], 8)
+        else:
+            r.para("Se necesitan al menos dos tratamientos con repeticiones registradas en una misma semana.", 9, MUTED)
 
-    def bar(delta):
-        def draw(doc, x, y, w, h):
-            mid, cy = x + (w - 34) / 2 + 2, y + h / 2
-            doc.line(x + 4, cy, x + w - 34, cy, RULE, 3)
-            doc.line(mid, y + 4, mid, y + h - 4, MUTED, .6)
-            span = abs(delta) / max_abs * ((w - 38) / 2)
-            doc.rect(mid if delta >= 0 else mid - span, cy - 3, span, 6,
-                     fill=BERRY if delta >= 0 else "#3e6a8a", radius=2)
-            doc.text(x + w - 4, cy + 3, f"{delta:+.1f}", 8, True, INK, "right")
-        return {"draw": draw, "h": 18}
+        r.h2("Precocidad relativa",
+             "Diferencia media, en unidades BBCH, entre cada tratamiento y el promedio de todos los "
+             "tratamientos en las mismas semanas. Positivo = adelantado; negativo = tardío.")
+        max_abs = ctx.get("max_abs") or 1.0
 
-    if ctx["ranking"]:
-        r.table(["#", "Tratamiento", "Dif. BBCH vs. promedio", "Último BBCH medio"],
-                [[{"text": str(i + 1), "color": MUTED}, {"text": rr["t"]["label"], "bold": True},
-                  bar(rr["delta"]), rr["last"]] for i, rr in enumerate(ctx["ranking"])], [.4, 2.4, 3, 1.4], 8)
-    else:
-        r.para("Sin datos suficientes.", 9, MUTED)
+        def bar(delta):
+            def draw(doc, x, y, w, h):
+                mid, cy = x + (w - 34) / 2 + 2, y + h / 2
+                doc.line(x + 4, cy, x + w - 34, cy, RULE, 3)
+                doc.line(mid, y + 4, mid, y + h - 4, MUTED, .6)
+                span = abs(delta) / max_abs * ((w - 38) / 2)
+                doc.rect(mid if delta >= 0 else mid - span, cy - 3, span, 6,
+                         fill=BERRY if delta >= 0 else "#3e6a8a", radius=2)
+                doc.text(x + w - 4, cy + 3, f"{delta:+.1f}", 8, True, INK, "right")
+            return {"draw": draw, "h": 18}
 
-    if ctx["milestones"]:
-        r.h2("Hitos fenológicos",
-             "Semana del año (promedio de las repeticiones) en que cada tratamiento alcanzó el estado; "
-             "entre paréntesis, cuántas repeticiones lo alcanzaron.")
-        trts = ctx["treatments"]
-        r.table(["Hito"] + [t["label"] for t in trts] + ["p"],
-                [[{"text": f"{m['name']} (>= {ph.code_str(m['code'])})", "bold": True}]
-                 + [f"{c['text']} ({c['n']})" for c in m["cells"]] + [m["p"]] for m in ctx["milestones"]],
-                [2.4] + [1.3] * len(trts) + [1.1], 7.4, ["left"] + ["center"] * (len(trts) + 1))
+        if ctx["ranking"]:
+            r.table(["#", "Tratamiento", "Dif. BBCH vs. promedio", "Último BBCH medio"],
+                    [[{"text": str(i + 1), "color": MUTED}, {"text": rr["t"]["label"], "bold": True},
+                      bar(rr["delta"]), rr["last"]] for i, rr in enumerate(ctx["ranking"])], [.4, 2.4, 3, 1.4], 8)
+        else:
+            r.para("Sin datos suficientes.", 9, MUTED)
+
+        if ctx["milestones"]:
+            r.h2("Hitos fenológicos",
+                 "Semana del año (promedio de las repeticiones) en que cada tratamiento alcanzó el estado; "
+                 "entre paréntesis, cuántas repeticiones lo alcanzaron.")
+            trts = ctx["treatments"]
+            r.table(["Hito"] + [t["label"] for t in trts] + ["p"],
+                    [[{"text": f"{m['name']} (>= {ph.code_str(m['code'])})", "bold": True}]
+                     + [f"{c['text']} ({c['n']})" for c in m["cells"]] + [m["p"]] for m in ctx["milestones"]],
+                    [2.4] + [1.3] * len(trts) + [1.1], 7.4, ["left"] + ["center"] * (len(trts) + 1))
 
     for m in ctx["measures"]:
         r.h2(m["name"], "Promedio ± error estándar de las repeticiones (las submuestras de una parcela "
@@ -869,8 +876,9 @@ def treatments(ctx: dict, names: dict, num=None) -> Report:
         for b in m["blocks"]:
             r.keep(lambda b=b: block(b))
 
-    r.h2("Detalle por parcela", "Código BBCH registrado en cada parcela (T = tratamiento, R = repetición).")
-    r.heatmap(ctx["heat"], weeks, label="Parcela")
+    if not ctx.get("unified"):
+        r.h2("Detalle por parcela", "Código BBCH registrado en cada parcela (T = tratamiento, R = repetición).")
+        r.heatmap(ctx["heat"], weeks, label="Parcela")
     return r
 
 

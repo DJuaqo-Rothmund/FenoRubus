@@ -542,11 +542,51 @@ class Database:
 
     # ------------------------------------------------------------ varieties
     def list_varieties(self, include_archived: bool = False) -> list[dict]:
-        sql = "SELECT * FROM varieties"
+        """Variedades, sectores o parcelas (sin el registro «Fenología del ensayo», que es
+        solo para la fenología unificada: ver pheno_units)."""
+        sql = "SELECT * FROM varieties WHERE IFNULL(treatment, -1) != 0"
         if not include_archived:
-            sql += " WHERE active = 1"
+            sql += " AND active = 1"
         sql += " ORDER BY sort_order, name"
         return self.query(sql)
+
+    # ----------------------------------------------- fenología unificada (ensayos T×R)
+    UNIT_NAME = "Fenología del ensayo"
+
+    @property
+    def unified_pheno(self) -> bool:
+        """Ensayo de tratamientos con una sola fenología para todo el ensayo (ningún
+        tratamiento la cambia): el estado BBCH se registra una vez por semana; las mediciones
+        siguen por tratamiento y repetición."""
+        return self.is_trial and bool(self.get_setting("trial_unified", False))
+
+    def trial_unit(self, create: bool = True) -> dict | None:
+        """El registro «Fenología del ensayo» (tratamiento 0, repetición 0)."""
+        row = self.query_one("SELECT * FROM varieties WHERE treatment=0 AND rep=0") \
+            or self.query_one("SELECT * FROM varieties WHERE name=?", (self.UNIT_NAME,))
+        if row is None and create:
+            vid = self.add_variety(self.UNIT_NAME, code="ENS", sort_order=-1, log=False)
+            self.execute("UPDATE varieties SET treatment=0, rep=0, updated_at=? WHERE id=?", (_now(), vid))
+            row = self.get_variety(vid)
+        return row
+
+    def set_unified_pheno(self, on: bool) -> None:
+        """Activa o quita la fenología unificada. Nada se borra: los registros por parcela y
+        los del ensayo se conservan; solo cambia cuáles se muestran."""
+        self.set_setting("trial_unified", bool(on))
+        unit = self.trial_unit(create=bool(on))
+        if unit:
+            self.execute("UPDATE varieties SET active=?, treatment=0, rep=0, updated_at=? WHERE id=?",
+                         (int(bool(on)), _now(), unit["id"]))
+        self.log("update", "trial", None, "Fenología unificada" if on else "Fenología por parcela")
+
+    def pheno_units(self, include_archived: bool = False) -> list[dict]:
+        """Lo que se registra en el muestreo y muestran la vista previa y los informes de
+        fenología: el ensayo completo (fenología unificada) o cada variedad/sector/parcela."""
+        if self.unified_pheno:
+            unit = self.trial_unit()
+            return [unit] if unit else []
+        return self.list_varieties(include_archived=include_archived)
 
     def get_variety(self, variety_id: int) -> dict | None:
         return self.query_one("SELECT * FROM varieties WHERE id=?", (variety_id,))
@@ -1518,7 +1558,7 @@ class Database:
     def week_overview(self, week_id: int, include_archived: bool = False) -> list[dict]:
         """Una fila por variedad con su observación y fotos para la semana indicada."""
         out = []
-        for v in self.list_varieties(include_archived=include_archived):
+        for v in self.pheno_units(include_archived=include_archived):
             obs = self.get_observation(v["id"], week_id)
             photos = self.get_photos(obs["id"]) if obs else {}
             out.append({"variety": v, "observation": obs, "photos": photos})

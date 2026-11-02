@@ -15,6 +15,11 @@
 </table>
 </div>
 
+{% if unified %}
+<h2>Fenología del ensayo (unificada)</h2>
+<p class="lead">En este ensayo ningún tratamiento cambia la fenología: el estado BBCH se registra una vez para todo el ensayo. La comparación de tratamientos queda en las mediciones.</p>
+{{ heatmap(heat, weeks, "Ensayo") }}
+{% else %}
 <h2>Estado BBCH medio por tratamiento</h2>
 <p class="lead">Promedio de las repeticiones en cada semana. Letras distintas = diferencias significativas (LSD de Fisher, p &lt; 0,05), solo en las semanas en que el ANOVA es significativo.</p>
 <div class="scroll-x">
@@ -92,6 +97,7 @@
 </table>
 </div>
 {% endif %}
+{% endif %}
 
 {% for m in measures %}
 <h2>{{ m.name }}</h2>
@@ -110,7 +116,9 @@
 {% endfor %}
 {% endfor %}
 
+{% if not unified %}
 <h2>Detalle por parcela</h2>
 <p class="lead">Código BBCH registrado en cada parcela (T = tratamiento, R = repetición).</p>
 {{ heatmap(heat, weeks, "Parcela") }}
+{% endif %}
 {% endblock %}

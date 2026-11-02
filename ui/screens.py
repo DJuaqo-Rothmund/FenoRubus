@@ -1045,10 +1045,11 @@ class StartScreen(MDScreen):
         self.ids.greeting.text = f"{self._greeting()}, {name}" if name else f"{self._greeting()} · toque para poner su nombre"
         ws = getattr(a, "workspace", None)
         try:
-            units = a.db.list_varieties()
-            done = a.db.query_one(
-                "SELECT COUNT(*) AS n FROM observations o JOIN varieties v ON v.id=o.variety_id "
-                "WHERE o.week_id=? AND o.bbch_code IS NOT NULL AND v.active=1", (a.week["id"],))["n"]
+            units = a.db.pheno_units()
+            ids = {v["id"] for v in units}
+            done = sum(1 for r in a.db.query(
+                "SELECT variety_id FROM observations WHERE week_id=? AND bbch_code IS NOT NULL",
+                (a.week["id"],)) if r["variety_id"] in ids)
             what = {"predio": "sectores", "tratamientos": "parcelas"}.get(
                 (ws or {}).get("kind") if (ws or {}).get("kind") == "tratamientos" else (ws or {}).get("profile"),
                 "registros")
@@ -2282,6 +2283,15 @@ class VarietiesTab(MDScreen):
         app().open_variety(variety_id)
 
     # ------------------------------------------- tratamientos × repeticiones
+    def _toggle_unified(self, on: bool):
+        a = app()
+        a.db.set_unified_pheno(on)
+        a.toast("Fenología unificada: un registro por semana para todo el ensayo" if on
+                else "Fenología por parcela: un registro por tratamiento y repetición")
+        self.refresh()
+        if a.home is not None:
+            a.refresh_home()
+
     def _catalog_card(self, box):
         import catalog
         from kivy.factory import Factory
@@ -2323,6 +2333,26 @@ class VarietiesTab(MDScreen):
         b3.bind(on_release=lambda *_: pick_catalog(self._set_trial_variety, "id",
                                                    allow_none="— Sin variedad para todo el ensayo"))
         card.add_widget(b3)
+        box.add_widget(card)
+        box.add_widget(Widget(size_hint_y=None, height=dp(8)))
+        # Fenología unificada: una sola fenología para todo el ensayo (ningún tratamiento la
+        # cambia); los tratamientos y repeticiones siguen para las mediciones.
+        card = Factory.PaperCard()
+        card.add_widget(Factory.SectionLabel(text="FENOLOGÍA DEL ENSAYO"))
+        on = db.unified_pheno
+        card.add_widget(Factory.Body(
+            text="[b]Unificada[/b]: un solo estado BBCH por semana para todo el ensayo." if on else
+                 "[b]Por parcela[/b]: el estado BBCH se registra en cada tratamiento y repetición.",
+            markup=True))
+        b4 = Factory.GhostButton(icon="sprout" if on else "grid",
+                                 text="Pasar a fenología por parcela" if on else "Usar fenología unificada")
+        b4.bind(on_release=lambda *_: self._toggle_unified(not on))
+        card.add_widget(b4)
+        card.add_widget(Factory.Muted(
+            text="Úsela cuando ningún tratamiento cambia la fenología (p. ej. corte de mulch): en "
+                 "Muestreo queda una sola tarjeta «Fenología del ensayo» y los informes muestran una "
+                 "sola curva. Las mediciones siguen por tratamiento y repetición (con ANOVA). Nada se "
+                 "borra al cambiar: los registros por parcela vuelven a verse al desactivarla."))
         box.add_widget(card)
         box.add_widget(Widget(size_hint_y=None, height=dp(8)))
         # Qué significa cada tratamiento: se ve en la ficha de muestreo y en los informes.
@@ -3907,7 +3937,7 @@ class ReportsTab(MDScreen):
             self.sel_week = a.week
             self.sel_from, self.sel_to = weeks[0], a.week
         if self.sel_variety is None or not a.db.get_variety(self.sel_variety["id"]):
-            vs = a.db.list_varieties()
+            vs = a.db.pheno_units()
             self.sel_variety = vs[0] if vs else None
         trial = a.db.is_trial
         # self.ids guarda referencias DÉBILES: al quitar la tarjeta de la pantalla se
@@ -3972,7 +4002,7 @@ class ReportsTab(MDScreen):
         def choose(v):
             self.sel_variety = v
             self._labels()
-        open_menu(caller, [(ph.unit_compact(v), lambda v=v: choose(v)) for v in app().db.list_varieties()])
+        open_menu(caller, [(ph.unit_compact(v), lambda v=v: choose(v)) for v in app().db.pheno_units()])
 
     def pick_photo_mode(self):
         a = app()

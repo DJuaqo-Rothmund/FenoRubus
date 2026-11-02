@@ -300,6 +300,10 @@ class LabeledDB:
         names = self._names()
         return [self._label(v, names) for v in self._db.list_varieties(*a, **kw)]
 
+    def pheno_units(self, *a, **kw):
+        names = self._names()
+        return [self._label(v, names) for v in self._db.pheno_units(*a, **kw)]
+
     def get_variety(self, variety_id):
         return self._label(self._db.get_variety(variety_id), self._names())
 
@@ -576,7 +580,7 @@ class ReportGenerator:
             week_from, week_to = week_to, week_from
         self.db.ensure_weeks(season, week_to)
         weeks = [w for w in self.db.list_weeks(season, include_skipped=False) if week_from <= w["week_number"] <= week_to]
-        varieties = self.db.list_varieties()
+        varieties = self.db.pheno_units()
         images = self._images(package, max_side=480)
         heat = self._heatmap(season, weeks, varieties)
         strips = []
@@ -637,7 +641,7 @@ class ReportGenerator:
                        for f in self.db.list_attachments(variety_id, season, general=True)
                        for src in [images.src(f["path"], 480)] if src]
         all_weeks = self.db.list_weeks(season, include_skipped=False)
-        compare = self._compare(self._heatmap(season, all_weeks, self.db.list_varieties()),
+        compare = self._compare(self._heatmap(season, all_weeks, self.db.pheno_units()),
                                 all_weeks, [variety_id])
         title = f"Ficha fenológica · {v['name']}"
         return self._render(
@@ -658,7 +662,7 @@ class ReportGenerator:
             weeks = [w for w in weeks if w["week_number"] <= week_to]
         if not weeks:
             raise ValueError("No hay semanas de muestreo registradas en la temporada.")
-        varieties = self.db.list_varieties()
+        varieties = self.db.pheno_units()
         heat = self._heatmap(season, weeks, varieties)
         images = self._images(package, max_side=360)
 
@@ -724,6 +728,8 @@ class ReportGenerator:
         parcels = [p for t in trts for p in t["parcels"]]
         # Solo el tramo con datos (sin las semanas vacías del inicio y del final).
         ids = {p["id"] for p in parcels}
+        if self.db.unified_pheno:           # fenología del ensayo (una sola)
+            ids |= {u["id"] for u in self.db.pheno_units()}
         used = {wn for (vid, wn), o in matrix.items() if vid in ids and o["bbch_code"] is not None}
         used |= {e["week_number"] for m in self.db.list_measures()
                  for e in self.db.list_entries(m["id"], season=season) if e["variety_id"] in ids}
@@ -845,8 +851,9 @@ class ReportGenerator:
         return self._render(
             "treatments.html", f"tratamientos_{season}", "tratamientos", title, images, package,
             weeks=weeks, rows=rows, tests=tests, compare=compare, ranking=ranking, max_abs=max_abs,
-            milestones=milestones, measures=measures, treatments=trts,
-            heat=self._heatmap(season, weeks, parcels), n_t=nt or len(trts), n_r=nr,
+            milestones=milestones, measures=measures, treatments=trts, unified=self.db.unified_pheno,
+            heat=self._heatmap(season, weeks, self.db.pheno_units() if self.db.unified_pheno else parcels),
+            n_t=nt or len(trts), n_r=nr,
             subtitle=f"{nt or len(trts)} tratamientos × {nr} repeticiones · {ph.season_title(season)} · "
                      f"Semanas {ph.week_of_year(weeks[0])}–{ph.week_of_year(weeks[-1])}")
 
@@ -873,7 +880,7 @@ def report_summary(db, kind: str, season: int, week_id: int | None = None,
                    variety_id: int | None = None) -> dict:
     """Qué incluirá el informe y qué datos faltan (sin generar nada)."""
     db = db if isinstance(db, LabeledDB) else LabeledDB(db)
-    varieties = db.list_varieties()
+    varieties = db.pheno_units()
     weeks = db.list_weeks(season, include_skipped=(kind == "weekly"))
     if kind == "weekly":
         weeks = [w for w in weeks if w["id"] == week_id]

@@ -76,11 +76,12 @@ def today_tasks() -> list[dict]:
     except Exception:  # noqa: BLE001
         pass
     try:
-        units = db.list_varieties()
+        units = db.pheno_units()
         if units:
-            n = db.query_one("SELECT COUNT(*) AS n FROM observations o JOIN varieties v ON v.id=o.variety_id "
-                             "WHERE o.week_id=? AND o.bbch_code IS NOT NULL AND v.active=1",
-                             (a.week["id"],))["n"]
+            ids = {v["id"] for v in units}
+            n = sum(1 for r in db.query("SELECT variety_id FROM observations WHERE week_id=? "
+                                        "AND bbch_code IS NOT NULL", (a.week["id"],))
+                    if r["variety_id"] in ids)
             tasks.append({"key": "sampling", "title": f"Muestreo semana {ph.week_of_year(a.week)}",
                           "short": "muestreo", "done": n >= len(units),
                           "detail": f"{n} de {len(units)} registrados", "action": "Ir", "run": a.enter_home})
