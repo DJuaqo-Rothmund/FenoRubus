@@ -32,8 +32,10 @@ HAND_THICK = 1.2                 # grosor de las manijas (× hand_w del logo)
 LOTTIE_FPS = 60                  # cuadros por segundo de la animación nativa (Lottie)
 
 
-def load_layout() -> dict:
-    with open(os.path.join(DIR, "layout.json"), encoding="utf-8") as f:
+def load_layout(path: str = DIR) -> dict:
+    """Capas de un logo: las de PhenoRubus (assets/ui/splash) o las de PhenoBlue y PhenoCran
+    (assets/crops/<cultivo>/splash, tools/make_crop_splash.py)."""
+    with open(os.path.join(path, "layout.json"), encoding="utf-8") as f:
         return json.load(f)
 
 

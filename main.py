@@ -261,7 +261,6 @@ class FenoRubusApp(MDApp):
         else:
             self._load_module(theme.crop_id)
             self.sm.current = "crops"
-            Clock.schedule_once(self._preload_idle, 0.5)
 
     # --------------------------------------- carga diferida (arranque rápido)
     @cached_property
@@ -570,7 +569,10 @@ class FenoRubusApp(MDApp):
             return
         self._frame += 1
         if self._frame < len(theme.AEON_FRAMES):
-            self.sm.get_screen("launch").ids.anim.source = theme.AEON_FRAMES[self._frame]
+            # Sin caché: cada cuadro se usa una vez (no se juntan 52 texturas en memoria).
+            from kivy.core.image import Image as CoreImage
+            img = self.sm.get_screen("launch").ids.anim
+            img.texture = CoreImage(theme.AEON_FRAMES[self._frame], nocache=True).texture
             return
         if self._frame >= len(theme.AEON_FRAMES) + 6:   # el logo completo un momento
             self._anim_ev.cancel()
@@ -585,7 +587,6 @@ class FenoRubusApp(MDApp):
         Clock.schedule_once(lambda *_: self.sm.has_screen("launch")
                             and self.sm.remove_widget(self.sm.get_screen("launch")), 0.6)
         Clock.schedule_once(lambda *_: self._after_launch(), 0.4)
-        Clock.schedule_once(self._preload_idle, 0.8)
 
     def _run_preload_step(self):
         step = self._preload.pop(0)
@@ -597,26 +598,17 @@ class FenoRubusApp(MDApp):
         if not self._preload:
             self._preloaded = True
 
-    def _preload_idle(self, *_):
-        """Precarga del módulo mientras se ve la pantalla de cultivos (un paso cada tanto)."""
-        if self._preload and self.sm.current == "crops":
-            self._run_preload_step()
-            Clock.schedule_once(self._preload_idle, 0.05)
-
     def _preload_steps(self):
         """Pasos de la precarga, del más necesario al menos (uno por cuadro)."""
         def home():
             self.home = HomeScreen(name="home")
             self.sm.add_widget(self.home)
 
-        return [home, lambda: self.home.refresh_current(), lambda: self.start,
-                lambda: self.workspaces_screen, lambda: self.observation,
-                lambda: self.settings, lambda: self.settings.ids.varieties.refresh(),
-                lambda: self.variety, lambda: self.measure, lambda: self.timeline,
-                lambda: self.sectors, lambda: self.ailab,
-                lambda: self.home.ids.reports.refresh(),
-                lambda: self.home.ids.preview.refresh(),
-                self._preload_images]
+        # Solo lo necesario para entrar (mientras corre la animación del módulo): cada
+        # pantalla tarda 40-250 ms en armarse y trababa la animación. Las demás (registro,
+        # ajustes, ficha, mediciones, línea de tiempo, IA…) se arman al abrirlas.
+        return [lambda: self.start, home, lambda: self.home.refresh_current(),
+                lambda: self.workspaces_screen, self._preload_images]
 
     def _preload_modules(self):
         for mod in ("numpy", "ai_classifier", "jinja2", "reporter", "pdf_report"):

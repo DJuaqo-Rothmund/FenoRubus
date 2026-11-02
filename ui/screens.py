@@ -672,9 +672,11 @@ class SplashScreen(MDScreen):
     def __init__(self, **kw):
         super().__init__(**kw)
         if theme.crop_id != "frambuesa":
-            from ui.splash_anim import CropLogoAnim
+            # PhenoBlue y PhenoCran: la misma animación que PhenoRubus, con sus capas.
+            from platform_utils import resource_path
+            from ui.splash_anim import LogoAnim
             old = self.ids.logo
-            new = CropLogoAnim(theme.LOGO, size_hint=old.size_hint)
+            new = LogoAnim(resource_path("assets", "crops", theme.crop_id, "splash"), size_hint=old.size_hint)
             parent = old.parent
             parent.remove_widget(old)
             parent.add_widget(new)
@@ -889,14 +891,13 @@ class CropScreen(MDScreen):
         for crop in crops.CROPS.values():
             w = self.ids[f"c_{crop.id}"]
             w.app_name, w.logo, w.accent = crop.app, theme.crop_logo(crop.id), theme.crop_accent(crop.id)
-        self.ids.account.bind(on_touch_down=self._account_touch)
 
     def on_pre_enter(self, *_):
         self.refresh_account()
 
     def on_enter(self, *_):
         self._t0 = time.monotonic()
-        self._ev = Clock.schedule_interval(self._float, 1 / 30)
+        self._ev = Clock.schedule_interval(self._float, 1 / 20)   # suave y liviano
 
     def on_leave(self, *_):
         if getattr(self, "_ev", None):
@@ -918,18 +919,11 @@ class CropScreen(MDScreen):
         on = bool(global_get("drive_enabled", False))
         btn = self.ids.google_btn
         if on:
-            self.ids.account.text = f"Google Drive · {acc or 'cuenta conectada'} · tocar para cambiar"
-            btn.opacity, btn.disabled, btn.height = 0, True, 0
+            self.ids.account.text = f"Google Drive conectado · {acc or 'cuenta de Google'}"
+            btn.text = "Cambiar cuenta de Google"
         else:
             self.ids.account.text = "Sin cuenta: se guarda en el teléfono hasta conectarla"
-            btn.opacity, btn.disabled, btn.height = 1, False, dp(52)
-
-    def _account_touch(self, label, touch):
-        from platform_utils import global_get
-        if label.collide_point(*touch.pos) and global_get("drive_enabled", False):
-            self.connect_google()
-            return True
-        return False
+            btn.text = "Inicia sesión con Google"
 
     def connect_google(self):
         a = app()
@@ -998,12 +992,12 @@ class StartScreen(MDScreen):
             self._intro_ready = False
             self._play_intro()
         self._t0 = time.monotonic()
-        self._float_ev = Clock.schedule_interval(self._float, 1 / 30)
+        self._float_ev = Clock.schedule_interval(self._float, 1 / 20)
 
     FLOAT = ((0.0, "ic_id"), (1.6, "ic_predio"), (4.8, "ic_nb"))   # desfase de cada ícono
 
     def _float(self, *_):
-        """Flotación suave y continua de los íconos (30 cuadros por segundo: liviano)."""
+        """Flotación suave y continua de los íconos (20 cuadros por segundo: liviano)."""
         t = time.monotonic() - self._t0
         for phase, key in self.FLOAT:
             w = self.ids[key]

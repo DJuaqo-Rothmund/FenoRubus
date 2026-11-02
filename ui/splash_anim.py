@@ -23,14 +23,15 @@ from kivy.uix.widget import Widget
 from ui import splash_timeline as tl
 
 DIR = tl.DIR
-MAX_DT = 1 / 24        # una traba larga no adelanta la animación (se pausa)
+MAX_DT = 1 / 6         # mientras se precarga el módulo: la animación sigue el reloj (salta
+                       # cuadros en vez de ir más lenta), salvo trabas muy largas
 
 
 class LogoAnim(Widget):
-    def __init__(self, **kw):
+    def __init__(self, layers: str = DIR, **kw):
         super().__init__(**kw)
-        self.L = tl.load_layout()
-        tex = lambda name: CoreImage(os.path.join(DIR, name)).texture  # noqa: E731
+        self.L = tl.load_layout(layers)
+        tex = lambda name: CoreImage(os.path.join(layers, name), mipmap=True).texture  # noqa: E731
         self._tex = {"berry": tex("berry.png"), "ring": tex("ring.png")}
         for ic in self.L["icons"]:
             self._tex[ic["file"]] = tex(ic["file"])

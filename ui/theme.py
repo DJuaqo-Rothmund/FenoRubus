@@ -314,7 +314,8 @@ def configure(crop: str | None = None, style_name: str | None = None) -> None:
         if style == "noche":
             g["BERRY_SOFT"] = FRUIT_SOFT_DARK["noche"].get(crop_id, "#42223A")
     LOGO = _crop_asset("logo.png", crop_id)
-    WORDMARK = _crop_asset("wordmark.png", crop_id)
+    # Nombre del módulo sin «App», misma letra para los tres (tools/make_crop_splash.py).
+    WORDMARK = resource_path("assets", "crops", crop_id, "name.png")
     if style == "pastel":
         BACKGROUND = _crop_asset("background.jpg", crop_id)
         START_BG = _crop_asset("start_bg.jpg", crop_id)
