@@ -28,6 +28,7 @@ from platform_utils import IS_ANDROID
 
 SCOPE = "https://www.googleapis.com/auth/drive.file"
 ROOT_FOLDER = "PhenoRubus · Imágenes de Fenología"   # raíz antigua (hasta la 1.1.151)
+_FOLDER_LOCK = threading.RLock()     # buscar-o-crear carpetas: de a una (ver _folder)
 FOLDER_MIME = "application/vnd.google-apps.folder"
 API = "https://www.googleapis.com/drive/v3/files"
 UPLOAD = "https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=id"
@@ -346,8 +347,12 @@ def is_metered() -> bool:
 class DriveBackup:
     TOKEN_TTL = 45 * 60
 
-    def __init__(self, db, authorizer=None, transport=None, metered=is_metered):
+    def __init__(self, db, authorizer=None, transport=None, metered=is_metered, crop=None):
+        import crops
         self.db = db
+        # El cultivo queda fijo: aunque luego se active otro (sincronizar todo), lo de esta
+        # base va siempre a la carpeta de SU módulo.
+        self.crop = crop or crops.current()
         self._authorizer = authorizer
         self.transport = transport or urllib_transport
         self.metered = metered
@@ -686,32 +691,40 @@ class DriveBackup:
         key = f"{parent or 'root'}/{name}"
         if key in cache:
             return cache[key]
-        esc = name.replace("\\", "\\\\").replace("'", "\\'")
-        q = f"name='{esc}' and mimeType='{FOLDER_MIME}' and trashed=false"
-        if parent:
-            q += f" and '{parent}' in parents"
-        found = self._call("GET", f"{API}?" + urllib.parse.urlencode(
-            {"q": q, "fields": "files(id)", "spaces": "drive"})).get("files", [])
-        if found:
-            fid = found[0]["id"]
-        else:
-            meta = {"name": name, "mimeType": FOLDER_MIME}
-            if parent:
-                meta["parents"] = [parent]
-            fid = self._call("POST", f"{API}?fields=id", json.dumps(meta).encode(),
-                             "application/json; charset=UTF-8")["id"]
-        cache[key] = fid
-        self.db.set_setting("drive_folders", cache)
-        return fid
+        # Una sola búsqueda-o-creación a la vez en toda la app: subidas, sincronización y
+        # «sincronizar todo» corren en hilos distintos y, sin esto, cada uno creaba su copia.
+        with _FOLDER_LOCK:
+            cache = self.db.get_setting("drive_folders") or {}
+            if key in cache:
+                return cache[key]
+            fid = self._find_folder(name, parent)
+            if fid is None:
+                meta = {"name": name, "mimeType": FOLDER_MIME}
+                if parent:
+                    meta["parents"] = [parent]
+                fid = self._call("POST", f"{API}?fields=id", json.dumps(meta).encode(),
+                                 "application/json; charset=UTF-8")["id"]
+            cache = self.db.get_setting("drive_folders") or {}
+            cache[key] = fid
+            self.db.set_setting("drive_folders", cache)
+            return fid
 
     def root_id(self) -> str:
         """Carpeta del módulo en Drive: «AeonCrop/<PhenoRubus|PhenoBlue|PhenoCran>».
         Frambuesa: la primera vez, la carpeta antigua «PhenoRubus · Imágenes de Fenología»
         (con todo lo respaldado) se mueve ahí y pasa a llamarse «PhenoRubus»."""
         import crops
-        crop = crops.current()
+        crop = self.crop
         cache = self.db.get_setting("drive_folders") or {}
         key = f"module/{crop.drive_folder}"
+        if key in cache:
+            return cache[key]
+        with _FOLDER_LOCK:
+            return self._root_locked(crop, key)
+
+    def _root_locked(self, crop, key: str) -> str:
+        import crops
+        cache = self.db.get_setting("drive_folders") or {}
         if key in cache:
             return cache[key]
         top = self._find_folder(crops.DRIVE_TOP, None)
@@ -743,13 +756,58 @@ class DriveBackup:
         return fid
 
     def _find_folder(self, name: str, parent: str | None) -> str | None:
+        """La carpeta con ese nombre (la más antigua). Si hay copias repetidas (de versiones
+        que las creaban a la vez desde dos hilos), su contenido pasa a la más antigua y las
+        copias vacías van a la papelera."""
         esc = name.replace("\\", "\\\\").replace("'", "\\'")
         q = f"name='{esc}' and mimeType='{FOLDER_MIME}' and trashed=false"
         if parent:
             q += f" and '{parent}' in parents"
         found = self._call("GET", f"{API}?" + urllib.parse.urlencode(
-            {"q": q, "fields": "files(id)", "spaces": "drive"})).get("files", [])
-        return found[0]["id"] if found else None
+            {"q": q, "fields": "files(id, name, createdTime)", "spaces": "drive",
+             "orderBy": "createdTime"})).get("files", [])
+        if not found:
+            return None
+        found.sort(key=lambda f: f.get("createdTime") or "")
+        keep = found[0]["id"]
+        for dup in [f for f in found[1:] if f.get("name") == name and f["id"] != keep]:
+            try:
+                self._merge_folder(dup["id"], keep)
+            except DriveError as exc:      # se reintenta la próxima vez; nunca frena la subida
+                self.log(f"Drive: no se pudo juntar la carpeta repetida «{name}»: {exc}", error=True)
+        return keep
+
+    def _merge_folder(self, src: str, dst: str) -> None:
+        """Mueve todo lo de `src` a `dst` (juntando también subcarpetas repetidas) y manda
+        `src`, ya vacía, a la papelera."""
+        token = None
+        children = []
+        while True:
+            params = {"q": f"'{src}' in parents and trashed=false",
+                      "fields": "nextPageToken, files(id, name, mimeType)", "pageSize": "1000"}
+            if token:
+                params["pageToken"] = token
+            res = self._call("GET", f"{API}?" + urllib.parse.urlencode(params))
+            children += res.get("files", [])
+            token = res.get("nextPageToken")
+            if not token:
+                break
+        for ch in children:
+            if ch.get("mimeType") == FOLDER_MIME:
+                esc = ch["name"].replace("\\", "\\\\").replace("'", "\\'")
+                same = self._call("GET", f"{API}?" + urllib.parse.urlencode(
+                    {"q": f"name='{esc}' and mimeType='{FOLDER_MIME}' and '{dst}' in parents and trashed=false",
+                     "fields": "files(id)"})).get("files", [])
+                if same:
+                    self._merge_folder(ch["id"], same[0]["id"])
+                    continue
+            self._call("PATCH", f"{API}/{ch['id']}?" + urllib.parse.urlencode(
+                {"addParents": dst, "removeParents": src, "fields": "id"}), b"{}",
+                "application/json; charset=UTF-8")
+        self._call("PATCH", f"{API}/{src}?fields=id", json.dumps({"trashed": True}).encode(),
+                   "application/json; charset=UTF-8")
+        self.db.set_setting("drive_folders", {})      # las rutas en caché pudieron cambiar
+        self.log("Drive: se juntó una carpeta repetida")
 
     def _upload(self, path: str, remote: str) -> str:
         *dirs, fname = remote.split("/")

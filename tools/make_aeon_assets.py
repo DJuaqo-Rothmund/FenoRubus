@@ -11,7 +11,9 @@ Imágenes de AeonCrop (la app Lab) a partir de los SVG de assets/src:
   PhenoCran; fruit.png / fruit_gris.png: el fruto solo (vista previa).
 * assets/ui/aeon_ia.png y aeon_iaplus.png: IA e IA+ (dibujo blanco teñido de celeste)
   sobre la burbuja azul con estrellas, centrada en el cerebro; aeon_ia_glow.png: su brillo neón.
-* assets/icon_aeoncrop.png: ícono de la app.
+* assets/icon_aeoncrop.png: ícono de la app en el teléfono, SIN el nombre (la huella y el
+  reloj de arena: `node tools/render_aeon_icon.js /tmp/marca.png` y luego este script con
+  esa imagen como segundo argumento).
 """
 from __future__ import annotations
 
@@ -111,9 +113,10 @@ def main(src: str):
     glow.alpha_composite(g, ((420 - g.width) // 2, (420 - g.height) // 2))
     glow.save(os.path.join(UI, "aeon_ia_glow.png"))
     on_blob(tint(load("IAplus"), (150, 210, 255))).save(os.path.join(UI, "aeon_iaplus.png"))
-    icon = Image.new("RGBA", (512, 512), (242, 244, 238, 255))
-    icon.alpha_composite(square(load("AeonCrop"), 512, .08))
-    icon.convert("RGB").save(os.path.join(ROOT, "assets", "icon_aeoncrop.png"))
+    if len(sys.argv) > 2:      # ícono sin letras (tools/render_aeon_icon.js)
+        icon = Image.new("RGBA", (512, 512), (242, 244, 238, 255))
+        icon.alpha_composite(square(Image.open(sys.argv[2]).convert("RGBA"), 512, .10))
+        icon.convert("RGB").save(os.path.join(ROOT, "assets", "icon_aeoncrop.png"))
     presplash()
 
 

@@ -107,10 +107,18 @@ jobs:
         with:
           path: ~/.buildozer
           key: buildozer-sdk-${{ runner.os }}-${{ github.run_id }}
+      # Instalador con el nombre de la app (release.env › APK_NAME: «AeonCrop» en la Lab).
+      - name: Nombre del instalador
+        run: |
+          source release.env
+          NAME="${APK_NAME:-fenorubus}"
+          APK=$(ls bin/*.apk | head -1)
+          mv "$APK" "bin/$NAME-$(cat version.txt).apk"
+          echo "APK_ARTIFACT=$(echo "$NAME" | tr '[:upper:]' '[:lower:]')-apk" >> "$GITHUB_ENV"
       - name: Publicar APK
         uses: actions/upload-artifact@v4
         with:
-          name: fenorubus-apk
+          name: ${{ env.APK_ARTIFACT }}
           path: bin/*.apk
           if-no-files-found: error
 

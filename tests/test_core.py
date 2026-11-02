@@ -2381,10 +2381,12 @@ def test_drive_root_moves_legacy_folder(db):
     top = tree["old"]["parents"][0]
     assert tree[top]["name"] == "AeonCrop" and tree["old"]["name"] == "PhenoRubus"
     assert drive.root_id() == "old" and patched == ["old"]          # en caché: una sola vez
+    # Cada conexión queda atada a su cultivo: activar otro no cambia su carpeta.
+    crops.activate("arandano")
     try:
-        crops.activate("arandano")
+        assert drive.root_id() == "old"
         db.set_setting("drive_folders", {})
-        blue = drive.root_id()
+        blue = DriveBackup(db, authorizer=Auth(), transport=transport, metered=lambda: False).root_id()
         assert tree[blue] == {"name": "PhenoBlue", "parents": [top]}
     finally:
         crops.activate("frambuesa")
@@ -2470,3 +2472,54 @@ def test_drive_top_folder_renamed_to_aeoncrop(db):
 
     drive = DriveBackup(db, authorizer=Auth(), transport=transport, metered=lambda: False)
     assert drive.root_id() == "rub" and tree["top"]["name"] == "AeonCrop"
+
+
+def test_drive_duplicate_folders_are_merged(db):
+    """Dos «PhenoBlue» (creadas a la vez por dos hilos en versiones anteriores): todo pasa a
+    la más antigua, juntando también las subcarpetas repetidas, y la copia va a la papelera."""
+    import json
+    import urllib.parse
+    import crops
+    from drive_backup import DriveBackup
+
+    tree = {"top": {"name": "AeonCrop", "parents": ["root"], "t": "1"},
+            "b1": {"name": "PhenoBlue", "parents": ["top"], "t": "2"},
+            "b2": {"name": "PhenoBlue", "parents": ["top"], "t": "3"},
+            "s1": {"name": "Sincronización", "parents": ["b1"], "t": "4"},
+            "s2": {"name": "Sincronización", "parents": ["b2"], "t": "5"},
+            "f1": {"name": "a.json", "parents": ["s2"], "t": "6", "file": True},
+            "f2": {"name": "foto.jpg", "parents": ["b2"], "t": "7", "file": True}}
+    FOLDER = "application/vnd.google-apps.folder"
+
+    def transport(method, url, headers, body):
+        u = urllib.parse.urlsplit(url)
+        qs = urllib.parse.parse_qs(u.query)
+        if method == "GET":
+            q = qs["q"][0]
+            par = q.split("' in parents")[0].rsplit("'", 1)[1] if "in parents" in q else None
+            name = q.split("name='")[1].split("' and")[0] if "name='" in q else None
+            hits = [{"id": k, "name": v["name"], "createdTime": v["t"],
+                     "mimeType": "x" if v.get("file") else FOLDER}
+                    for k, v in tree.items() if not v.get("trashed")
+                    and (name is None or v["name"] == name) and (par is None or par in v["parents"])
+                    and (name is None or not v.get("file"))]
+            return 200, json.dumps({"files": hits}).encode()
+        if method == "PATCH":
+            fid = u.path.rsplit("/", 1)[1]
+            meta = json.loads(body or b"{}")
+            if meta.get("trashed"):
+                tree[fid]["trashed"] = True
+            if "addParents" in qs:
+                tree[fid]["parents"] = [qs["addParents"][0]]
+            return 200, b'{"id": "%s"}' % fid.encode()
+        raise AssertionError("no debe crear carpetas")
+
+    class Auth:
+        def get_token(self, interactive, timeout=None):
+            return "t"
+
+    drive = DriveBackup(db, authorizer=Auth(), transport=transport, metered=lambda: False,
+                        crop=crops.get("arandano"))
+    assert drive.root_id() == "b1"
+    assert tree["b2"].get("trashed") and tree["s2"].get("trashed")
+    assert tree["f1"]["parents"] == ["s1"] and tree["f2"]["parents"] == ["b1"]

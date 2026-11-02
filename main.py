@@ -914,9 +914,11 @@ class FenoRubusApp(MDApp):
                             res = self.sync.run(manual=True)
                         else:
                             crops.activate(crop.id)
-                            wss = Workspaces(get_data_dir())
+                            data_dir = get_data_dir()
+                            wss = Workspaces(data_dir)
                             db = wss.open(wss.last())
-                            res = DriveSync(DriveBackup(db), wss, wss.open, get_data_dir()).run(manual=True)
+                            crops.activate(loaded)       # el resto de la app sigue en su cultivo
+                            res = DriveSync(DriveBackup(db, crop=crop), wss, wss.open, data_dir).run(manual=True)
                         msgs.append(f"{crop.app}: {summary(res)}")
                     except Exception as exc:  # noqa: BLE001
                         msgs.append(f"{crop.app}: {explain(str(exc))}")
