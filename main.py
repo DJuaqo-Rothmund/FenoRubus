@@ -716,7 +716,14 @@ class FenoRubusApp(MDApp):
         return True
 
     def on_resume(self):
+        # Kivy llama on_resume desde dentro del filtro de eventos nativo de SDL, con la
+        # Activity todavía volviendo: una llamada a Java ahí (p. ej. AlarmManager al
+        # refrescar Ajustes) cerraba la app con un fallo nativo. Todo se hace un momento
+        # después, ya en un cuadro normal de Kivy.
         _step("vuelve")
+        Clock.schedule_once(self._after_resume, .4)
+
+    def _after_resume(self, *_):
         self.week = self.db.current_week() if self.week is None else self.week
         if "drive" in self.__dict__:
             self.drive.flush_async()

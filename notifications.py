@@ -184,10 +184,13 @@ def _pending_intent(ctx):
 def can_schedule_exact() -> bool:
     if not IS_ANDROID or android_api_level() < 31:
         return True
-    from jnius import autoclass  # type: ignore
-    Context = autoclass("android.content.Context")
-    am = android_context().getSystemService(Context.ALARM_SERVICE)
-    return bool(am.canScheduleExactAlarms())
+    try:
+        from jnius import autoclass  # type: ignore
+        Context = autoclass("android.content.Context")
+        am = android_context().getSystemService(Context.ALARM_SERVICE)
+        return bool(am.canScheduleExactAlarms())
+    except Exception:  # noqa: BLE001 (sin respuesta de Android: no se molesta con el aviso)
+        return True
 
 
 def request_exact_alarm_permission() -> None:
