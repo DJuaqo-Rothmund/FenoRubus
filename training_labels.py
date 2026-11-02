@@ -148,7 +148,7 @@ class LabelStore:
         """Baja las marcas de Drive (las del PC u otro teléfono), las suma y sube el total si
         aquí hay cambios. drive_sync: sync_drive.DriveSync. Devuelve cuántas fotos llegaron."""
         drive = drive_sync.drive
-        root = drive.root_id()             # «App Fenología/<módulo>»: marcas de cada cultivo
+        root = drive.root_id()             # «AeonCrop/<módulo>»: marcas de cada cultivo
         folder = drive._folder(DRIVE_DIR, root)
         files = [f for f in drive_sync._list(folder) if f["name"].endswith(".json")]
         main = next((f for f in files if f["name"] == DRIVE_FILE), None)

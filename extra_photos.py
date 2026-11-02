@@ -4,7 +4,7 @@ extra_photos.py
 Fotos extra para entrenar IA+: fotos que no son de ningún ensayo ni predio (de otros
 años, de otros lugares…), en una carpeta propia de Drive:
 
-    App Fenología/<módulo>/IA+ Conocimiento ampliado/
+    AeonCrop/<módulo>/IA+ Conocimiento ampliado/
         20261028-153012-extra.jpg          ← sacadas o elegidas en el teléfono
         2024/Regina/IMG_1234.jpg           ← subidas desde la web (con sus subcarpetas)
 

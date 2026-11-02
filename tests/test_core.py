@@ -439,7 +439,7 @@ def test_drive_backup_queue_with_fake_api(db, tmp_path):
     names = [m["name"] for m in folders.values()]
     start = dt.date.fromisoformat(week["start_date"])
     iso_w, iso_y = start.isocalendar()[1], start.isocalendar()[0]
-    assert names[:2] == ["App Fenología", "PhenoRubus"] and f"Año {iso_y}" in names
+    assert names[:2] == ["AeonCrop", "PhenoRubus"] and f"Año {iso_y}" in names
     week_dir = f"Semana {iso_w:02d} · {start:%d-%m-%Y}"
     assert week_dir in names                      # carpeta por semana de muestreo
     wk = next(fid for fid, m in folders.items() if m["name"] == week_dir)
@@ -2339,8 +2339,8 @@ def test_extra_sampling_from_web_bundle(tmp_path):
 
 
 def test_drive_root_moves_legacy_folder(db):
-    """La carpeta antigua «PhenoRubus · Imágenes de Fenología» pasa a «App Fenología/PhenoRubus»
-    (se mueve y se renombra: todo lo respaldado sigue ahí); arándano usa «App Fenología/PhenoBlue»."""
+    """La carpeta antigua «PhenoRubus · Imágenes de Fenología» pasa a «AeonCrop/PhenoRubus»
+    (se mueve y se renombra: todo lo respaldado sigue ahí); arándano usa «AeonCrop/PhenoBlue»."""
     import json
     import urllib.parse
     import crops
@@ -2379,7 +2379,7 @@ def test_drive_root_moves_legacy_folder(db):
     rid = drive.root_id()
     assert rid == "old" and patched == ["old"]
     top = tree["old"]["parents"][0]
-    assert tree[top]["name"] == "App Fenología" and tree["old"]["name"] == "PhenoRubus"
+    assert tree[top]["name"] == "AeonCrop" and tree["old"]["name"] == "PhenoRubus"
     assert drive.root_id() == "old" and patched == ["old"]          # en caché: una sola vez
     try:
         crops.activate("arandano")
@@ -2440,3 +2440,33 @@ def test_blueberry_color_prior_prefers_ripe_when_blue():
         assert int(codes[int(np.argmax(s))]) in (85, 89)
     finally:
         crops.activate("frambuesa")
+
+
+def test_drive_top_folder_renamed_to_aeoncrop(db):
+    """«App Fenología» (versiones anteriores) se renombra a «AeonCrop» con todo adentro."""
+    import json
+    import urllib.parse
+    from drive_backup import DriveBackup
+
+    tree = {"top": {"name": "App Fenología", "parents": ["root"]},
+            "rub": {"name": "PhenoRubus", "parents": ["top"]}}
+
+    def transport(method, url, headers, body):
+        if method == "GET":
+            q = urllib.parse.parse_qs(urllib.parse.urlsplit(url).query)["q"][0]
+            name = q.split("name='")[1].split("' and")[0]
+            par = q.split("' in parents")[0].rsplit("'", 1)[1] if "in parents" in q else None
+            hits = [k for k, v in tree.items() if v["name"] == name and (par is None or par in v["parents"])]
+            return 200, json.dumps({"files": [{"id": k} for k in hits]}).encode()
+        if method == "PATCH":
+            fid = url.split("/files/")[1].split("?")[0]
+            tree[fid]["name"] = json.loads(body)["name"]
+            return 200, b'{"id": "%s"}' % fid.encode()
+        raise AssertionError("no debe crear carpetas")
+
+    class Auth:
+        def get_token(self, interactive, timeout=None):
+            return "t"
+
+    drive = DriveBackup(db, authorizer=Auth(), transport=transport, metered=lambda: False)
+    assert drive.root_id() == "rub" and tree["top"]["name"] == "AeonCrop"

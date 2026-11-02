@@ -53,6 +53,11 @@ MIND_FIRE = "#FFB454"
 BACKGROUND = resource_path("assets", "ui", "background.jpg")
 LOGO = resource_path("assets", "ui", "logo.png")
 APP_LOGO = resource_path("assets", "ui", "app_logo.png")   # los tres frutos (pantalla de cultivos)
+AEON_LOGO = resource_path("assets", "ui", "aeoncrop.png")   # AeonCrop (pantalla principal)
+AEON_FRAMES = [resource_path("assets", "aeon_anim", f"f{i:03d}.png") for i in range(52)]
+AEON_IA = resource_path("assets", "ui", "aeon_ia.png")
+AEON_IA_GLOW = resource_path("assets", "ui", "aeon_ia_glow.png")
+AEON_IAPLUS = resource_path("assets", "ui", "aeon_iaplus.png")
 WORDMARK = resource_path("assets", "ui", "wordmark.png")
 # Frambuesas ilustradas (vista previa): color = semana con registro; gris = sin registro.
 BERRY_KEYS = ("meeker", "wakefield", "lagorai", "cascade_harvest", "codigo_11", "codigo_24",

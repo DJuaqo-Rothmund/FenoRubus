@@ -3,12 +3,14 @@ crops.py
 ========
 Cultivos de la app (un «módulo» por cultivo, todos con el mismo entorno):
 
+AeonCrop (app Lab) reúne los módulos:
+
 * Frambuesa  → PhenoRubus (el de siempre: sus datos siguen en la carpeta de datos raíz).
 * Arándano   → PhenoBlue  (datos en «cultivos/arandano»).
 * Cranberry  → PhenoCran  (datos en «cultivos/cranberry»).
 
 Cada cultivo tiene su escala fenológica (phenology.py), sus variedades iniciales, su
-carpeta en Google Drive («App Fenología/<módulo>») y su color de fruta (ui/theme.py).
+carpeta en Google Drive («AeonCrop/<módulo>») y su color de fruta (ui/theme.py).
 Elegir un cultivo (`activate`) deja todo listo para abrir su entorno.
 
 Puro Python (sin Kivy): lo usa también el servicio de recordatorios.
@@ -17,7 +19,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-DRIVE_TOP = "App Fenología"      # carpeta grande en «Mi unidad» con un módulo por cultivo
+DRIVE_TOP = "AeonCrop"           # carpeta grande en «Mi unidad» con un módulo por cultivo
+DRIVE_TOP_OLD = "App Fenología"  # nombre anterior (se renombra la primera vez)
 
 
 @dataclass(frozen=True)

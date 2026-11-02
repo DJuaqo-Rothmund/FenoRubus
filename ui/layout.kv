@@ -380,134 +380,141 @@
 # ---------------------------------------------------------------------------
 # Pantalla de cultivos: lo primero al abrir la app (y la cuenta de Google, una para todos)
 # ---------------------------------------------------------------------------
-<CropCard>:
-    orientation: "horizontal"
-    size_hint_y: None
-    height: dp(96)
-    padding: dp(12), dp(8), dp(14), dp(8)
-    spacing: dp(14)
-    radius: [dp(26)]
-    md_bg_color: c(theme.GLASS_STRONG)
-    line_color: c(root.accent, .55)
+<FloatCrop>:
+    # Logo de un cultivo «suelto» en la pantalla principal (flota; tocarlo entra al módulo).
+    size_hint: None, None
+    size: root.side, root.side + dp(22)
+    canvas.before:
+        PushMatrix
+        Translate:
+            xy: 0, root.bob
+    canvas.after:
+        PopMatrix
     Image:
         source: root.logo
-        size_hint: None, None
-        size: dp(78), dp(78)
-        pos_hint: {"center_y": .5}
-        mipmap: True
         fit_mode: "contain"
-    MDBoxLayout:
-        orientation: "vertical"
-        pos_hint: {"center_y": .5}
-        adaptive_height: True
-        spacing: dp(2)
-        MDLabel:
-            text: root.app_name
-            font_style: "H6"
-            bold: True
-            adaptive_height: True
-            theme_text_color: "Custom"
-            text_color: c(root.accent)
-        MDLabel:
-            text: root.crop_name
-            font_style: "Subtitle2"
-            adaptive_height: True
-            theme_text_color: "Custom"
-            text_color: c(theme.INK)
-        MDLabel:
-            text: "[i]" + root.species + "[/i]"
-            markup: True
-            font_style: "Caption"
-            adaptive_height: True
-            theme_text_color: "Custom"
-            text_color: c(theme.MUTED)
-    MDIcon:
-        icon: "chevron-right"
+        mipmap: True
         size_hint: None, None
-        size: dp(28), dp(28)
-        pos_hint: {"center_y": .5}
+        size: (root.side * (.9 if root.state == "down" else 1),) * 2
+        pos: root.center_x - self.width / 2, root.top - root.side / 2 - self.height / 2
+    MDLabel:
+        text: root.app_name
+        halign: "center"
+        font_style: "Caption"
+        bold: True
         theme_text_color: "Custom"
         text_color: c(root.accent)
+        size_hint: None, None
+        size: root.width, dp(20)
+        pos: root.x, root.y
+
+<AiLauncher>:
+    # IA (brillo neón cian) o IA+ (ki rojo) en la pantalla principal.
+    size_hint: None, None
+    size: root.side, root.side + dp(20)
+    MDLabel:
+        text: root.label
+        halign: "center"
+        font_style: "Caption"
+        bold: True
+        theme_text_color: "Custom"
+        text_color: theme.on_bg("#3A5AE6")
+        size_hint: None, None
+        size: root.width, dp(18)
+        pos: root.x, root.y
 
 <CropScreen>:
     md_bg_color: 0, 0, 0, 0
-    MDBoxLayout:
-        orientation: "vertical"
-        padding: dp(20), dp(26), dp(20), dp(18)
-        spacing: dp(10)
+    FloatLayout:
+        id: stage
         Image:
-            source: theme.APP_LOGO
+            source: theme.AEON_LOGO
             fit_mode: "contain"
             mipmap: True
-            size_hint_y: None
-            height: dp(132)
-        MDLabel:
-            text: "App Fenología"
-            halign: "center"
-            font_style: "H5"
-            bold: True
-            adaptive_height: True
-            theme_text_color: "Custom"
-            text_color: c(theme.LEAF_DARK)
-        MDLabel:
-            text: "Elija el cultivo"
-            halign: "center"
-            font_style: "Body2"
-            adaptive_height: True
-            theme_text_color: "Custom"
-            text_color: c(theme.MUTED)
-        Widget:
-            size_hint_y: None
-            height: dp(4)
+            size_hint: None, None
+            size: dp(150), dp(150)
+            pos_hint: {"center_x": .5, "top": .975}
+        FloatCrop:
+            id: c_frambuesa
+            crop_id: "frambuesa"
+            side: dp(128)
+            pos_hint: {"center_x": .5, "center_y": .6}
+            on_release: app.choose_crop(self.crop_id)
+        FloatCrop:
+            id: c_arandano
+            crop_id: "arandano"
+            side: dp(128)
+            pos_hint: {"center_x": .26, "center_y": .43}
+            on_release: app.choose_crop(self.crop_id)
+        FloatCrop:
+            id: c_cranberry
+            crop_id: "cranberry"
+            side: dp(128)
+            pos_hint: {"center_x": .74, "center_y": .43}
+            on_release: app.choose_crop(self.crop_id)
+        AiLauncher:
+            id: ai
+            label: "Entrenador IA"
+            side: dp(100)
+            pos_hint: {"center_x": .34, "center_y": .225}
+        AiLauncher:
+            id: aiplus
+            label: "IA+"
+            plus: True
+            side: dp(100)
+            pos_hint: {"center_x": .66, "center_y": .225}
         MDBoxLayout:
-            id: cards
             orientation: "vertical"
             adaptive_height: True
-            spacing: dp(12)
-        Widget:
-        MDLabel:
-            id: account
-            halign: "center"
-            font_style: "Caption"
-            adaptive_height: True
-            theme_text_color: "Custom"
-            text_color: c(theme.MUTED)
-        GoogleButton:
-            id: google_btn
-            on_release: root.connect_google()
-        MDLabel:
-            text: "By DJuaqo, potenciado con Claude AI"
-            halign: "center"
-            font_style: "Caption"
-            adaptive_height: True
-            theme_text_color: "Custom"
-            text_color: c(theme.MUTED, .8)
+            size_hint_x: .9
+            pos_hint: {"center_x": .5, "y": .02}
+            spacing: dp(4)
+            MDLabel:
+                id: account
+                halign: "center"
+                font_style: "Caption"
+                adaptive_height: True
+                theme_text_color: "Custom"
+                text_color: c(theme.MUTED)
+            GoogleButton:
+                id: google_btn
+                on_release: root.connect_google()
     MDIconButton:
-        icon: "palette-outline"
+        id: gear
+        icon: "cog-outline"
         icon_size: "26sp"
         theme_icon_color: "Custom"
         icon_color: c(theme.LEAF_DARK, .8)
-        pos_hint: {"right": .99, "top": .99}
-        on_release: app.pick_style()
+        pos_hint: {"x": .01, "top": .99}
+        on_release: app.open_settings(general_only=True)
+    MDIconButton:
+        id: syncbtn
+        icon: "sync"
+        icon_size: "26sp"
+        theme_icon_color: "Custom"
+        icon_color: c(theme.LEAF_DARK, .8)
+        pos: gear.right - dp(6), gear.y
+        on_release: root.sync_all()
+        canvas.before:
+            PushMatrix
+            Rotate:
+                angle: root.sync_angle
+                origin: self.center
+        canvas.after:
+            PopMatrix
 
 <LaunchScreen>:
     md_bg_color: c(theme.SPLASH_BG)
+    # Apertura de AeonCrop: la huella se dibuja y la planta crece (cuadros de
+    # tools/aeon_anim.js); el primer cuadro es la pantalla de carga de Android.
     Image:
-        source: theme.APP_LOGO
+        id: anim
+        source: theme.AEON_FRAMES[0]
         fit_mode: "contain"
         mipmap: True
-        size_hint: .6, .3
-        pos_hint: {"center_x": .5, "center_y": .56}
-    MDLabel:
-        text: "App Fenología"
-        halign: "center"
-        font_style: "H5"
-        bold: True
-        theme_text_color: "Custom"
-        text_color: c(theme.LEAF_DARK)
-        size_hint: 1, None
-        height: dp(40)
-        pos_hint: {"center_x": .5, "center_y": .36}
+        size_hint: None, None
+        size: (min(root.width * .62, root.height * .34),) * 2
+        pos_hint: {"center_x": .5, "center_y": .55}
 
 <SplashScreen>:
     md_bg_color: c(theme.SPLASH_BG)
@@ -762,20 +769,11 @@
                 color: theme.on_bg("#2F5643")
                 diameter: dp(112)
                 on_release: root.open_profile("predio")
+        # La IA y la IA+ están en la pantalla principal de AeonCrop (eligen el cultivo).
         MDBoxLayout:
             size_hint: None, None
-            size: dp(150) * 2 + dp(16), dp(170)
+            size: dp(150), dp(170)
             pos_hint: {"center_x": .5}
-            spacing: dp(16)
-            StartIcon:
-                id: ic_ai
-                source: theme.START_AI_NIGHT
-                bubble: theme.BLOB_AI
-                glow: theme.AI_GLOW
-                label: "Entrenador IA"
-                color: theme.on_bg("#3A5AE6")
-                diameter: dp(112)
-                on_release: root.open_ai()
             StartIcon:
                 id: ic_nb
                 source: theme.START_NOTEBOOK
@@ -805,8 +803,8 @@
         # La cuenta de Google se conecta en la pantalla de cultivos (una para todos).
         GhostButton:
             id: crops_btn
-            icon: "fruit-grapes-outline"
-            text: "Cambiar de cultivo"
+            icon: "home-variant-outline"
+            text: "AeonCrop · todos los cultivos"
             height: dp(46)
             on_release: app.open_crops()
     # Ajustes generales: solo el engranaje, arriba a la izquierda (el post-it va a la derecha)
@@ -1813,6 +1811,7 @@
                 Muted:
                     text: "Vale para todos los cultivos. Al cambiarlo, la app se vuelve a dibujar (los datos no cambian)."
             PaperCard:
+                id: card_reminder
                 SectionLabel:
                     text: "RECORDATORIO DE MUESTREO"
                 MDBoxLayout:
@@ -1851,6 +1850,7 @@
                     adaptive_height: True
                     spacing: dp(8)
             PaperCard:
+                id: card_season
                 SectionLabel:
                     text: "SEMANA DE INICIO DEL MUESTREO"
                 Body:
@@ -1958,7 +1958,7 @@
                         text: "Desconectar"
                         on_release: root.drive_disconnect()
                 Muted:
-                    text: "Cada foto nueva queda en el teléfono y además se sube a «Mi unidad › App Fenología › (PhenoRubus, PhenoBlue o PhenoCran)», por ensayo y semana. Sin señal, se guarda en cola y se sube sola al volver la conexión."
+                    text: "Cada foto nueva queda en el teléfono y además se sube a «Mi unidad › AeonCrop › (PhenoRubus, PhenoBlue o PhenoCran)», por ensayo y semana. Sin señal, se guarda en cola y se sube sola al volver la conexión."
             PaperCard:
                 SectionLabel:
                     text: "INTELIGENCIA ARTIFICIAL (EDGE AI)"
@@ -1969,6 +1969,7 @@
                     text: "Módulo de calibración (PIN)"
                     on_release: app.open_ai_lab()
             PaperCard:
+                id: card_data
                 SectionLabel:
                     text: "TRAZABILIDAD Y DATOS"
                 Muted:
@@ -3326,9 +3327,6 @@
                         spacing: dp(10)
 
     # IA+ (cajas para el detector): pantalla aparte, junto al candado
-    IAPlusButton:
-        pos: root.width - dp(116), root.height - dp(60)
-        on_release: root.open_iaplus()
 
 <HeatmapScreen>:
     md_bg_color: 0, 0, 0, 0

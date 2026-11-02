@@ -97,7 +97,7 @@ MIME = {".html": "text/html", ".zip": "application/zip", ".sqlite3": "applicatio
 
 
 class FenoRubusApp(MDApp):
-    title = "PhenoRubus"
+    title = "AeonCrop"
 
     # ------------------------------------------------------------ build
     def build(self):
@@ -558,7 +558,23 @@ class FenoRubusApp(MDApp):
         self._preloaded = False
         self._preload = self._preload_steps()
         self.sm.add_widget(CropScreen(name="crops"))
-        Clock.schedule_once(self._show_crops, 0)
+        # La pantalla de carga de Android es el primer cuadro de la animación de AeonCrop:
+        # se quita y sigue la animación (la huella se dibuja, la planta crece).
+        Clock.schedule_once(lambda *_: splash_native.remove(), 0)
+        self._frame = 0
+        self._anim_ev = Clock.schedule_interval(self._launch_frame, 1 / 20)
+
+    def _launch_frame(self, *_):
+        if not self.sm.has_screen("launch"):
+            self._anim_ev.cancel()
+            return
+        self._frame += 1
+        if self._frame < len(theme.AEON_FRAMES):
+            self.sm.get_screen("launch").ids.anim.source = theme.AEON_FRAMES[self._frame]
+            return
+        if self._frame >= len(theme.AEON_FRAMES) + 6:   # el logo completo un momento
+            self._anim_ev.cancel()
+            self._show_crops()
 
     def _show_crops(self, *_):
         _step("cultivos")
@@ -741,11 +757,17 @@ class FenoRubusApp(MDApp):
             if target == "start":
                 self.open_start()
                 return
+            if target == "crops":
+                self.open_crops()
+                return
             self.sm.current = target
             if target == "home":
                 self.refresh_home()
             return
         target = self._history.pop() if self._history else "home"
+        if target == "crops":
+            self.open_crops()
+            return
         self.sm.current = target
         if target == "home":
             self.refresh_home()
@@ -800,9 +822,118 @@ class FenoRubusApp(MDApp):
     def open_settings(self, general_only: bool = False):
         """general_only: desde el inicio, solo los ajustes generales (sin la pestaña de
         registros del ensayo)."""
+        home = self.sm.current == "crops"
+        if getattr(self, "_settings_home", None) != home and self.sm.has_screen("settings"):
+            self.sm.remove_widget(self.sm.get_screen("settings"))   # otras tarjetas
+        self._settings_home = home
         self.settings.general_only = general_only
         self._settings_return = self.sm.current
         self.go("settings")
+
+    def open_ai_entry(self, kind: str):
+        """IA o IA+ desde la pantalla principal: PIN, luego el cultivo a entrenar (cada IA
+        aprende por separado). Al volver, se regresa a la pantalla principal."""
+        def go_crop(crop_id):
+            import crops
+            if self._loaded != (crop_id, theme.style):
+                self._load_module(crop_id)
+            from platform_utils import global_set
+            global_set("crop", crop_id)
+            self.title = "AeonCrop"
+            self._history = ["crops"]
+            if kind == "iaplus":
+                from ui import boxes
+                boxes.open_screen()
+            else:
+                self.go("ailab")
+            self._history = ["crops"]
+            self.toast(f"{'IA+' if kind == 'iaplus' else 'Entrenador IA'} · {crops.get(crop_id).app}")
+
+        self._ask_pin(lambda: self.pick_crop("¿Qué IA quiere entrenar?" if kind == "ia"
+                                             else "IA+ · ¿de qué cultivo?", go_crop))
+
+    def pick_crop(self, title: str, on_pick) -> None:
+        """Los tres cultivos con su logo, para elegir uno."""
+        import crops
+        from kivy.uix.boxlayout import BoxLayout
+        from kivy.uix.modalview import ModalView
+        from ui.screens import FloatCrop, GlassCard
+        view = ModalView(size_hint=(.94, None), height=dp(196), background="",
+                         background_color=(0, 0, 0, .45))
+        card = GlassCard(orientation="vertical", padding=(dp(12), dp(14), dp(12), dp(10)),
+                         spacing=dp(6), md_bg_color=theme.c(theme.GLASS_STRONG), radius=[dp(26)])
+        card.add_widget(MDLabel(text=title, halign="center", font_style="Subtitle1", bold=True,
+                                theme_text_color="Custom", text_color=theme.c(theme.LEAF_DARK),
+                                size_hint_y=None, height=dp(30)))
+        row = BoxLayout(spacing=dp(4), size_hint_y=None, height=dp(118))
+        for crop in crops.CROPS.values():
+            w = FloatCrop(crop_id=crop.id, app_name=crop.app, logo=theme.crop_logo(crop.id),
+                          accent=theme.crop_accent(crop.id), side=dp(96))
+            w.size_hint = (1, None)
+
+            def pick(btn):
+                view.dismiss()
+                Clock.schedule_once(lambda *_: on_pick(btn.crop_id), 0.05)
+            w.bind(on_release=pick)
+            row.add_widget(w)
+        card.add_widget(row)
+        view.add_widget(card)
+        view.open()
+
+    def _ask_pin(self, on_ok) -> None:
+        form = PinForm()
+
+        def ok(f):
+            if self.pin.verify(f.ids.pin.text):
+                Clock.schedule_once(lambda *_: on_ok(), 0.1)
+                return True
+            wait = self.pin.locked_seconds
+            f.ids.msg.text = (f"Demasiados intentos. Espere {wait} s." if wait
+                              else "PIN incorrecto.")
+            f.ids.pin.text = ""
+            return False
+
+        dialog = form_dialog("Acceso restringido · IA", form, ok, "INGRESAR")
+        form.ids.pin.bind(on_text_validate=lambda *_: ok(form) and dialog.dismiss())
+
+    def sync_all_crops(self) -> None:
+        """Botón sincronizar de la pantalla principal: los tres cultivos, uno tras otro (en
+        segundo plano). Sin cuenta de Google, avisa: todo sigue guardado en el teléfono."""
+        from platform_utils import global_get
+        if not global_get("drive_enabled", False):
+            self.toast("Conecte su cuenta de Google: mientras, todo queda guardado en el teléfono.")
+            return
+        if getattr(self, "_syncing", False):
+            return
+        self._syncing = True
+        self.toast("Sincronizando los tres cultivos con Google Drive…")
+        loaded = self._loaded[0]
+
+        def work():
+            import crops
+            from drive_backup import DriveBackup, explain
+            from platform_utils import get_data_dir
+            from sync_drive import DriveSync, summary
+            msgs = []
+            try:
+                for crop in crops.CROPS.values():
+                    try:
+                        if crop.id == loaded:
+                            res = self.sync.run(manual=True)
+                        else:
+                            crops.activate(crop.id)
+                            wss = Workspaces(get_data_dir())
+                            db = wss.open(wss.last())
+                            res = DriveSync(DriveBackup(db), wss, wss.open, get_data_dir()).run(manual=True)
+                        msgs.append(f"{crop.app}: {summary(res)}")
+                    except Exception as exc:  # noqa: BLE001
+                        msgs.append(f"{crop.app}: {explain(str(exc))}")
+                    finally:
+                        crops.activate(loaded)
+            finally:
+                self._syncing = False
+            Clock.schedule_once(lambda *_: self.toast(" · ".join(msgs)))
+        self.workers.submit(work)
 
     def open_ai_lab(self):
         """Módulo de calibración: requiere PIN (por defecto 1234)."""
@@ -903,7 +1034,7 @@ class FenoRubusApp(MDApp):
             ("WhatsApp", "Enviar como documento", lambda: self.share_file(path, target="whatsapp")),
             ("Correo electrónico", mail_note, lambda: self.send_email(path)),
             ("Guardar en el teléfono", "Descargas › PhenoRubus", lambda: self.save_file(path)),
-            ("Guardar en Google Drive", "Carpeta de la semana en «App Fenología»"
+            ("Guardar en Google Drive", "Carpeta de la semana en «AeonCrop»"
              if self.db.get_setting("drive_enabled", False) else "Primero conecte Drive en Ajustes",
              lambda: self.save_to_drive(path)),
             ("Ver informe", "Abrir en el lector de PDF" if path.endswith(".pdf") else "Abrir en el navegador",

@@ -705,7 +705,7 @@ class DriveBackup:
         return fid
 
     def root_id(self) -> str:
-        """Carpeta del módulo en Drive: «App Fenología/<PhenoRubus|PhenoBlue|PhenoCran>».
+        """Carpeta del módulo en Drive: «AeonCrop/<PhenoRubus|PhenoBlue|PhenoCran>».
         Frambuesa: la primera vez, la carpeta antigua «PhenoRubus · Imágenes de Fenología»
         (con todo lo respaldado) se mueve ahí y pasa a llamarse «PhenoRubus»."""
         import crops
@@ -714,7 +714,17 @@ class DriveBackup:
         key = f"module/{crop.drive_folder}"
         if key in cache:
             return cache[key]
-        top = self._folder(crops.DRIVE_TOP, None)
+        top = self._find_folder(crops.DRIVE_TOP, None)
+        if top is None:
+            # «App Fenología» (versiones anteriores) pasa a llamarse «AeonCrop», con todo.
+            old_top = self._find_folder(crops.DRIVE_TOP_OLD, None)
+            if old_top is not None:
+                self._call("PATCH", f"{API}/{old_top}?fields=id",
+                           json.dumps({"name": crops.DRIVE_TOP}).encode(), "application/json; charset=UTF-8")
+                self.log(f"Drive: «{crops.DRIVE_TOP_OLD}» pasa a llamarse «{crops.DRIVE_TOP}»")
+                top = old_top
+            else:
+                top = self._folder(crops.DRIVE_TOP, None)
         fid = self._find_folder(crop.drive_folder, top)
         if fid is None and crop.id == "frambuesa":
             old = self._find_folder(ROOT_FOLDER, None)

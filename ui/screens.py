@@ -831,47 +831,105 @@ class GoogleButton(ButtonBehavior, FloatLayout):
 
 class LaunchScreen(MDScreen):
     """Lo que se ve al abrir la app (igual a la pantalla de carga de Android: los tres
-    frutos y «App Fenología») mientras se prepara la pantalla de cultivos."""
+    animación de AeonCrop) mientras se prepara la pantalla principal."""
 
 
-@themed(md_bg_color=("GLASS_STRONG", None))
-class CropCard(ButtonBehavior, GlassCard):
+class FloatCrop(ButtonBehavior, FloatLayout):
+    """Logo de un cultivo en la pantalla principal de AeonCrop: suelto, flotando."""
     crop_id = StringProperty()
     app_name = StringProperty()
-    crop_name = StringProperty()
-    species = StringProperty()
     logo = StringProperty()
     accent = StringProperty("#A8184A")
+    side = NumericProperty(dp(120))
+    bob = NumericProperty(0)
+
+
+class AiLauncher(ButtonBehavior, FloatLayout):
+    """IA (con brillo neón cian que sube y baja) o IA+ (con ki rojo) en la pantalla
+    principal. Tocarlo pide el PIN y luego el cultivo a entrenar."""
+    label = StringProperty()
+    plus = BooleanProperty(False)
+    side = NumericProperty(dp(86))
+    glow_level = NumericProperty(.7)
+
+    def __init__(self, **kw):
+        super().__init__(**kw)
+        Clock.schedule_once(self._build, 0)
+
+    def _build(self, *_):
+        from kivy.uix.image import Image
+        s = self.side
+        top = {"center_x": .5, "top": 1}       # arriba; el nombre va abajo (regla KV)
+        if self.plus:
+            from ui.arcade import KiButton
+            icon = KiButton(source=theme.AEON_IAPLUS, size_hint=(None, None), size=(s, s), pos_hint=top)
+            icon.bind(on_release=lambda *_: self.dispatch("on_release"))
+        else:
+            self.glow = Image(source=theme.AEON_IA_GLOW, size_hint=(None, None), size=(s, s),
+                              fit_mode="contain", opacity=self.glow_level, pos_hint=top)
+            self.bind(glow_level=lambda *_: setattr(self.glow, "opacity", self.glow_level))
+            self.add_widget(self.glow)
+            icon = Image(source=theme.AEON_IA, size_hint=(None, None), size=(s, s),
+                         fit_mode="contain", mipmap=True, pos_hint=top)
+        self.add_widget(icon)
+
+    def on_release(self):
+        app().open_ai_entry("iaplus" if self.plus else "ia")
 
 
 class CropScreen(MDScreen):
-    """Primera pantalla: elegir el cultivo (PhenoBlue, PhenoCran, PhenoRubus) y conectar la
-    cuenta de Google (una sola para todos los cultivos)."""
+    """Pantalla principal de AeonCrop: los cultivos (PhenoRubus, PhenoBlue, PhenoCran)
+    flotando, IA e IA+ aparte, ajustes, sincronizar y la cuenta de Google (una para todos).
+    Sin cuenta, todo queda guardado en el teléfono hasta conectarla."""
+    sync_angle = NumericProperty(0)
+    PHASE = {"frambuesa": 0.0, "arandano": 1.7, "cranberry": 3.4}
+
+    def on_kv_post(self, *_):
+        import crops
+        for crop in crops.CROPS.values():
+            w = self.ids[f"c_{crop.id}"]
+            w.app_name, w.logo, w.accent = crop.app, theme.crop_logo(crop.id), theme.crop_accent(crop.id)
+        self.ids.account.bind(on_touch_down=self._account_touch)
 
     def on_pre_enter(self, *_):
-        self.refresh()
+        self.refresh_account()
+
+    def on_enter(self, *_):
+        self._t0 = time.monotonic()
+        self._ev = Clock.schedule_interval(self._float, 1 / 30)
+
+    def on_leave(self, *_):
+        if getattr(self, "_ev", None):
+            self._ev.cancel()
+            self._ev = None
+
+    def _float(self, *_):
+        t = time.monotonic() - self._t0
+        for crop_id, ph_ in self.PHASE.items():
+            self.ids[f"c_{crop_id}"].bob = dp(6) * math.sin(t * 1.3 + ph_)
+        self.ids.ai.glow_level = .7 + .25 * math.sin(t * 1.6)
 
     def refresh(self):
-        import crops
-        box = self.ids.cards
-        fast_clear(box)
-        for crop in crops.CROPS.values():
-            accent = theme.crop_accent(crop.id)
-            card = CropCard(crop_id=crop.id, app_name=crop.app, crop_name=crop.name,
-                            species=crop.species, logo=theme.crop_logo(crop.id), accent=accent)
-            card.bind(on_release=lambda w: app().choose_crop(w.crop_id))
-            box.add_widget(card)
         self.refresh_account()
 
     def refresh_account(self):
         from platform_utils import global_get
         acc = global_get("drive_account")
-        if global_get("drive_enabled", False):
-            self.ids.account.text = f"Google Drive conectado{f' · {acc}' if acc else ''}"
-            self.ids.google_btn.text = "Cambiar cuenta de Google"
+        on = bool(global_get("drive_enabled", False))
+        btn = self.ids.google_btn
+        if on:
+            self.ids.account.text = f"Google Drive · {acc or 'cuenta conectada'} · tocar para cambiar"
+            btn.opacity, btn.disabled, btn.height = 0, True, 0
         else:
-            self.ids.account.text = "Sin cuenta: los datos quedan solo en este equipo"
-            self.ids.google_btn.text = "Inicia sesión con Google"
+            self.ids.account.text = "Sin cuenta: se guarda en el teléfono hasta conectarla"
+            btn.opacity, btn.disabled, btn.height = 1, False, dp(52)
+
+    def _account_touch(self, label, touch):
+        from platform_utils import global_get
+        if label.collide_point(*touch.pos) and global_get("drive_enabled", False):
+            self.connect_google()
+            return True
+        return False
 
     def connect_google(self):
         a = app()
@@ -884,6 +942,22 @@ class CropScreen(MDScreen):
             Clock.schedule_once(lambda *_: (a.toast(msg), self.refresh_account()))
 
         a.drive.connect(done)
+
+    # ------------------------------------------------------------ sincronizar todo
+    def sync_all(self):
+        a = app()
+        a.sync_all_crops()
+        if getattr(self, "_spin_ev", None) is None:
+            self._spin_ev = Clock.schedule_interval(self._spin, 1 / 30)
+
+    def _spin(self, *_):
+        if getattr(app(), "_syncing", False):
+            self.sync_angle = (self.sync_angle - 9) % 360
+            return
+        self.sync_angle = 0
+        self._spin_ev.cancel()
+        self._spin_ev = None
+        self.refresh_account()
 
 
 class StartScreen(MDScreen):
@@ -926,7 +1000,7 @@ class StartScreen(MDScreen):
         self._t0 = time.monotonic()
         self._float_ev = Clock.schedule_interval(self._float, 1 / 30)
 
-    FLOAT = ((0.0, "ic_id"), (1.6, "ic_predio"), (3.2, "ic_ai"), (4.8, "ic_nb"))   # desfase de cada ícono
+    FLOAT = ((0.0, "ic_id"), (1.6, "ic_predio"), (4.8, "ic_nb"))   # desfase de cada ícono
 
     def _float(self, *_):
         """Flotación suave y continua de los íconos (30 cuadros por segundo: liviano)."""
@@ -936,7 +1010,6 @@ class StartScreen(MDScreen):
             k = math.sin(t * 1.5 + phase)
             w.bob = dp(4) * k
             w.pulse = 1 + .035 * math.sin(t * 1.5 + phase - .9)
-        self.ids.ic_ai.glow_level = self.neon(t)
 
     @staticmethod
     def neon(t: float) -> float:
@@ -949,7 +1022,7 @@ class StartScreen(MDScreen):
 
     # ------------------------------------------------------------ animación
     def _prepare_intro(self):
-        for w in (self.ids.ic_id, self.ids.ic_predio, self.ids.ic_ai, self.ids.ic_nb):
+        for w in (self.ids.ic_id, self.ids.ic_predio, self.ids.ic_nb):
             w.reveal, w.lift = 0, dp(46)
         self.ids.logo.opacity = 0
         self._intro_ready = True
@@ -961,7 +1034,7 @@ class StartScreen(MDScreen):
         logo.height = h * .7
         (Animation(opacity=1, height=h * 1.06, d=.32, t="out_cubic")
          + Animation(height=h, d=.16, t="in_out_sine")).start(logo)
-        for i, w in enumerate((self.ids.ic_id, self.ids.ic_predio, self.ids.ic_ai, self.ids.ic_nb)):
+        for i, w in enumerate((self.ids.ic_id, self.ids.ic_predio, self.ids.ic_nb)):
             anim = Animation(d=.12 + .11 * i) + Animation(reveal=1, lift=0, d=.38, t="out_back")
             anim.start(w)
 
@@ -4035,8 +4108,18 @@ class ReportsTab(MDScreen):
 class SettingsTab(MDScreen):
     _loading = False
 
+    def _card(self, key: str, show: bool) -> None:
+        """Tarjetas propias de cada cultivo: fuera cuando Ajustes se abre desde la pantalla
+        principal de AeonCrop (ahí solo lo general; la app rehace Ajustes al cambiar de lugar)."""
+        w = self.ids[key]
+        if not show and w.parent is not None:
+            w.parent.remove_widget(w)
+
     def refresh(self):
         a = app()
+        home = getattr(a, "_settings_return", None) == "crops"
+        for key in ("card_reminder", "card_season", "card_data"):
+            self._card(key, not home)
         name, desc = theme.STYLES[theme.style]
         self.ids.style_text.text = f"[b]{name}[/b] · {desc}"
         self.ids.style_text.markup = True
