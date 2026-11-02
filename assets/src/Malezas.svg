@@ -1,0 +1,21 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 240 240">
+<g fill="none" stroke="#2E6B34" stroke-width="7" stroke-linecap="round" stroke-linejoin="round">
+  <!-- suelo y raíces -->
+  <path d="M34 198 C70 192 170 192 206 198"/>
+  <path d="M120 198 L120 222 M120 206 L106 220 M120 210 L134 222"/>
+  <!-- hojas dentadas de la roseta -->
+  <path d="M120 196 C96 186 72 176 52 150 L66 152 L58 134 L74 140 L70 122 L86 132 C96 150 110 170 120 196"/>
+  <path d="M120 196 C144 186 168 176 188 150 L174 152 L182 134 L166 140 L170 122 L154 132 C144 150 130 170 120 196"/>
+  <path d="M120 196 C108 170 102 150 104 126 L112 136 L114 118 L122 130 C124 152 124 172 120 196"/>
+  <!-- tallo y vilano -->
+  <path d="M128 192 C138 150 146 112 150 78"/>
+  <circle cx="152" cy="62" r="10"/>
+  <path d="M152 52 L152 26 M162 56 L182 38 M164 64 L192 62 M160 72 L180 90 M142 56 L124 36 M140 66 L114 62"/>
+</g>
+<g fill="#2E6B34">
+  <circle cx="152" cy="24" r="4"/><circle cx="184" cy="36" r="4"/><circle cx="194" cy="62" r="4"/>
+  <circle cx="182" cy="92" r="4"/><circle cx="122" cy="34" r="4"/><circle cx="112" cy="62" r="4"/>
+  <path d="M44 48 l4 11 l11 4 l-11 4 l-4 11 l-4 -11 l-11 -4 l11 -4 z"/>
+  <path d="M208 132 l3 7 l7 3 l-7 3 l-3 7 l-3 -7 l-7 -3 l7 -3 z"/>
+</g>
+</svg>

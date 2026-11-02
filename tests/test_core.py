@@ -2734,3 +2734,90 @@ def test_plain_pdf_has_no_brand(db, tmp_path):
     text_p = "".join(p.extract_text() for p in PdfReader(io.BytesIO(plain)).pages)
     assert app_name.upper() in text_b.upper() and app_name.upper() not in text_p.upper()
     assert b"/Producer" not in plain and len(plain) < len(branded)
+
+
+# ------------------------------------------------------------------ AeonScout
+def test_scout_catalog_capture_identify_and_drive(tmp_path):
+    """AeonScout: catálogo inicial (con vinagrillo, milenrama y romaza), capturas con
+    «No identificada» (NI-001…), carpetas de Drive por sección/especie/estadio y, al
+    identificar, las fotos ya subidas se MUEVEN en Drive (no se suben de nuevo)."""
+    import scout
+    db = scout.ScoutDB(str(tmp_path))
+    names = [s["name"] for s in db.species("malezas")]
+    assert {"Vinagrillo", "Milenrama", "Romaza", "Correhuela"} <= set(names)
+    assert any(s["kind"] == "benefico" for s in db.species("plagas"))
+    assert db.species("enfermedades")
+    ni = db.new_unidentified("malezas")
+    assert db.get_species(ni)["name"] == "NI-001"
+    assert db.get_species(db.new_unidentified("malezas"))["name"] == "NI-002"
+    assert db.get_species(db.new_unidentified("plagas"))["name"] == "NI-001"   # por sección
+    rec = db.add_record("malezas", ni, stage="Floración", organ="Planta completa", crop="frambuesa",
+                        place_kind="predio", place="El Amanecer", place_code="AM", sector="Sector 1",
+                        latitude=-36.6, longitude=-72.1)
+    r = db.get_record(rec)
+    base = db.photo_basename(r, "FR")
+    assert base.startswith(r["taken_at"][:10].replace("-", "") + "_MZ_NI-001_Floracion_FR")
+    path = os.path.join(db.photo_dir("malezas"), base + ".jpg")
+    open(path, "wb").write(b"jpg")
+    pid = db.add_photo(rec, path, view="Planta completa")
+    q = db.query_one("SELECT * FROM drive_queue")
+    assert q["name"] == f"Malezas/No identificadas/NI-001/Floración/{base}.jpg" and q["photo_id"] is None
+    c = db.counts()
+    assert c["malezas"]["pending"] == 1 and c["malezas"]["photos"] == 1
+    assert db.missing_view("malezas", ni) != "Planta completa"
+    # Subida (simulada) y luego identificar: queda «move» con la ruta nueva.
+    db.execute("UPDATE drive_queue SET status='done', drive_id='abc' WHERE id=?", (q["id"],))
+    vin = next(s["id"] for s in db.species("malezas") if s["name"] == "Vinagrillo")
+    res = db.identify(ni, vin)
+    assert res == {"records": 1, "photos": 1}
+    p = db.query_one("SELECT * FROM scout_photos WHERE id=?", (pid,))
+    assert "Vinagrillo" in os.path.basename(p["path"]) and os.path.exists(p["path"])
+    q = db.query_one("SELECT * FROM drive_queue WHERE id=?", (q["id"],))
+    assert q["status"] == "move" and q["name"].startswith("Malezas/Vinagrillo/Floración/")
+    assert db.counts()["malezas"]["pending"] == 0
+    assert db.stage_counts(vin) == {"Floración": 1}
+
+    class FakeBackup:
+        enabled = True
+        moved, put = [], []
+
+        def move_file(self, drive_id, remote):
+            self.moved.append((drive_id, remote))
+
+        def flush(self):
+            return 0
+
+        def put_file(self, path, remote):
+            self.put.append((os.path.basename(path), remote))
+
+    fb = FakeBackup()
+    scout.ScoutDrive(db, fb).run()
+    assert fb.moved == [("abc", q["name"])] and fb.put == [("registro.csv", "registro.csv")]
+    assert db.query_one("SELECT status FROM drive_queue WHERE id=?", (q["id"],))["status"] == "done"
+    text = open(os.path.join(db.base_dir, "registro.csv"), encoding="utf-8-sig").read()
+    assert "Vinagrillo;Rumex acetosella;Floración" in text and "El Amanecer" in text
+    with pytest.raises(ValueError):
+        db.add_species("malezas", "vinagrillo")                  # ya existe (sin mayúsculas)
+    sid = db.add_species("malezas", "Hierba azul", "Echium vulgare")
+    assert db.get_species(sid)["scientific"] == "Echium vulgare"
+    db.delete_record(rec)
+    assert not os.path.exists(p["path"]) and db.counts()["malezas"]["records"] == 0
+    db.close()
+
+
+def test_scout_places_from_crop_modules(tmp_path):
+    """Dónde: los ensayos y predios de cada cultivo (leídos sin abrir su módulo) y los
+    sectores de un predio."""
+    import scout
+    from workspaces import Workspaces
+    base = str(tmp_path / "data")
+    wss = Workspaces(base)                        # frambuesa (raíz): NV, AM, LE
+    am = wss.open(wss.by_code("AM"))
+    am.save_unit("Meeker", "MEE", 2, 1)
+    am.close()
+    wss.close()
+    pl = scout.places(base, "frambuesa")
+    assert [(p["kind"], p["code"]) for p in pl] == [("ensayo", "NV"), ("predio", "AM"), ("predio", "LE")]
+    secs = scout.sectors(next(p for p in pl if p["code"] == "AM"))
+    assert secs and "Meeker" in secs[0] and "sector 2" in secs[0].lower()
+    assert scout.places(base, "arandano") == []                # módulo aún sin abrir

@@ -291,6 +291,51 @@ class FenoRubusApp(MDApp):
         from drive_backup import DriveBackup  # respaldo de fotos en Google Drive
         return DriveBackup(self.db)
 
+    # ------------------------------------------------------------ AeonScout
+    @cached_property
+    def scout(self):
+        """Base de AeonScout (plagas, malezas y enfermedades; común a todos los cultivos)."""
+        from platform_utils import get_base_dir
+        from scout import ScoutDB
+        return ScoutDB(get_base_dir())
+
+    @cached_property
+    def scout_drive(self):
+        from scout import ScoutDrive
+        return ScoutDrive(self.scout)
+
+    def scout_backup(self, manual: bool = False) -> None:
+        """Sube a «AeonCrop/AeonScout» lo pendiente (en segundo plano)."""
+        d = self.scout_drive
+        if not d.enabled:
+            if manual:
+                self.toast("Conecte su cuenta de Google en la pantalla principal.")
+            return
+        if not d.backup.available:       # crea el acceso a la cuenta en el hilo principal
+            return
+        if manual:
+            self.toast("Respaldando AeonScout en Google Drive…")
+
+        def work():
+            from drive_backup import _detach
+            try:
+                n = d.run()
+                if manual:
+                    Clock.schedule_once(lambda *_: self.toast(
+                        f"AeonScout: {n} foto(s) subidas" if n else "AeonScout: todo respaldado"))
+            except Exception as exc:  # noqa: BLE001
+                if manual:
+                    Clock.schedule_once(lambda *_: self.toast(f"AeonScout: {exc}"))
+            finally:
+                _detach()
+        threading.Thread(target=work, daemon=True).start()
+
+    def open_scout(self):
+        """AeonScout desde la pantalla principal."""
+        from ui import scout_ui
+        self.title = "AeonCrop"
+        scout_ui.open_home()
+
     @cached_property
     def sync(self):
         from sync_drive import DriveSync   # celular <-> PC por Google Drive
@@ -908,6 +953,10 @@ class FenoRubusApp(MDApp):
         self._syncing = True
         self.toast("Sincronizando los tres cultivos con Google Drive…")
         loaded = self._loaded[0]
+        try:
+            self.scout_backup()            # AeonScout también
+        except Exception:  # noqa: BLE001
+            pass
 
         def work():
             import crops

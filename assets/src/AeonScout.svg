@@ -1,0 +1,19 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 240 240">
+<g fill="none" stroke="#1D5E63" stroke-linecap="round" stroke-linejoin="round">
+  <circle cx="104" cy="104" r="66" stroke-width="9"/>
+  <path d="M152 152 L206 206" stroke-width="20"/>
+  <path d="M152 152 L206 206" stroke="#F2F4EE" stroke-width="6"/>
+  <!-- hoja -->
+  <path d="M62 140 C58 104 82 76 124 70 C128 108 104 136 62 140 Z" stroke-width="6"/>
+  <path d="M64 138 C82 120 98 104 120 76" stroke-width="5"/>
+  <!-- insecto -->
+  <path d="M128 112 C116 112 112 126 114 136 C116 146 124 150 128 150 C132 150 140 146 142 136 C144 126 140 112 128 112 Z" stroke-width="5"/>
+  <circle cx="128" cy="104" r="7" stroke-width="5"/>
+  <path d="M128 114 L128 148 M114 124 L104 118 M142 124 L152 118 M114 138 L104 144 M142 138 L152 144 M124 98 L118 88 M132 98 L138 88" stroke-width="4"/>
+</g>
+<g fill="#1D5E63">
+  <path d="M200 30 l4 11 l11 4 l-11 4 l-4 11 l-4 -11 l-11 -4 l11 -4 z"/>
+  <path d="M30 196 l3 7 l7 3 l-7 3 l-3 7 l-3 -7 l-7 -3 l7 -3 z"/>
+  <circle cx="214" cy="96" r="4"/><circle cx="182" cy="16" r="3"/>
+</g>
+</svg>

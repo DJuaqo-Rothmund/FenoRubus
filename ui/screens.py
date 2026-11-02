@@ -13,6 +13,7 @@ import time
 from kivy.clock import Clock, mainthread
 from kivy.metrics import dp
 from kivy.uix.behaviors import ButtonBehavior
+from kivy.uix.image import Image as KivyImage
 from kivy.uix.boxlayout import BoxLayout
 from kivy.uix.floatlayout import FloatLayout
 from kivy.uix.label import Label
@@ -926,12 +927,24 @@ class AiLauncher(ButtonBehavior, FloatLayout):
         app().open_ai_entry("iaplus" if self.plus else "ia")
 
 
+class AeonLogo(ButtonBehavior, KivyImage):
+    """Logo de AeonCrop en la pantalla principal: tocarlo muestra IA e IA+."""
+    pulse = NumericProperty(1)
+
+
 class CropScreen(MDScreen):
     """Pantalla principal de AeonCrop: los cultivos (PhenoRubus, PhenoBlue, PhenoCran)
     flotando, IA e IA+ aparte, ajustes, sincronizar y la cuenta de Google (una para todos).
     Sin cuenta, todo queda guardado en el teléfono hasta conectarla."""
     sync_angle = NumericProperty(0)
+    ai_shown = NumericProperty(0)      # IA e IA+ visibles (0-1): aparecen al tocar el logo
     PHASE = {"frambuesa": 0.0, "arandano": 1.7, "cranberry": 3.4}
+
+    def toggle_ai(self, show: bool | None = None):
+        from kivy.animation import Animation
+        show = self.ai_shown < .5 if show is None else show
+        Animation.cancel_all(self, "ai_shown")
+        Animation(ai_shown=1 if show else 0, d=.28, t="out_cubic").start(self)
 
     def on_kv_post(self, *_):
         import crops
@@ -950,12 +963,17 @@ class CropScreen(MDScreen):
         if getattr(self, "_ev", None):
             self._ev.cancel()
             self._ev = None
+        self.ai_shown = 0                  # al volver, IA e IA+ quedan ocultas
 
     def _float(self, *_):
         t = time.monotonic() - self._t0
         for crop_id, ph_ in self.PHASE.items():
             self.ids[f"c_{crop_id}"].bob = dp(6) * math.sin(t * 1.3 + ph_)
-        self.ids.ai.glow_level = .7 + .25 * math.sin(t * 1.6)
+        self.ids.scout.bob = dp(4) * math.sin(t * 1.3 + 5.1)
+        if self.ai_shown:
+            self.ids.ai.glow_level = .7 + .25 * math.sin(t * 1.6)
+        # Mientras IA e IA+ están ocultas, el logo «respira» (se puede tocar).
+        self.ids.logo.pulse = 1 + .025 * math.sin(t * 2.2) * (1 - self.ai_shown)
 
     def refresh(self):
         self.refresh_account()

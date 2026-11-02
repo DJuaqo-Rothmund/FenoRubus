@@ -832,6 +832,22 @@ class DriveBackup:
                 self.db.set_setting("drive_folders", {})
             raise
 
+    def move_file(self, drive_id: str, remote: str) -> None:
+        """Mueve y renombra un archivo ya subido a «<módulo>/<remote>» (sin subirlo de nuevo).
+        Lo usa AeonScout al identificar una especie."""
+        *dirs, fname = remote.split("/")
+        parent = self.root_id()
+        for d in dirs:
+            parent = self._folder(d, parent)
+        old = self._call("GET", f"{API}/{drive_id}?fields=parents").get("parents", [])
+        params = {"fields": "id"}
+        if parent not in old:
+            params["addParents"] = parent
+            if old:
+                params["removeParents"] = ",".join(old)
+        self._call("PATCH", f"{API}/{drive_id}?" + urllib.parse.urlencode(params),
+                   json.dumps({"name": fname}).encode(), "application/json; charset=UTF-8")
+
     def put_file(self, path: str, remote: str) -> str:
         """Sube `path` a «PhenoRubus · …/<remote>» REEMPLAZANDO el archivo del mismo nombre si
         ya existe (p. ej. la página del cuaderno al editarla de nuevo). Devuelve su id."""

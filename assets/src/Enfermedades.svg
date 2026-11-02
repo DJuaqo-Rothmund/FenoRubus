@@ -1,0 +1,19 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 240 240">
+<g fill="none" stroke="#6E4A9E" stroke-width="7" stroke-linecap="round" stroke-linejoin="round">
+  <!-- hoja -->
+  <path d="M46 196 C40 120 90 52 196 40 C204 132 150 196 46 196 Z"/>
+  <path d="M46 196 L26 216"/>
+  <path d="M52 190 C96 146 136 104 186 50"/>
+  <path d="M84 156 L72 128 M112 128 L102 98 M140 98 L136 72 M106 136 L134 148 M132 110 L176 108 M156 82 L184 80"/>
+</g>
+<g stroke="#6E4A9E" stroke-width="5" fill="none">
+  <circle cx="96" cy="160" r="10"/><circle cx="160" cy="122" r="12"/><circle cx="124" cy="96" r="8"/>
+</g>
+<g fill="#6E4A9E">
+  <circle cx="96" cy="160" r="4"/><circle cx="160" cy="122" r="5"/><circle cx="124" cy="96" r="3.5"/>
+  <circle cx="198" cy="150" r="5"/><circle cx="212" cy="128" r="3.5"/><circle cx="214" cy="170" r="4"/>
+  <circle cx="186" cy="176" r="3"/><circle cx="54" cy="74" r="4"/><circle cx="72" cy="56" r="3"/>
+  <path d="M36 30 l4 11 l11 4 l-11 4 l-4 11 l-4 -11 l-11 -4 l11 -4 z"/>
+  <path d="M210 206 l3 7 l7 3 l-7 3 l-3 7 l-3 -7 l-7 -3 l7 -3 z"/>
+</g>
+</svg>

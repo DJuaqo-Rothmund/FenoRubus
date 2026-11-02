@@ -1,0 +1,23 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 240 240">
+<g fill="none" stroke="#A0441E" stroke-width="7" stroke-linecap="round" stroke-linejoin="round">
+  <!-- antenas -->
+  <path d="M110 62 C100 40 86 32 72 34"/><path d="M130 62 C140 40 154 32 168 34"/>
+  <circle cx="70" cy="34" r="4" fill="#A0441E"/><circle cx="170" cy="34" r="4" fill="#A0441E"/>
+  <!-- cabeza y pronoto -->
+  <path d="M104 74 C104 58 136 58 136 74 Z"/>
+  <path d="M92 96 C92 76 148 76 148 96 C148 104 92 104 92 96 Z"/>
+  <!-- élitros -->
+  <path d="M120 102 C84 102 76 140 80 166 C84 194 104 206 120 206 C136 206 156 194 160 166 C164 140 156 102 120 102 Z"/>
+  <path d="M120 104 L120 204"/>
+  <path d="M100 116 C94 140 94 170 104 196 M140 116 C146 140 146 170 136 196" stroke-width="4"/>
+  <!-- patas -->
+  <path d="M92 96 L66 86 L54 64"/><path d="M148 96 L174 86 L186 64"/>
+  <path d="M82 136 L56 136 L40 150"/><path d="M158 136 L184 136 L200 150"/>
+  <path d="M86 178 L64 192 L60 214"/><path d="M154 178 L176 192 L180 214"/>
+</g>
+<g fill="#A0441E">
+  <path d="M206 30 l4 11 l11 4 l-11 4 l-4 11 l-4 -11 l-11 -4 l11 -4 z"/>
+  <path d="M30 196 l3 7 l7 3 l-7 3 l-3 7 l-3 -7 l-7 -3 l7 -3 z"/>
+  <circle cx="214" cy="100" r="4"/><circle cx="26" cy="96" r="3"/>
+</g>
+</svg>

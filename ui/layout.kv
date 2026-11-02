@@ -427,13 +427,16 @@
     md_bg_color: 0, 0, 0, 0
     FloatLayout:
         id: stage
-        Image:
+        # Tocar el logo de AeonCrop: aparecen IA e IA+ a sus lados (y se ocultan de nuevo).
+        AeonLogo:
+            id: logo
             source: theme.AEON_LOGO
             fit_mode: "contain"
             mipmap: True
             size_hint: None, None
-            size: dp(150), dp(150)
+            size: (dp(150) * self.pulse * (.94 if self.state == "down" else 1),) * 2
             pos_hint: {"center_x": .5, "top": .975}
+            on_release: root.toggle_ai()
         FloatCrop:
             id: c_frambuesa
             crop_id: "frambuesa"
@@ -455,14 +458,28 @@
         AiLauncher:
             id: ai
             label: "Entrenador IA"
-            side: dp(100)
-            pos_hint: {"center_x": .34, "center_y": .225}
+            side: dp(84)
+            opacity: root.ai_shown
+            disabled: root.ai_shown < .5
+            pos_hint: {"center_x": .16, "center_y": .845 - .03 * (1 - root.ai_shown)}
         AiLauncher:
             id: aiplus
             label: "IA+"
             plus: True
-            side: dp(100)
-            pos_hint: {"center_x": .66, "center_y": .225}
+            side: dp(84)
+            opacity: root.ai_shown
+            disabled: root.ai_shown < .5
+            pos_hint: {"center_x": .84, "center_y": .845 - .03 * (1 - root.ai_shown)}
+        # AeonScout: plagas, malezas y enfermedades (banco de imágenes para la IA).
+        StartIcon:
+            id: scout
+            source: theme.SCOUT_ICON
+            bubble: theme.SCOUT_BUBBLE
+            label: "AeonScout"
+            color: c("#1D5E63")
+            diameter: dp(78)
+            pos_hint: {"center_x": .5, "center_y": .215}
+            on_release: app.open_scout()
         MDBoxLayout:
             orientation: "vertical"
             adaptive_height: True
