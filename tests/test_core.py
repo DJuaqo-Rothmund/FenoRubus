@@ -2821,3 +2821,30 @@ def test_scout_places_from_crop_modules(tmp_path):
     secs = scout.sectors(next(p for p in pl if p["code"] == "AM"))
     assert secs and "Meeker" in secs[0] and "sector 2" in secs[0].lower()
     assert scout.places(base, "arandano") == []                # módulo aún sin abrir
+
+
+def test_report_uses_available_canopy_and_counts_missing(db, tmp_path):
+    """Informes: si la foto general principal no está en el teléfono (tomada en otro equipo
+    y aún no bajada), va otra general que sí esté; si no hay ninguna, se cuenta como faltante
+    y queda en la lista para bajarla de Drive."""
+    w = db.current_week(dt.date(2026, 10, 5))
+    v = db.list_varieties()[0]
+    o = db.get_or_create_observation(v["id"], w["id"])
+    db.update_observation(o["id"], bbch_code=61)
+    paths = {}
+    for k, seed in (("canopy", 1), ("detail", 2)):
+        paths[k] = str(tmp_path / f"{k}.jpg")
+        synthetic_photo(61, k, paths[k], seed)
+        db.add_photo(o["id"], k, paths[k])
+    gone = str(tmp_path / "otra_general.jpg")              # principal nueva, sin archivo aquí
+    db.add_photo(o["id"], "canopy", gone, primary=True)
+    assert db.get_photos(o["id"])["canopy"]["path"] == paths["canopy"]
+    rep = ReportGenerator(db, str(tmp_path / "out"))
+    rep.photo_mode = "canopy"
+    res = rep.weekly(w["id"])
+    assert open(res.path).read().count("data:image/jpeg") == 1 and res.missing == 0
+    os.remove(paths["canopy"])                              # ninguna general en el teléfono
+    res = rep.weekly(w["id"])
+    assert res.missing == 1
+    assert db.register_missing_photos() == 2
+    assert db.query_one("SELECT COUNT(*) AS n FROM sync_missing")["n"] == 2

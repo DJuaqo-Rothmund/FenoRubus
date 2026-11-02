@@ -75,6 +75,7 @@ class ImageStore:
         self.quality = quality
         self.files: dict[str, bytes] = {}
         self._cache: dict[tuple[str, int], str] = {}
+        self.missing: set[str] = set()   # fotos pedidas que no están en el teléfono
 
     def _encode(self, path: str, max_side: int) -> bytes:
         img = Image.open(path)
@@ -86,6 +87,8 @@ class ImageStore:
         return buf.getvalue()
 
     def src(self, path: str | None, max_side: int | None = None) -> str | None:
+        if path and not os.path.exists(path):
+            self.missing.add(path)
         if not path or not os.path.exists(path):
             return None
         side = max_side or self.max_side
@@ -274,6 +277,7 @@ class ReportResult:
     title: str
     kind: str
     size_kb: int
+    missing: int = 0      # fotos del informe cuyo archivo no está en el teléfono
 
 
 class LabeledDB:
@@ -392,7 +396,7 @@ class ReportGenerator:
             with open(path, "w", encoding="utf-8") as f:
                 f.write(html)
         self.db.log("create", "report", None, f"{kind}: {os.path.basename(path)}")
-        return ReportResult(path, title, kind, max(1, os.path.getsize(path) // 1024))
+        return ReportResult(path, title, kind, max(1, os.path.getsize(path) // 1024), len(images.missing))
 
     include_all_photos = False  # True: agrega las fotos no principales como miniaturas
     plain_pdf = False           # True: PDF simple, sin logo ni marca (solo información e imágenes)

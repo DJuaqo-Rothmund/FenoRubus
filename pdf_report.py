@@ -602,12 +602,13 @@ def period(ctx: dict, names: dict, num=None) -> Report:
     if ctx.get("compare"):
         r.h2("Estado BBCH por semana")
         r.chart(ctx["compare"]["raw"])
-    r.h2("Evolución por variedad", "Foto de detalle (o de canopia) de cada semana.")
+    r.h2("Evolución por variedad", "Fotos de cada semana: general arriba y detalle abajo (según lo "
+                                    "elegido en Informes).")
     cols, gap = 6, 6
     w = (CW - gap * (cols - 1)) / cols
     h = w * .75
     def draw_strip(s):
-        r.ensure(30 + h + 24)
+        r.ensure(30 + h * 2 + 27)
         r.y += 14
         r.text(M, r.y, s["variety"]["name"], 11, True, INK)
         if s["first"] is not None:
@@ -619,15 +620,20 @@ def period(ctx: dict, names: dict, num=None) -> Report:
         r.y += 6
         tiles = s["tiles"]
         for i in range(0, len(tiles), cols):
-            r.ensure(h + 24)
-            for j, t in enumerate(tiles[i:i + cols]):
+            row = tiles[i:i + cols]
+            # Con general y detalle (Full), cada semana lleva las dos: general arriba.
+            kinds = [k for k in ("canopy", "detail") if any(t["img"].get(k) for t in row)] or ["detail"]
+            hh = h * len(kinds) + 3 * (len(kinds) - 1)
+            r.ensure(hh + 24)
+            for j, t in enumerate(row):
                 x = M + j * (w + gap)
-                r.photo(t["img"].get("detail") or t["img"].get("canopy"), x, r.y, w, h)
+                for n, k in enumerate(kinds):
+                    r.photo(t["img"].get(k), x, r.y + n * (h + 3), w, h)
                 lab = t["week"]["label"].replace("Semana del ", "")
-                r.text(x, r.y + h + 9, r.fit(f"{ph.week_short(t['week'])} · {lab}", w, 6.8), 6.8, False, MUTED)
-                r.text(x, r.y + h + 18, f"BBCH {ph.code_str(t['code'])}" if t["code"] is not None else "—", 7.4,
+                r.text(x, r.y + hh + 9, r.fit(f"{ph.week_short(t['week'])} · {lab}", w, 6.8), 6.8, False, MUTED)
+                r.text(x, r.y + hh + 18, f"BBCH {ph.code_str(t['code'])}" if t["code"] is not None else "—", 7.4,
                        True, INK if t["code"] is not None else MUTED)
-            r.y += h + 24
+            r.y += hh + 24
 
     for s in ctx["strips"]:
         r.keep(lambda s=s: draw_strip(s))   # la franja de cada variedad sin cortar

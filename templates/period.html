@@ -12,7 +12,7 @@
 {% endif %}
 
 <h2>Evolución por variedad</h2>
-<p class="lead">Secuencia de fotos de detalle por semana. Desplace horizontalmente en el teléfono.</p>
+<p class="lead">Fotos de cada semana (general arriba y detalle abajo, según lo elegido en Informes). Desplace horizontalmente en el teléfono.</p>
 {% for s in strips %}
 <section class="card" style="padding: 12px 14px; margin-bottom: 14px;">
   <div class="head" style="display:flex; justify-content:space-between; align-items:baseline; gap:8px; flex-wrap:wrap;">
@@ -26,9 +26,9 @@
   <div class="strip">
     {% for t in s.tiles %}
     <div class="tile" title="{{ t.week.label }}{% if t.notes %} — {{ t.notes }}{% endif %}">
-      {% if t.img.detail %}<img src="{{ t.img.detail }}" alt="Detalle {{ t.week|wk }}" loading="lazy">
-      {% elif t.img.canopy %}<img src="{{ t.img.canopy }}" alt="Canopia {{ t.week|wk }}" loading="lazy">
-      {% else %}<div class="nophoto">Sin foto</div>{% endif %}
+      {% if t.img.canopy %}<img src="{{ t.img.canopy }}" alt="General {{ t.week|wk }}" loading="lazy">{% endif %}
+      {% if t.img.detail %}<img src="{{ t.img.detail }}" alt="Detalle {{ t.week|wk }}" loading="lazy">{% endif %}
+      {% if not t.img.canopy and not t.img.detail %}<div class="nophoto">Sin foto</div>{% endif %}
       <div class="t">{{ t.week|wks }} · {{ t.week.label|replace('Semana del ', '') }}</div>
       <div class="b">{% if t.code is not none %}BBCH {{ t.code|code }}{% else %}<span class="muted">—</span>{% endif %}</div>
     </div>

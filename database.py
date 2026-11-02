@@ -1748,9 +1748,28 @@ class Database:
             self.conn.commit()
 
     def get_photos(self, observation_id: int) -> dict[str, dict]:
-        """Foto PRINCIPAL de cada tipo: {'canopy': fila, 'detail': fila}."""
-        return {r["kind"]: r for r in self.query(
-            "SELECT * FROM photos WHERE observation_id=? AND is_primary=1", (observation_id,))}
+        """Foto PRINCIPAL de cada tipo: {'canopy': fila, 'detail': fila}. Si la principal
+        no está en el teléfono (aún no se baja de Drive) o ningún tipo tiene principal, va
+        otra foto de ese tipo que sí esté (la más reciente)."""
+        out: dict[str, dict] = {}
+        for r in self.query("SELECT * FROM photos WHERE observation_id=? "
+                            "ORDER BY is_primary DESC, captured_at DESC, id DESC", (observation_id,)):
+            cur = out.get(r["kind"])
+            if cur is None or (not os.path.exists(cur["path"] or "") and os.path.exists(r["path"] or "")):
+                out[r["kind"]] = r
+        return out
+
+    def register_missing_photos(self) -> int:
+        """Fotos de registros cuyo archivo no está en el teléfono: quedan en la lista para
+        bajarlas de Drive (sincronización). Devuelve cuántas faltan."""
+        n = 0
+        has = self.query_one("SELECT 1 FROM sqlite_master WHERE type='table' AND name='sync_missing'")
+        for r in self.query("SELECT path FROM photos"):
+            if r["path"] and not os.path.exists(r["path"]):
+                n += 1
+                if has:
+                    self.execute("INSERT OR IGNORE INTO sync_missing(path) VALUES (?)", (r["path"],))
+        return n
 
     def list_photos(self, observation_id: int, kind: str | None = None) -> list[dict]:
         sql = "SELECT * FROM photos WHERE observation_id=?"

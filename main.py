@@ -1056,18 +1056,40 @@ class FenoRubusApp(MDApp):
 
         def work():
             try:
+                self._fetch_report_photos()
                 res = job()
                 self._report_done(res, None, on_done)
             except Exception as exc:  # noqa: BLE001
                 self._report_done(None, exc, on_done)
+            finally:
+                try:
+                    from drive_backup import _detach
+                    _detach()
+                except Exception:  # noqa: BLE001
+                    pass
 
         threading.Thread(target=work, daemon=True).start()
+
+    def _fetch_report_photos(self) -> None:
+        """Antes de un informe: las fotos del ensayo que no están en el teléfono (tomadas
+        en otro equipo y aún no bajadas) se bajan de Drive, para que el informe las traiga."""
+        try:
+            missing = self.db.register_missing_photos()
+            if not missing or not self.db.get_setting("drive_enabled", False) or "drive" not in self.__dict__:
+                return
+            Clock.schedule_once(lambda *_: self.toast(f"Bajando de Drive {missing} foto(s) para el informe…"))
+            self.sync.fetch_missing(self.db, None)
+        except Exception as exc:  # noqa: BLE001 (sin red: el informe sale con lo que hay)
+            print("fotos del informe:", exc)
 
     @mainthread
     def _report_done(self, res, error, on_done):
         if error:
             self.toast(f"Error al generar: {error}")
             return
+        if getattr(res, "missing", 0):
+            self.toast(f"Atención: {res.missing} foto(s) no están en el teléfono y no salen en el informe "
+                       "(sincronice con Wi-Fi para bajarlas)")
         if on_done:
             on_done(res)
         self.report_actions(res.path, title="Informe listo",
