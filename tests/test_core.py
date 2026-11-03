@@ -2963,3 +2963,98 @@ def test_old_week_moves_fixed_once(db, tmp_path):
     assert todo == [{"old": "20261012-C11G.jpg", "path": str(tmp_path / "20261019-C11G.jpg"),
                      "src": "2026-10-12", "dst": "2026-10-19", "sub": ""}]
     assert db.fix_week_names() == 0                           # una sola vez
+
+
+class MovableDrive(FakeDrive):
+    """FakeDrive que además mueve, renombra y manda a la papelera (PATCH de metadatos)."""
+
+    def __call__(self, method, url, headers, body):
+        import json
+        import urllib.parse
+        fid = url.split("/files/")[1].split("?")[0] if "/files/" in url else ""
+        qs = urllib.parse.parse_qs(urllib.parse.urlsplit(url).query)
+        if method == "GET" and fid and "q" not in qs and "alt=media" not in url:
+            return 200, json.dumps({"parents": self.files[fid]["parents"]}).encode()
+        if method == "PATCH" and fid and "uploadType" not in url:
+            meta = json.loads(body or b"{}")
+            f = self.files[fid]
+            if meta.get("trashed"):
+                f["trashed"] = True
+            if "name" in meta:
+                f["name"] = meta["name"]
+            if "addParents" in qs:
+                f["parents"] = [p for p in f["parents"] if p not in qs.get("removeParents", [""])[0].split(",")]
+                f["parents"].append(qs["addParents"][0])
+            return 200, json.dumps({"id": fid}).encode()
+        if method == "GET" and "q" in qs:
+            code, data = super().__call__(method, url, headers, body)
+            hits = [dict(h, mimeType="application/vnd.google-apps.folder" if self.files[h["id"]]["folder"]
+                         else "image/jpeg")
+                    for h in json.loads(data)["files"] if not self.files[h["id"]].get("trashed")]
+            return code, json.dumps({"files": hits}).encode()
+        return super().__call__(method, url, headers, body)
+
+    def path_of(self, fid):
+        parts = []
+        while fid in self.files:
+            parts.append(self.files[fid]["name"])
+            ps = self.files[fid]["parents"]
+            fid = ps[0] if ps else None
+        return "/".join(reversed(parts))
+
+    def live(self):
+        return sorted(self.path_of(k) for k, f in self.files.items() if not f["folder"] and not f.get("trashed"))
+
+
+def test_drive_subfolder_per_parcel_in_id(tmp_path):
+    """I+D: dentro de la carpeta semanal, una subcarpeta por variedad o parcela (T0R1…); las
+    adjuntas en «<parcela>/Adjuntas». Lo ya subido sin subcarpeta se ordena una vez (sin
+    subirlo de nuevo); los predios no cambian."""
+    from drive_backup import DriveBackup
+    from workspaces import Workspaces
+
+    class Auth:
+        def get_token(self, interactive):
+            return "t"
+    wss = Workspaces(str(tmp_path / "data"))
+    db = wss.open(wss.create("id", "tratamientos", "Urea", "AUF"))
+    db.setup_trial(2, 1, t0=True)
+    db.set_setting("drive_enabled", True)
+    fake = MovableDrive()
+    drive = DriveBackup(db, authorizer=Auth(), transport=fake, metered=lambda: False)
+    w = db.week_for_date(dt.date(2026, 10, 26))
+    t0, t1 = db.list_varieties()
+    o0 = db.get_or_create_observation(t0["id"], w["id"])
+    o1 = db.get_or_create_observation(t1["id"], w["id"])
+    p0, p1, a1 = (str(tmp_path / n) for n in ("20261026-AUF-T0R1G.jpg", "20261026-AUF-T1R1G.jpg",
+                                              "20261026-AUF-T1R1A.jpg"))
+    for i, p in enumerate((p0, p1, a1)):
+        synthetic_photo(61, "canopy", p, i)
+    week_dir = drive.week_path(w["start_date"])
+    # T0R1: subida antes de esta versión, suelta en la carpeta semanal.
+    pid0 = db.add_photo(o0["id"], "canopy", p0)
+    db.execute("INSERT INTO drive_queue(photo_id, path, name, created_at) VALUES (?,?,?,?)",
+               (pid0, p0, f"{week_dir}/{os.path.basename(p0)}", "2026-10-26"))
+    drive._target_for = lambda *a, **k: None                  # subir como lo hacía la versión anterior
+    drive.flush()
+    del drive._target_for
+    db.set_setting("weeks_drive_checked_v2", None)
+    # T1R1: nueva, con adjunta.
+    drive.enqueue(db.add_photo(o1["id"], "canopy", p1), p1, flush=False)
+    db.add_attachment(t1["id"], w["season"], a1, week_id=w["id"])
+    assert drive._target_for(a1) == f"{week_dir}/T1R1/Adjuntas/{os.path.basename(a1)}"
+    drive.enqueue(None, a1, remote=drive._target_for(a1), flush=False)
+    n_before = len(fake.live())
+    drive.flush()
+    live = fake.live()
+    assert any(x.endswith(f"Semana 44 · 26-10-2026/T0R1/{os.path.basename(p0)}") for x in live)   # ordenada
+    assert any(x.endswith(f"Semana 44 · 26-10-2026/T1R1/{os.path.basename(p1)}") for x in live)
+    assert any(x.endswith(f"Semana 44 · 26-10-2026/T1R1/Adjuntas/{os.path.basename(a1)}") for x in live)
+    assert len(live) == n_before + 2                           # la de T0R1 se movió, no se subió de nuevo
+    # Predio: sin subcarpeta de unidad.
+    am = wss.open(wss.by_code("AM"))
+    pd = DriveBackup(am, authorizer=Auth(), transport=fake, metered=lambda: False)
+    assert pd._unit_folder(1) == ""                            # predio: sin subcarpeta de unidad
+    am.close()
+    db.close()
+    wss.close()

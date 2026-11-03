@@ -1199,8 +1199,10 @@ class FenoRubusApp(MDApp):
         if not self.db.get_setting("drive_enabled", False):
             return
         safe = folder.replace("/", "-").strip() or "Otras"
-        self.drive.enqueue(None, path, remote=f"{self.drive.week_path(start_date)}/{safe}/"
-                                              f"{os.path.basename(path)}")
+        # Con su registro ya guardado, va a «semana/variedad o parcela (I+D)/<carpeta>/».
+        remote = self.drive._target_for(path) or (f"{self.drive.week_path(start_date)}/{safe}/"
+                                                  f"{os.path.basename(path)}")
+        self.drive.enqueue(None, path, remote=remote)
 
     def _check_reminder(self):
         if self.reminders.check_due():

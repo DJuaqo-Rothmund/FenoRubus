@@ -454,17 +454,47 @@ class DriveBackup:
         return f"{self.prefix}{self.week_folder(start_date)}"
 
     def _remote_name(self, photo_id: int | None, path: str) -> str:
-        """Carpeta de la SEMANA de muestreo de la foto + nombre del archivo."""
-        row = None
+        """Carpeta de la SEMANA de muestreo de la foto (y, en I+D, la de su variedad o
+        parcela) + nombre del archivo."""
+        return self._target_for(path, photo_id) or f"{self.prefix}{os.path.basename(path)}"
+
+    def _unit_folder(self, variety_id) -> str:
+        """En los ensayos de I+D, la subcarpeta de la variedad, parcela (T1R1…) o punto de
+        fenología dentro de la carpeta de la semana; en los predios, ninguna."""
+        ws = getattr(self.db, "workspace", None) or {}
+        if ws.get("profile") != "id" or not variety_id:
+            return ""
+        v = self.db.query_one("SELECT name FROM varieties WHERE id=?", (variety_id,))
+        return (v["name"] or "").replace("/", "-").strip() if v else ""
+
+    def _target_for(self, path: str | None, photo_id: int | None = None) -> str | None:
+        """Ruta en Drive que le corresponde a una foto del registro, una adjunta o una foto de
+        medición, según su semana y su variedad/parcela:
+        «<ensayo>/Año 2026/Semana 44 · 26-10-2026/T1R1/[Adjuntas|<medición>/]foto.jpg».
+        None si el archivo no es de ninguno de esos registros."""
+        if not path:
+            return None
+        row, sub = None, ""
+        q = ("SELECT w.start_date, o.variety_id FROM photos p JOIN observations o ON o.id = p.observation_id "
+             "JOIN sampling_weeks w ON w.id = o.week_id WHERE ")
         if photo_id is not None:
-            row = self.db.query_one(
-                "SELECT w.start_date FROM photos p "
-                "JOIN observations o ON o.id = p.observation_id "
-                "JOIN sampling_weeks w ON w.id = o.week_id WHERE p.id = ?", (photo_id,))
-        base = os.path.basename(path)
-        if row:
-            return f"{self.week_path(row['start_date'])}/{base}"
-        return f"{self.prefix}{base}"
+            row = self.db.query_one(q + "p.id = ?", (photo_id,))
+        if row is None:
+            row = self.db.query_one(q + "p.path = ?", (path,))
+        if row is None:
+            row = self.db.query_one("SELECT w.start_date, a.variety_id FROM variety_attachments a "
+                                    "JOIN sampling_weeks w ON w.id = a.week_id WHERE a.path = ?", (path,))
+            sub = "Adjuntas" if row else ""
+        if row is None:
+            row = self.db.query_one("SELECT w.start_date, e.variety_id, m.name AS mname FROM measure_entries e "
+                                    "JOIN measures m ON m.id = e.measure_id JOIN sampling_weeks w "
+                                    "ON w.id = e.week_id WHERE e.path = ?", (path,))
+            sub = (row["mname"] or "Otras").replace("/", "-").strip() if row else ""
+        if row is None:
+            return None
+        parts = [self.week_path(row["start_date"]), self._unit_folder(row["variety_id"]), sub,
+                 os.path.basename(path)]
+        return "/".join(p for p in parts if p)
 
     def enqueue_report(self, path: str, flush: bool = True) -> str:
         """Sube un informe: los semanales van a la carpeta de su semana; el resto a
@@ -919,29 +949,13 @@ class DriveBackup:
     WEEK_DIR_RE = re.compile(r"Año \d{4}/Semana \d{2} · \d{2}-\d{2}-\d{4}")
 
     def _expected_name(self, r: dict) -> str | None:
-        """Ruta que le corresponde HOY en Drive a un archivo de la cola cuya carpeta es la de
-        una semana («…/Año 2026/Semana 42 · 12-10-2026/…»), según la semana de su registro
-        (foto, adjunta o foto de medición). Solo cambia esa carpeta (el resto de la ruta y el
-        nombre quedan iguales). None si no corresponde."""
-        name = r["name"] or ""
-        m = self.WEEK_DIR_RE.search(name)
-        if not m:
+        """Ruta que le corresponde HOY en Drive a un archivo de la cola que está en la carpeta
+        de una semana («…/Año 2026/Semana 42 · 12-10-2026/…»): la de la semana de su registro
+        y, en I+D, la subcarpeta de su variedad o parcela. None si no corresponde (lo que no
+        está en una carpeta semanal no se toca)."""
+        if not self.WEEK_DIR_RE.search(r["name"] or ""):
             return None
-        row = None
-        if r["photo_id"] is not None:
-            row = self.db.query_one(
-                "SELECT w.start_date FROM photos p JOIN observations o ON o.id = p.observation_id "
-                "JOIN sampling_weeks w ON w.id = o.week_id WHERE p.id = ?", (r["photo_id"],))
-        else:
-            for table in ("variety_attachments", "measure_entries"):
-                row = self.db.query_one(f"SELECT w.start_date FROM {table} t JOIN sampling_weeks w "
-                                        f"ON w.id = t.week_id WHERE t.path = ?", (r["path"],))
-                if row:
-                    break
-        if not row:
-            return None
-        head = (name[:m.start()] + self.week_folder(row["start_date"]) + name[m.end():]).rpartition("/")[0]
-        return f"{head}/{os.path.basename(r['path'])}" if r["path"] else None
+        return self._target_for(r["path"], r["photo_id"])
 
     def _drive_ids_by_name(self, *names: str) -> list[str]:
         """Ids de los archivos de la app en Drive con ese nombre (los haya subido este equipo
@@ -966,7 +980,7 @@ class DriveBackup:
         if hasattr(self.db, "fix_week_names"):
             self.db.fix_week_names()      # una vez: lo movido antes, con la fecha de su semana
         todo = self.db.get_setting("week_moves_drive")
-        if not (todo or not self.db.get_setting("weeks_drive_checked_v1")):
+        if not (todo or not self.db.get_setting("weeks_drive_checked_v2")):
             return 0
         moved, emptied = 0, set()
         # 1) Lo movido con «Mover datos de semana»: cada archivo, a la carpeta de su nueva
@@ -975,7 +989,8 @@ class DriveBackup:
         for it in todo if isinstance(todo, list) else []:
             new_base = os.path.basename(it.get("path") or "")
             sub = (it.get("sub") or "").replace("/", "-").strip()
-            want = f"{self.week_path(it['dst'])}/" + (f"{sub}/" if sub else "") + new_base
+            want = self._target_for(it.get("path")) or (
+                f"{self.week_path(it['dst'])}/" + (f"{sub}/" if sub else "") + new_base)
             q = self.db.query_one("SELECT * FROM drive_queue WHERE path=? ORDER BY id DESC", (it.get("path"),))
             if q and q["status"] == "pending":
                 if not q["photo_id"]:
@@ -1002,6 +1017,9 @@ class DriveBackup:
             if q:
                 self.db.execute("UPDATE drive_queue SET name=?, drive_id=? WHERE id=?", (want, fid, q["id"]))
             emptied.add(self.week_path(it["src"]))
+            for sub_dir in ("Adjuntas", sub):
+                if sub_dir:
+                    emptied.add(f"{self.week_path(it['src'])}/{sub_dir}")
             moved += 1
         # 2) Lo que quedó en la cola con la carpeta de otra semana (también lo movido antes).
         for r in self.db.query("SELECT * FROM drive_queue WHERE status IN ('done', 'pending')"):
@@ -1025,14 +1043,17 @@ class DriveBackup:
             m = self.WEEK_DIR_RE.search(old_dir)
             if m:
                 emptied.add(old_dir[:m.end()])
+                emptied.add(old_dir)                    # p. ej. «…/Semana 44/Adjuntas» vacía
+            if moved % 10 == 0:
+                self._set_message(f"Ordenando Drive: {moved} archivo(s) movidos…")
             self.db.execute("UPDATE drive_queue SET name=? WHERE id=?", (want, r["id"]))
             moved += 1
         for folder in sorted(emptied, key=len, reverse=True):
             self._trash_if_empty(folder)
         self.db.set_setting("week_moves_drive", left or None)
-        self.db.set_setting("weeks_drive_checked_v1", True)
+        self.db.set_setting("weeks_drive_checked_v2", True)   # v2: subcarpetas por variedad/parcela (I+D)
         if moved:
-            self.log(f"Drive: {moved} archivo(s) movidos a la carpeta de su nueva semana")
+            self.log(f"Drive: {moved} archivo(s) ordenados en su carpeta de semana y variedad/parcela")
         return moved
 
     def _trash_if_empty(self, path: str) -> None:
