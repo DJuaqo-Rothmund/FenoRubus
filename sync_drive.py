@@ -225,6 +225,7 @@ class DriveSync:
             db = self.open_db(ws)
             folder = folders.get(ws["code"]) or self.drive._folder(ws["code"], root)
             res = self.sync_db(db, folder)
+            self._backup_photos(db)
             total["workspaces"] += 1
             for k in ("received", "sent", "applied"):
                 total[k] += res[k]
@@ -235,6 +236,19 @@ class DriveSync:
             else:
                 total["pending_photos"] += db.query_one("SELECT COUNT(*) AS n FROM sync_missing")["n"]
         return total
+
+    def _backup_photos(self, db) -> None:
+        """Respaldo de las fotos de ESTE ensayo o predio (no solo del abierto): sube lo
+        pendiente y ordena lo movido de semana (carpeta y nombre en Drive)."""
+        try:
+            if db is getattr(self.drive, "db", None):
+                self.drive.flush()
+                return
+            from drive_backup import DriveBackup
+            DriveBackup(db, authorizer=self.drive.authorizer, transport=self.drive.transport,
+                        metered=self.drive.metered, crop=self.drive.crop).flush()
+        except Exception as exc:  # noqa: BLE001 (lo que falte se reintenta en la próxima)
+            print("respaldo de fotos:", exc)
 
     def photos_allowed(self) -> bool:
         """Las fotos se bajan con Wi-Fi si así está el respaldo («Subir solo con Wi-Fi»)."""

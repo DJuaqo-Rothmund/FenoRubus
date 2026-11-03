@@ -1488,17 +1488,19 @@ class Database:
     def move_week_data(self, src_id: int, dst_id: int) -> dict:
         """Pasa TODO lo registrado en la semana `src_id` (estados, fotos, notas, mediciones y
         adjuntos) a la semana `dst_id` (p. ej. se muestreó esta semana pero se anotó en la
-        hoja de la siguiente). Nada se borra: si una parcela ya tiene un registro con datos en
-        la semana de destino, el de origen se queda donde estaba (se cuenta en "kept"); los
-        registros vacíos del destino se reemplazan. Viaja a los otros equipos."""
+        hoja de la siguiente). Nada se borra ni queda atrás: si una parcela ya tiene un
+        registro con datos en la semana de destino, los dos se JUNTAN (las fotos se suman; el
+        estado BBCH, la ubicación y la IA se completan si allá faltaban; las notas se agregan;
+        se cuenta en "merged"). Los registros vacíos del destino se reemplazan. Viaja a los
+        otros equipos."""
         if src_id == dst_id:
             raise ValueError("Elija una semana distinta.")
         src, dst = self.get_week(src_id), self.get_week(dst_id)
         if not src or not dst:
             raise ValueError("Semana no encontrada.")
-        moved = kept = 0
+        moved = merged = 0
         photo_ids = []
-        for o in self.query("SELECT id, variety_id FROM observations WHERE week_id=?", (src_id,)):
+        for o in self.query("SELECT * FROM observations WHERE week_id=?", (src_id,)):
             other = self.get_observation(o["variety_id"], dst_id)
             src_empty = self.observation_is_empty(o["id"])
             if other is not None:
@@ -1508,7 +1510,8 @@ class Database:
                     self.execute("DELETE FROM observations WHERE id=?", (o["id"],))
                     continue
                 else:
-                    kept += 1
+                    photo_ids += self._merge_observation(o, other)
+                    merged += 1
                     continue
             self.execute("UPDATE observations SET week_id=?, updated_at=? WHERE id=?", (dst_id, _now(), o["id"]))
             if not src_empty:
@@ -1554,13 +1557,42 @@ class Database:
         self.set_setting("week_moves_drive", todo)
         self.log("update", "week_move", dst_id, f"{src['start_date']} → {dst['start_date']}: "
                                                 f"{moved} registros, {entries} mediciones, {att} adjuntos")
-        return {"records": moved, "entries": entries, "attachments": att, "kept": kept}
+        return {"records": moved, "entries": entries, "attachments": att, "merged": merged}
+
+    def _merge_observation(self, o: dict, dst: dict) -> list[int]:
+        """Junta el registro `o` en `dst` (misma parcela, otra semana) y borra `o`. Devuelve
+        las fotos que pasaron."""
+        ids = []
+        for p in self.query("SELECT * FROM photos WHERE observation_id=? ORDER BY id", (o["id"],)):
+            primary = p["is_primary"] and not self.query_one(
+                "SELECT 1 FROM photos WHERE observation_id=? AND kind=? AND is_primary=1", (dst["id"], p["kind"]))
+            self.execute("UPDATE photos SET observation_id=?, is_primary=? WHERE id=?",
+                         (dst["id"], int(bool(primary)), p["id"]))
+            ids.append(p["id"])
+        sets = {}
+        for col in ("bbch_code", "bbch_label", "ai_code", "ai_confidence", "ai_detail", "ai_accepted",
+                    "observed_at", "latitude", "longitude", "gps_accuracy", "gps_source"):
+            if dst.get(col) in (None, "") and o.get(col) not in (None, ""):
+                sets[col] = o[col]
+        extra = (o.get("notes") or "").strip()
+        if o.get("bbch_code") is not None and dst.get("bbch_code") not in (None, o["bbch_code"]):
+            extra = (f"Estado del registro movido: BBCH {ph.code_str(o['bbch_code'])}" + (f". {extra}" if extra else ""))
+        notes = [n for n in ((dst.get("notes") or "").strip(), extra) if n]
+        if len(notes) == 2 and notes[1] not in notes[0]:
+            sets["notes"] = notes[0] + "\n" + notes[1]
+        elif notes and not (dst.get("notes") or "").strip():
+            sets["notes"] = notes[0]
+        if sets:
+            self.execute(f"UPDATE observations SET {', '.join(f'{k}=?' for k in sets)}, updated_at=? WHERE id=?",
+                         (*sets.values(), _now(), dst["id"]))
+        self.execute("DELETE FROM observations WHERE id=?", (o["id"],))
+        return ids
 
     def fix_week_names(self) -> int:
         """Una vez: fotos (de registros, adjuntas y de mediciones) cuyo nombre lleva la fecha
         de OTRA semana (movidas antes de que «Mover datos de semana» las renombrara): toman
         la fecha de su semana y quedan en la lista para moverlas y renombrarlas en Drive."""
-        if self.get_setting("week_names_fixed_v1"):
+        if self.get_setting("week_names_fixed_v2"):
             return 0
         rows = [("photos", r) for r in self.query(
             "SELECT p.id, p.path, w.start_date, '' AS sub FROM photos p JOIN observations o "
@@ -1603,7 +1635,7 @@ class Database:
             n += 1
         if todo:
             self.set_setting("week_moves_drive", todo)
-        self.set_setting("week_names_fixed_v1", True)
+        self.set_setting("week_names_fixed_v2", True)
         return n
 
     def ensure_week(self, season: int, number: int) -> dict:

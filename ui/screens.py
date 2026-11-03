@@ -2165,8 +2165,9 @@ class SamplingTab(MDBoxLayout):
                     f"«{name(dst)}» YA TIENE DATOS: {self._week_what(have)}"
                     + (f" ({names})" if names else "") + ".\n\n"
                     f"Si mueve igual, {what} pasan allá; si una parcela tiene registro en ambas "
-                    "semanas, se conserva el de destino y el de origen queda en su semana. "
-                    "No se borra nada.",
+                    "semanas, se JUNTAN: las fotos se suman, el estado BBCH se completa si faltaba "
+                    "(si ambos tienen, queda el de destino y el otro se anota en las notas). "
+                    "No se pierde nada.",
                     [("Revisar destino", lambda: self._go(dst)),
                      ("Mover igual", lambda: self._do_move(src, dst))])
 
@@ -2211,8 +2212,7 @@ class SamplingTab(MDBoxLayout):
         if a.db.get_setting("drive_enabled", False):
             a.drive.flush_async()      # en Drive, los archivos pasan a la carpeta de la nueva semana
         a.toast(f"Movidos a {dst['label']}: {res['records']} registro(s), {res['entries']} medición(es)"
-                + (f". {res['kept']} quedaron en la semana original (destino ya tenía datos)"
-                   if res["kept"] else ""))
+                + (f". {res['merged']} se juntaron con el registro que ya había" if res["merged"] else ""))
         if a.home is not None:
             a.refresh_home()
 

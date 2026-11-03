@@ -2629,7 +2629,7 @@ def test_move_week_data(db, tmp_path):
     assert db.week_data_summary(w1["id"]) == {"records": 1, "photos": 1, "entries": 1,
                                               "attachments": 0, "total": 2, "names": [v1["name"]]}
     res = db.move_week_data(w1["id"], w2["id"])
-    assert res == {"records": 1, "entries": 1, "attachments": 0, "kept": 0}
+    assert res == {"records": 1, "entries": 1, "attachments": 0, "merged": 0}
     assert db.week_data_summary(w1["id"])["total"] == 0
     moved = db.get_observation(v1["id"], w2["id"])
     assert moved["bbch_code"] == 61 and moved["id"] == o["id"]
@@ -2637,10 +2637,17 @@ def test_move_week_data(db, tmp_path):
     # Destino con datos: se conserva el de destino.
     db.update_observation(db.get_or_create_observation(v1["id"], w1["id"])["id"], bbch_code=55)
     db.update_observation(db.get_or_create_observation(v2["id"], w1["id"])["id"], bbch_code=57)
+    p2 = str(tmp_path / "otra.jpg")
+    open(p2, "wb").write(b"jpg")
+    db.add_photo(db.get_observation(v1["id"], w1["id"])["id"], "detail", p2)
     res = db.move_week_data(w1["id"], w2["id"])
-    assert res["records"] == 1 and res["kept"] == 1
-    assert db.get_observation(v1["id"], w2["id"])["bbch_code"] == 61
-    assert db.get_observation(v1["id"], w1["id"])["bbch_code"] == 55
+    assert res["records"] == 1 and res["merged"] == 1             # destino con datos: se juntan
+    merged_obs = db.get_observation(v1["id"], w2["id"])
+    assert merged_obs["bbch_code"] == 61 and "BBCH 55" in merged_obs["notes"]
+    assert db.get_observation(v1["id"], w1["id"]) is None            # nada queda atrás
+    assert db.query_one("SELECT COUNT(*) AS n FROM photos WHERE observation_id=?", (merged_obs["id"],))["n"] == 2
+    assert db.query_one("SELECT COUNT(*) AS n FROM photos WHERE observation_id=? AND kind='detail' "
+                        "AND is_primary=1", (merged_obs["id"],))["n"] == 1
     assert db.get_observation(v2["id"], w2["id"])["bbch_code"] == 57
     with pytest.raises(ValueError):
         db.move_week_data(w2["id"], w2["id"])

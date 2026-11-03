@@ -943,8 +943,9 @@ class DriveBackup:
         head = (name[:m.start()] + self.week_folder(row["start_date"]) + name[m.end():]).rpartition("/")[0]
         return f"{head}/{os.path.basename(r['path'])}" if r["path"] else None
 
-    def _drive_id_by_name(self, *names: str) -> str | None:
-        """Id de un archivo de la app en Drive por su nombre (lo haya subido este equipo u otro)."""
+    def _drive_ids_by_name(self, *names: str) -> list[str]:
+        """Ids de los archivos de la app en Drive con ese nombre (los haya subido este equipo
+        u otro; si hay copias repetidas, todas)."""
         for n in names:
             if not n:
                 continue
@@ -953,8 +954,8 @@ class DriveBackup:
                 {"q": f"name='{esc}' and trashed=false and mimeType!='{FOLDER_MIME}'",
                  "fields": "files(id,name)", "spaces": "drive"})).get("files", [])
             if found:
-                return found[0]["id"]
-        return None
+                return [f["id"] for f in found]
+        return []
 
     def relocate_weeks(self) -> int:
         """Datos movidos a otra semana (Mover datos de semana): las fotos, adjuntas y fotos de
@@ -980,16 +981,22 @@ class DriveBackup:
                 if not q["photo_id"]:
                     self.db.execute("UPDATE drive_queue SET name=? WHERE id=?", (want, q["id"]))
                 continue                                # sube directo a la carpeta nueva
-            fid = (q["drive_id"] if q and q["drive_id"] else None) or self._drive_id_by_name(it.get("old"), new_base)
-            if not fid:
+            fids = self._drive_ids_by_name(it.get("old"), new_base)
+            if q and q["drive_id"] and q["drive_id"] not in fids:
+                fids.insert(0, q["drive_id"])
+            if not fids:
                 continue                                # nunca se subió: nada que mover
+            fid = fids[0]
             if moved == 0:
                 self._set_message("Moviendo en Drive los archivos de la semana cambiada…")
-            try:
-                self.move_file(fid, want)
-            except DriveError as exc:
-                if exc.status in (403, 404):
-                    continue
+            failed = False
+            for one in fids:                            # también las copias repetidas
+                try:
+                    self.move_file(one, want)
+                except DriveError as exc:
+                    if exc.status not in (403, 404):
+                        failed = True
+            if failed:
                 left.append(it)
                 continue
             if q:
