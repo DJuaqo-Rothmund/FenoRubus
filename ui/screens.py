@@ -2208,6 +2208,8 @@ class SamplingTab(MDBoxLayout):
             a.toast(str(exc))
             return
         self._go(a.db.get_week(dst["id"]))
+        if a.db.get_setting("drive_enabled", False):
+            a.drive.flush_async()      # en Drive, los archivos pasan a la carpeta de la nueva semana
         a.toast(f"Movidos a {dst['label']}: {res['records']} registro(s), {res['entries']} medición(es)"
                 + (f". {res['kept']} quedaron en la semana original (destino ya tenía datos)"
                    if res["kept"] else ""))

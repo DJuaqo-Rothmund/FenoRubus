@@ -1515,15 +1515,9 @@ class Database:
             photo_ids += [p["id"] for p in self.query("SELECT id FROM photos WHERE observation_id=?", (o["id"],))]
         entries = self.execute("UPDATE measure_entries SET week_id=? WHERE week_id=?", (dst_id, src_id)).rowcount
         att = self.execute("UPDATE variety_attachments SET week_id=? WHERE week_id=?", (dst_id, src_id)).rowcount
-        # Fotos aún por subir: van a la carpeta de Drive de la nueva semana.
-        if photo_ids:
-            try:
-                from drive_backup import DriveBackup
-                old_f, new_f = DriveBackup.week_folder(src["start_date"]), DriveBackup.week_folder(dst["start_date"])
-                self.execute(f"UPDATE drive_queue SET name=REPLACE(name, ?, ?) WHERE status!='done' "
-                             f"AND photo_id IN ({','.join(str(i) for i in photo_ids)})", (old_f, new_f))
-            except Exception:   # noqa: BLE001 — Drive es opcional
-                pass
+        # Drive: en el próximo respaldo, lo ya subido se MUEVE a la carpeta de la nueva semana
+        # (que se crea si no existe) y lo pendiente sube directo allá (DriveBackup.relocate_weeks).
+        self.set_setting("week_moves_drive", True)
         self.log("update", "week_move", dst_id, f"{src['start_date']} → {dst['start_date']}: "
                                                 f"{moved} registros, {entries} mediciones, {att} adjuntos")
         return {"records": moved, "entries": entries, "attachments": att, "kept": kept}

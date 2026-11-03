@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import datetime as _dt
 import json
+import re
 import os
 import threading
 import time
@@ -915,6 +916,93 @@ class DriveBackup:
             parent = found[0]["id"]
         return parent
 
+    WEEK_DIR_RE = re.compile(r"Año \d{4}/Semana \d{2} · \d{2}-\d{2}-\d{4}")
+
+    def _expected_name(self, r: dict) -> str | None:
+        """Ruta que le corresponde HOY en Drive a un archivo de la cola cuya carpeta es la de
+        una semana («…/Año 2026/Semana 42 · 12-10-2026/…»), según la semana de su registro
+        (foto, adjunta o foto de medición). Solo cambia esa carpeta (el resto de la ruta y el
+        nombre quedan iguales). None si no corresponde."""
+        name = r["name"] or ""
+        m = self.WEEK_DIR_RE.search(name)
+        if not m:
+            return None
+        row = None
+        if r["photo_id"] is not None:
+            row = self.db.query_one(
+                "SELECT w.start_date FROM photos p JOIN observations o ON o.id = p.observation_id "
+                "JOIN sampling_weeks w ON w.id = o.week_id WHERE p.id = ?", (r["photo_id"],))
+        else:
+            for table in ("variety_attachments", "measure_entries"):
+                row = self.db.query_one(f"SELECT w.start_date FROM {table} t JOIN sampling_weeks w "
+                                        f"ON w.id = t.week_id WHERE t.path = ?", (r["path"],))
+                if row:
+                    break
+        if not row:
+            return None
+        return name[:m.start()] + self.week_folder(row["start_date"]) + name[m.end():]
+
+    def relocate_weeks(self) -> int:
+        """Datos movidos a otra semana (Mover datos de semana): las fotos, adjuntas y fotos de
+        mediciones YA SUBIDAS se mueven en Drive a la carpeta de su nueva semana (que se crea
+        si no existe), sin subirlas de nuevo; las pendientes suben directo allá. La carpeta
+        de la semana anterior, si queda vacía, va a la papelera. Corre tras mover una semana
+        y una vez para lo movido antes de esta versión."""
+        if not (self.db.get_setting("week_moves_drive") or not self.db.get_setting("weeks_drive_checked_v1")):
+            return 0
+        moved, emptied = 0, set()
+        for r in self.db.query("SELECT * FROM drive_queue WHERE status IN ('done', 'pending')"):
+            want = self._expected_name(r)
+            if not want or want == r["name"]:
+                continue
+            if r["status"] == "pending" or not r["drive_id"]:
+                self.db.execute("UPDATE drive_queue SET name=? WHERE id=?", (want, r["id"]))
+                continue
+            if moved == 0:
+                self._set_message("Moviendo en Drive los archivos de la semana cambiada…")
+            try:
+                self.move_file(r["drive_id"], want)
+            except DriveError as exc:
+                if exc.status in (403, 404):   # ya no está en Drive: se sube de nuevo allá
+                    self.db.execute("UPDATE drive_queue SET status='pending', drive_id=NULL, attempts=0, "
+                                    "name=? WHERE id=?", (want, r["id"]))
+                    continue
+                raise
+            old_dir = (r["name"] or "").rpartition("/")[0]
+            m = self.WEEK_DIR_RE.search(old_dir)
+            if m:
+                emptied.add(old_dir[:m.end()])
+            self.db.execute("UPDATE drive_queue SET name=? WHERE id=?", (want, r["id"]))
+            moved += 1
+        for folder in sorted(emptied, key=len, reverse=True):
+            self._trash_if_empty(folder)
+        self.db.set_setting("week_moves_drive", False)
+        self.db.set_setting("weeks_drive_checked_v1", True)
+        if moved:
+            self.log(f"Drive: {moved} archivo(s) movidos a la carpeta de su nueva semana")
+        return moved
+
+    def _trash_if_empty(self, path: str) -> None:
+        """La carpeta «<módulo>/<path>» a la papelera si quedó vacía (también sus subcarpetas
+        vacías, como «Adjuntas»)."""
+        try:
+            fid = self._find_path(path)
+            if not fid:
+                return
+
+            def empty(folder_id) -> bool:
+                kids = self._call("GET", f"{API}?" + urllib.parse.urlencode(
+                    {"q": f"'{folder_id}' in parents and trashed=false",
+                     "fields": "files(id,mimeType)", "pageSize": "50"})).get("files", [])
+                return all(k.get("mimeType") == FOLDER_MIME and empty(k["id"]) for k in kids)
+
+            if empty(fid):
+                self._call("PATCH", f"{API}/{fid}?fields=id", json.dumps({"trashed": True}).encode(),
+                           "application/json; charset=UTF-8")
+                self.db.set_setting("drive_folders", {})   # rutas en caché
+        except (DriveError, KeyError, ValueError):
+            pass
+
     def relocate_moved(self) -> int:
         """Ensayo traspasado a un predio (Workspaces.move_to_predio): en Drive, el contenido
         de «I+D/Nuevas variedades» pasa a «Predio/El Amanecer» y las fotos ya subidas toman
@@ -1025,6 +1113,7 @@ class DriveBackup:
             # Primero mover lo de versiones anteriores (rápido: unas pocas carpetas)…
             self.relocate_legacy()  # lo subido antes de los ensayos -> «I+D/Nuevas variedades»
             self.relocate_moved()   # ensayo traspasado a un predio: carpeta y nombres en Drive
+            self.relocate_weeks()   # datos movidos a otra semana: sus archivos, a esa carpeta
             while True:
                 self._again = False
                 if self.wifi_only and self.metered():

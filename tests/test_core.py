@@ -2848,3 +2848,81 @@ def test_report_uses_available_canopy_and_counts_missing(db, tmp_path):
     assert res.missing == 1
     assert db.register_missing_photos() == 2
     assert db.query_one("SELECT COUNT(*) AS n FROM sync_missing")["n"] == 2
+
+
+def test_week_move_relocates_drive_files(db, tmp_path):
+    """Mover datos de semana: lo ya subido a Drive (foto del registro y foto adjunta) pasa a
+    la carpeta de la nueva semana (que se crea), sin subirlo de nuevo; la carpeta vieja,
+    vacía, va a la papelera."""
+    import json
+    import urllib.parse
+    from drive_backup import DriveBackup
+
+    class MovableDrive(FakeDrive):
+        def __call__(self, method, url, headers, body):
+            fid = url.split("/files/")[1].split("?")[0] if "/files/" in url else ""
+            qs = urllib.parse.parse_qs(urllib.parse.urlsplit(url).query)
+            if method == "GET" and fid and "q" not in qs and "alt=media" not in url:
+                return 200, json.dumps({"parents": self.files[fid]["parents"]}).encode()
+            if method == "PATCH" and fid and "uploadType" not in url:
+                meta = json.loads(body or b"{}")
+                f = self.files[fid]
+                if meta.get("trashed"):
+                    f["trashed"] = True
+                if "name" in meta:
+                    f["name"] = meta["name"]
+                if "addParents" in qs:
+                    f["parents"] = [p for p in f["parents"] if p not in qs.get("removeParents", [""])[0].split(",")]
+                    f["parents"].append(qs["addParents"][0])
+                return 200, json.dumps({"id": fid}).encode()
+            if method == "GET" and "q" in qs:              # sin lo que está en la papelera
+                code, data = super().__call__(method, url, headers, body)
+                hits = [dict(h, mimeType="application/vnd.google-apps.folder" if self.files[h["id"]]["folder"]
+                             else "image/jpeg")
+                        for h in json.loads(data)["files"] if not self.files[h["id"]].get("trashed")]
+                return code, json.dumps({"files": hits}).encode()
+            return super().__call__(method, url, headers, body)
+
+        def path_of(self, fid):
+            parts = []
+            while fid in self.files:
+                parts.append(self.files[fid]["name"])
+                ps = self.files[fid]["parents"]
+                fid = ps[0] if ps else None
+            return "/".join(reversed(parts))
+
+    class Auth:
+        def get_token(self, interactive):
+            return "t"
+
+    fake = MovableDrive()
+    db.set_setting("drive_enabled", True)
+    drive = DriveBackup(db, authorizer=Auth(), transport=fake, metered=lambda: False)
+    db.set_season_start(2026, dt.date(2026, 9, 7))
+    v = db.list_varieties()[0]
+    w1 = db.week_for_date(dt.date(2026, 10, 12))
+    w2 = db.week_for_date(dt.date(2026, 10, 19))
+    o = db.get_or_create_observation(v["id"], w1["id"])
+    db.update_observation(o["id"], bbch_code=61)
+    photo, att = str(tmp_path / "20261012-C11G.jpg"), str(tmp_path / "20261012-C11A.jpg")
+    synthetic_photo(61, "canopy", photo, 1)
+    synthetic_photo(61, "detail", att, 2)
+    drive.enqueue(db.add_photo(o["id"], "canopy", photo), photo, flush=False)
+    db.add_attachment(v["id"], w1["season"], att, week_id=w1["id"])
+    drive.enqueue(None, att, remote=f"{drive.week_path(w1['start_date'])}/Adjuntas/{os.path.basename(att)}",
+                  flush=False)
+    assert drive.flush() == 2
+    ids = {os.path.basename(r["path"]): r["drive_id"] for r in db.query("SELECT * FROM drive_queue")}
+    old = drive.week_folder(w1["start_date"])
+    assert old in fake.path_of(ids[os.path.basename(photo)])
+    db.move_week_data(w1["id"], w2["id"])
+    n_files = sum(1 for f in fake.files.values() if not f["folder"])
+    drive.flush()
+    new = drive.week_folder(w2["start_date"])
+    assert fake.path_of(ids[os.path.basename(photo)]).endswith(f"{new}/{os.path.basename(photo)}")
+    assert fake.path_of(ids[os.path.basename(att)]).endswith(f"{new}/Adjuntas/{os.path.basename(att)}")
+    assert sum(1 for f in fake.files.values() if not f["folder"]) == n_files      # nada se subió de nuevo
+    old_dirs = [f for f in fake.files.values() if f["folder"] and f["name"] == old.split("/")[-1]]
+    assert old_dirs and all(f.get("trashed") for f in old_dirs)
+    assert not db.get_setting("week_moves_drive")
+    assert drive.relocate_weeks() == 0                                             # ya está todo en su lugar
