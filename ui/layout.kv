@@ -1020,9 +1020,10 @@
                     adaptive_height: True
                     padding: dp(12), 0
                     spacing: dp(10)
-                    MDProgressBar:
+                    # Barra propia (la de KivyMD, al cambiar de semana, a veces dejaba el relleno
+                    # de la semana anterior dibujado encima del título).
+                    WeekBar:
                         id: progress
-                        max: 1
                         value: 0
                         color: c(theme.BERRY) if root.extra else c(theme.LEAF)
                         back_color: c(theme.BERRY_SOFT) if root.extra else c(theme.LEAF_SOFT)
@@ -1208,6 +1209,25 @@
         pos_hint: {"center_y": .5}
         theme_text_color: "Custom"
         text_color: c(theme.LEAF_DARK)
+
+<WeekBar@Widget>:
+    value: 0
+    color: [0, 0, 0, 1]
+    back_color: [0, 0, 0, .1]
+    canvas:
+        Color:
+            rgba: self.back_color
+        RoundedRectangle:
+            pos: self.pos
+            size: self.size
+            radius: [self.height / 2]
+        # Sin avance no se dibuja relleno (un rectángulo redondeado de ancho 0 salía lleno).
+        Color:
+            rgba: self.color if self.value > 0 else (0, 0, 0, 0)
+        RoundedRectangle:
+            pos: self.pos
+            size: max(self.height, self.width * min(1, self.value)) if self.value > 0 else 0, self.height
+            radius: [self.height / 2]
 
 <WeekHeader@ButtonBehavior+MDBoxLayout>:
     canvas.before:
