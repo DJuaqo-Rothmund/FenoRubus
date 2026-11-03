@@ -34,6 +34,10 @@ presplash.filename = %(source.dir)s/assets/presplash.png
 # que aparece la pantalla de cultivos. La animación de cada módulo (la de PhenoRubus, la
 # de siempre) se ve al elegir el cultivo (ver tools/make_crop_assets.py y splash_native.py).
 icon.filename = %(source.dir)s/assets/icon.png
+# Ícono adaptativo (Android 8+: fondo que llena la forma del ícono y logo encima). CI lo
+# activa si release.env trae ICON_FG e ICON_BG (AeonCrop).
+#icon.adaptive_foreground.filename = %(source.dir)s/assets/icon_fg.png
+#icon.adaptive_background.filename = %(source.dir)s/assets/icon_bg.png
 android.presplash_color = #F2F4EE
 
 # (list) Supported orientations

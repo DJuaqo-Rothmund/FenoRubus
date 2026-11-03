@@ -65,6 +65,10 @@ jobs:
           sed -i "s/^package.name = .*/package.name = $PACKAGE/" buildozer.spec
           sed -i "s/^title = .*/title = $TITLE/" buildozer.spec
           sed -i "s#^icon.filename = .*#icon.filename = %(source.dir)s/$ICON#" buildozer.spec
+          if [ -n "${ICON_FG:-}" ] && [ -n "${ICON_BG:-}" ]; then
+            sed -i "s#^\#\?icon.adaptive_foreground.filename = .*#icon.adaptive_foreground.filename = %(source.dir)s/$ICON_FG#" buildozer.spec
+            sed -i "s#^\#\?icon.adaptive_background.filename = .*#icon.adaptive_background.filename = %(source.dir)s/$ICON_BG#" buildozer.spec
+          fi
           echo "$VERSION" > version.txt
           echo "Versión: $VERSION · paquete org.rubus.$PACKAGE · $TITLE"
       # freetype se descarga de download.savannah.gnu.org, que a veces no responde desde

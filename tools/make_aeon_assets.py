@@ -11,9 +11,8 @@ Imágenes de AeonCrop (la app Lab) a partir de los SVG de assets/src:
   PhenoCran; fruit.png / fruit_gris.png: el fruto solo (vista previa).
 * assets/ui/aeon_ia.png y aeon_iaplus.png: IA e IA+ (dibujo blanco teñido de celeste)
   sobre la burbuja azul con estrellas, centrada en el cerebro; aeon_ia_glow.png: su brillo neón.
-* assets/icon_aeoncrop.png: ícono de la app en el teléfono, SIN el nombre (la huella y el
-  reloj de arena: `node tools/render_aeon_icon.js /tmp/marca.png` y luego este script con
-  esa imagen como segundo argumento).
+* El ícono de la app en el teléfono (logo grande sobre fondo azul estelar, adaptativo) lo
+  hace ahora tools/make_aeon_icon.py: no pase el segundo argumento aquí.
 """
 from __future__ import annotations
 
