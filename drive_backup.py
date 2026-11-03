@@ -940,7 +940,21 @@ class DriveBackup:
                     break
         if not row:
             return None
-        return name[:m.start()] + self.week_folder(row["start_date"]) + name[m.end():]
+        head = (name[:m.start()] + self.week_folder(row["start_date"]) + name[m.end():]).rpartition("/")[0]
+        return f"{head}/{os.path.basename(r['path'])}" if r["path"] else None
+
+    def _drive_id_by_name(self, *names: str) -> str | None:
+        """Id de un archivo de la app en Drive por su nombre (lo haya subido este equipo u otro)."""
+        for n in names:
+            if not n:
+                continue
+            esc = n.replace("\\", "\\\\").replace("'", "\\'")
+            found = self._call("GET", f"{API}?" + urllib.parse.urlencode(
+                {"q": f"name='{esc}' and trashed=false and mimeType!='{FOLDER_MIME}'",
+                 "fields": "files(id,name)", "spaces": "drive"})).get("files", [])
+            if found:
+                return found[0]["id"]
+        return None
 
     def relocate_weeks(self) -> int:
         """Datos movidos a otra semana (Mover datos de semana): las fotos, adjuntas y fotos de
@@ -948,9 +962,41 @@ class DriveBackup:
         si no existe), sin subirlas de nuevo; las pendientes suben directo allá. La carpeta
         de la semana anterior, si queda vacía, va a la papelera. Corre tras mover una semana
         y una vez para lo movido antes de esta versión."""
-        if not (self.db.get_setting("week_moves_drive") or not self.db.get_setting("weeks_drive_checked_v1")):
+        if hasattr(self.db, "fix_week_names"):
+            self.db.fix_week_names()      # una vez: lo movido antes, con la fecha de su semana
+        todo = self.db.get_setting("week_moves_drive")
+        if not (todo or not self.db.get_setting("weeks_drive_checked_v1")):
             return 0
         moved, emptied = 0, set()
+        # 1) Lo movido con «Mover datos de semana»: cada archivo, a la carpeta de su nueva
+        #    semana y con su nombre nuevo (se busca por nombre si lo subió otro equipo).
+        left = []
+        for it in todo if isinstance(todo, list) else []:
+            new_base = os.path.basename(it.get("path") or "")
+            sub = (it.get("sub") or "").replace("/", "-").strip()
+            want = f"{self.week_path(it['dst'])}/" + (f"{sub}/" if sub else "") + new_base
+            q = self.db.query_one("SELECT * FROM drive_queue WHERE path=? ORDER BY id DESC", (it.get("path"),))
+            if q and q["status"] == "pending":
+                if not q["photo_id"]:
+                    self.db.execute("UPDATE drive_queue SET name=? WHERE id=?", (want, q["id"]))
+                continue                                # sube directo a la carpeta nueva
+            fid = (q["drive_id"] if q and q["drive_id"] else None) or self._drive_id_by_name(it.get("old"), new_base)
+            if not fid:
+                continue                                # nunca se subió: nada que mover
+            if moved == 0:
+                self._set_message("Moviendo en Drive los archivos de la semana cambiada…")
+            try:
+                self.move_file(fid, want)
+            except DriveError as exc:
+                if exc.status in (403, 404):
+                    continue
+                left.append(it)
+                continue
+            if q:
+                self.db.execute("UPDATE drive_queue SET name=?, drive_id=? WHERE id=?", (want, fid, q["id"]))
+            emptied.add(self.week_path(it["src"]))
+            moved += 1
+        # 2) Lo que quedó en la cola con la carpeta de otra semana (también lo movido antes).
         for r in self.db.query("SELECT * FROM drive_queue WHERE status IN ('done', 'pending')"):
             want = self._expected_name(r)
             if not want or want == r["name"]:
@@ -976,7 +1022,7 @@ class DriveBackup:
             moved += 1
         for folder in sorted(emptied, key=len, reverse=True):
             self._trash_if_empty(folder)
-        self.db.set_setting("week_moves_drive", False)
+        self.db.set_setting("week_moves_drive", left or None)
         self.db.set_setting("weeks_drive_checked_v1", True)
         if moved:
             self.log(f"Drive: {moved} archivo(s) movidos a la carpeta de su nueva semana")
@@ -1106,6 +1152,9 @@ class DriveBackup:
         uploaded = failed = 0
         self.running = True
         try:
+            # Datos movidos a otra semana: sus archivos se mueven y renombran en Drive. Va
+            # antes del «solo Wi-Fi»: no se sube nada, solo cambian carpeta y nombre.
+            self.relocate_weeks()
             if self.wifi_only and self.metered():
                 raise Offline("Esperando Wi-Fi (datos móviles desactivados para el respaldo)")
             self._sync_account_queue()
@@ -1113,7 +1162,6 @@ class DriveBackup:
             # Primero mover lo de versiones anteriores (rápido: unas pocas carpetas)…
             self.relocate_legacy()  # lo subido antes de los ensayos -> «I+D/Nuevas variedades»
             self.relocate_moved()   # ensayo traspasado a un predio: carpeta y nombres en Drive
-            self.relocate_weeks()   # datos movidos a otra semana: sus archivos, a esa carpeta
             while True:
                 self._again = False
                 if self.wifi_only and self.metered():

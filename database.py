@@ -25,6 +25,7 @@ from __future__ import annotations
 import datetime as _dt
 import json
 import os
+import re
 import sqlite3
 import threading
 from typing import Any, Iterable
@@ -1513,14 +1514,97 @@ class Database:
             if not src_empty:
                 moved += 1
             photo_ids += [p["id"] for p in self.query("SELECT id FROM photos WHERE observation_id=?", (o["id"],))]
+        # Archivos que cambian de semana: (tabla, id, ruta, subcarpeta en Drive).
+        files = [("photos", r["id"], r["path"], "") for r in self.query(
+            f"SELECT id, path FROM photos WHERE id IN ({','.join(str(i) for i in photo_ids) or '0'})")]
+        files += [("variety_attachments", r["id"], r["path"], "Adjuntas") for r in self.query(
+            "SELECT id, path FROM variety_attachments WHERE week_id=? AND path IS NOT NULL", (src_id,))]
+        files += [("measure_entries", r["id"], r["path"], r["mname"]) for r in self.query(
+            "SELECT e.id, e.path, m.name AS mname FROM measure_entries e JOIN measures m ON m.id = e.measure_id "
+            "WHERE e.week_id=? AND e.path IS NOT NULL AND e.path != ''", (src_id,))]
         entries = self.execute("UPDATE measure_entries SET week_id=? WHERE week_id=?", (dst_id, src_id)).rowcount
         att = self.execute("UPDATE variety_attachments SET week_id=? WHERE week_id=?", (dst_id, src_id)).rowcount
-        # Drive: en el próximo respaldo, lo ya subido se MUEVE a la carpeta de la nueva semana
-        # (que se crea si no existe) y lo pendiente sube directo allá (DriveBackup.relocate_weeks).
-        self.set_setting("week_moves_drive", True)
+        # Las fotos llevan la fecha de su semana en el nombre (20261012-C11G.jpg): pasa a la de
+        # la nueva semana (también en la cola de Drive). En el próximo respaldo, lo ya subido
+        # se MUEVE y renombra en Drive (DriveBackup.relocate_weeks), aunque lo haya subido
+        # otro equipo; lo pendiente sube directo a la carpeta nueva.
+        d1 = _dt.date.fromisoformat(src["start_date"][:10]).strftime(ph.PHOTO_DATE_FMT)
+        d2 = _dt.date.fromisoformat(dst["start_date"][:10]).strftime(ph.PHOTO_DATE_FMT)
+        todo = [m for m in (self.get_setting("week_moves_drive") or []) if isinstance(m, dict)]
+        for table, rid, path, sub in files:
+            old_base = os.path.basename(path or "")
+            new_path = path
+            if old_base.startswith(d1) and d1 != d2:
+                folder, rest = os.path.dirname(path), old_base[len(d1):]
+                stem, ext = os.path.splitext(d2 + rest)
+                cand, n = os.path.join(folder, stem + ext), 2
+                while os.path.exists(cand) or self.query_one(f"SELECT 1 FROM {table} WHERE path=?", (cand,)):
+                    cand, n = os.path.join(folder, f"{stem}-{n}{ext}"), n + 1
+                try:
+                    if os.path.exists(path):
+                        os.rename(path, cand)
+                    new_path = cand
+                except OSError:
+                    new_path = path
+                if new_path != path:
+                    self.execute(f"UPDATE {table} SET path=? WHERE id=?", (new_path, rid))
+                    self.execute("UPDATE drive_queue SET path=? WHERE path=?", (new_path, path))
+            todo.append({"old": old_base, "path": new_path, "src": src["start_date"][:10],
+                         "dst": dst["start_date"][:10], "sub": sub})
+        self.set_setting("week_moves_drive", todo)
         self.log("update", "week_move", dst_id, f"{src['start_date']} → {dst['start_date']}: "
                                                 f"{moved} registros, {entries} mediciones, {att} adjuntos")
         return {"records": moved, "entries": entries, "attachments": att, "kept": kept}
+
+    def fix_week_names(self) -> int:
+        """Una vez: fotos (de registros, adjuntas y de mediciones) cuyo nombre lleva la fecha
+        de OTRA semana (movidas antes de que «Mover datos de semana» las renombrara): toman
+        la fecha de su semana y quedan en la lista para moverlas y renombrarlas en Drive."""
+        if self.get_setting("week_names_fixed_v1"):
+            return 0
+        rows = [("photos", r) for r in self.query(
+            "SELECT p.id, p.path, w.start_date, '' AS sub FROM photos p JOIN observations o "
+            "ON o.id = p.observation_id JOIN sampling_weeks w ON w.id = o.week_id")]
+        rows += [("variety_attachments", r) for r in self.query(
+            "SELECT a.id, a.path, w.start_date, 'Adjuntas' AS sub FROM variety_attachments a "
+            "JOIN sampling_weeks w ON w.id = a.week_id WHERE a.path IS NOT NULL")]
+        rows += [("measure_entries", r) for r in self.query(
+            "SELECT e.id, e.path, w.start_date, m.name AS sub FROM measure_entries e JOIN measures m "
+            "ON m.id = e.measure_id JOIN sampling_weeks w ON w.id = e.week_id "
+            "WHERE e.path IS NOT NULL AND e.path != ''")]
+        todo = [m for m in (self.get_setting("week_moves_drive") or []) if isinstance(m, dict)]
+        n = 0
+        for table, r in rows:
+            base = os.path.basename(r["path"])
+            want = _dt.date.fromisoformat(r["start_date"][:10]).strftime(ph.PHOTO_DATE_FMT)
+            m = re.match(r"(\d{8})(?=\D)", base)
+            if not m or m[1] == want:
+                continue
+            try:
+                old_day = _dt.datetime.strptime(m[1], ph.PHOTO_DATE_FMT).date()
+            except ValueError:
+                continue                                  # otro formato (p. ej. ddmmaaaa antiguo)
+            if not 2020 <= old_day.year <= 2050:
+                continue
+            folder = os.path.dirname(r["path"])
+            stem, ext = os.path.splitext(want + base[8:])
+            cand, k = os.path.join(folder, stem + ext), 2
+            while os.path.exists(cand) or self.query_one(f"SELECT 1 FROM {table} WHERE path=?", (cand,)):
+                cand, k = os.path.join(folder, f"{stem}-{k}{ext}"), k + 1
+            try:
+                if os.path.exists(r["path"]):
+                    os.rename(r["path"], cand)
+            except OSError:
+                continue
+            self.execute(f"UPDATE {table} SET path=? WHERE id=?", (cand, r["id"]))
+            self.execute("UPDATE drive_queue SET path=? WHERE path=?", (cand, r["path"]))
+            todo.append({"old": base, "path": cand, "src": old_day.isoformat(),
+                         "dst": r["start_date"][:10], "sub": r["sub"]})
+            n += 1
+        if todo:
+            self.set_setting("week_moves_drive", todo)
+        self.set_setting("week_names_fixed_v1", True)
+        return n
 
     def ensure_week(self, season: int, number: int) -> dict:
         """Semana n.º `number` de la temporada (se crea si no existe). Puede ser 0 o negativa:

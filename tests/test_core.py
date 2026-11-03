@@ -2915,14 +2915,44 @@ def test_week_move_relocates_drive_files(db, tmp_path):
     ids = {os.path.basename(r["path"]): r["drive_id"] for r in db.query("SELECT * FROM drive_queue")}
     old = drive.week_folder(w1["start_date"])
     assert old in fake.path_of(ids[os.path.basename(photo)])
+    # Lo subido por OTRO equipo: este teléfono no lo tiene en su cola (se busca por nombre).
+    db.execute("DELETE FROM drive_queue WHERE path=?", (att,))
     db.move_week_data(w1["id"], w2["id"])
     n_files = sum(1 for f in fake.files.values() if not f["folder"])
+    new_photo = db.query_one("SELECT path FROM photos")["path"]
+    new_att = db.query_one("SELECT path FROM variety_attachments")["path"]
+    assert os.path.basename(new_photo) == "20261019-C11G.jpg" and os.path.exists(new_photo)
+    assert os.path.basename(new_att) == "20261019-C11A.jpg" and not os.path.exists(att)
+    drive.metered = lambda: True                    # con datos móviles y «solo Wi-Fi»: igual se mueve
     drive.flush()
     new = drive.week_folder(w2["start_date"])
-    assert fake.path_of(ids[os.path.basename(photo)]).endswith(f"{new}/{os.path.basename(photo)}")
-    assert fake.path_of(ids[os.path.basename(att)]).endswith(f"{new}/Adjuntas/{os.path.basename(att)}")
+    assert fake.path_of(ids[os.path.basename(photo)]).endswith(f"{new}/20261019-C11G.jpg")
+    assert fake.path_of(ids[os.path.basename(att)]).endswith(f"{new}/Adjuntas/20261019-C11A.jpg")
     assert sum(1 for f in fake.files.values() if not f["folder"]) == n_files      # nada se subió de nuevo
     old_dirs = [f for f in fake.files.values() if f["folder"] and f["name"] == old.split("/")[-1]]
     assert old_dirs and all(f.get("trashed") for f in old_dirs)
     assert not db.get_setting("week_moves_drive")
     assert drive.relocate_weeks() == 0                                             # ya está todo en su lugar
+
+
+def test_old_week_moves_fixed_once(db, tmp_path):
+    """Lo movido de semana ANTES de esta versión: la foto lleva la fecha de la semana vieja;
+    una vez se renombra con la de su semana (y queda para moverla en Drive)."""
+    db.set_season_start(2026, dt.date(2026, 9, 7))
+    v = db.list_varieties()[0]
+    w2 = db.week_for_date(dt.date(2026, 10, 19))
+    o = db.get_or_create_observation(v["id"], w2["id"])
+    db.update_observation(o["id"], bbch_code=61)
+    p = str(tmp_path / "20261012-C11G.jpg")
+    synthetic_photo(61, "canopy", p, 1)
+    legacy = str(tmp_path / "28092026-C11D.jpg")          # formato antiguo: no se toca
+    synthetic_photo(61, "detail", legacy, 2)
+    db.add_photo(o["id"], "canopy", p)
+    db.add_photo(o["id"], "detail", legacy)
+    assert db.fix_week_names() == 1
+    paths = sorted(os.path.basename(r["path"]) for r in db.query("SELECT path FROM photos"))
+    assert paths == ["20261019-C11G.jpg", "28092026-C11D.jpg"]
+    todo = db.get_setting("week_moves_drive")
+    assert todo == [{"old": "20261012-C11G.jpg", "path": str(tmp_path / "20261019-C11G.jpg"),
+                     "src": "2026-10-12", "dst": "2026-10-19", "sub": ""}]
+    assert db.fix_week_names() == 0                           # una sola vez
