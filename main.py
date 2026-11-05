@@ -313,20 +313,68 @@ class FenoRubusApp(MDApp):
             return
         if not d.backup.available:       # crea el acceso a la cuenta en el hilo principal
             return
+        from ui import task_badges
         if manual:
-            self.toast("Respaldando AeonScout en Google Drive…")
+            task_badges.start("backup", "AeonScout")
 
         def work():
             from drive_backup import _detach
             try:
+                if manual:
+                    d.backup.progress_cb = lambda f, t="": task_badges.update("backup", f, f"AeonScout · {t}")
                 n = d.run()
                 if manual:
-                    Clock.schedule_once(lambda *_: self.toast(
-                        f"AeonScout: {n} foto(s) subidas" if n else "AeonScout: todo respaldado"))
+                    task_badges.finish("backup", "done" if n else "empty",
+                                       f"AeonScout: {n} foto(s) subidas" if n else "AeonScout: todo estaba respaldado")
             except Exception as exc:  # noqa: BLE001
                 if manual:
-                    Clock.schedule_once(lambda *_: self.toast(f"AeonScout: {exc}"))
+                    task_badges.finish("backup", "error", f"AeonScout: {exc}")
             finally:
+                d.backup.progress_cb = None
+                _detach()
+        threading.Thread(target=work, daemon=True).start()
+
+    def backup_now(self) -> None:
+        """Botón «Respaldar»: sube a Drive lo pendiente del ensayo abierto (y reintenta lo que
+        falló), con la insignia flotante de avance."""
+        from ui import task_badges
+        d = self.drive
+        if not d.enabled:
+            self.toast("Conecte su cuenta de Google para respaldar en Drive.")
+            return
+        if not d.available or task_badges.active("backup"):
+            return
+        task_badges.start("backup")
+
+        def work():
+            from drive_backup import _detach, explain
+            try:
+                d._skip_missing()
+                d.db.execute("UPDATE drive_queue SET status='pending', attempts=0 WHERE status='error'")
+                waited = 0
+                while d.running and waited < 600:        # hay una subida automática en curso
+                    time.sleep(1)
+                    waited += 1
+                moved = d.relocate_weeks()
+                pending = d.db.query_one("SELECT COUNT(*) AS n FROM drive_queue WHERE status='pending'")["n"]
+                if not pending:
+                    task_badges.finish("backup", "done" if moved else "empty",
+                                       f"{moved} archivo(s) ordenados en Drive" if moved
+                                       else "Todo estaba respaldado en Google Drive")
+                    return
+                d.progress_cb = lambda f, t="": task_badges.update("backup", f, t)
+                n = d.flush()
+                st = d.status()
+                left = st["pending"] + st["errors"]
+                if left:
+                    task_badges.finish("backup", "error",
+                                       f"{n} subida(s); faltan {left}: {st.get('message') or 'se reintenta luego'}")
+                else:
+                    task_badges.finish("backup", "done", f"{n} archivo(s) respaldados en Google Drive")
+            except Exception as exc:  # noqa: BLE001
+                task_badges.finish("backup", "error", explain(str(exc)))
+            finally:
+                d.progress_cb = None
                 _detach()
         threading.Thread(target=work, daemon=True).start()
 
@@ -347,9 +395,20 @@ class FenoRubusApp(MDApp):
             if manual:
                 self.toast("Conecte Google Drive (Ajustes) para sincronizar con su PC.")
             return
+        from ui import task_badges
         if getattr(self, "_syncing", False):
+            if manual and not task_badges.active("sync"):
+                task_badges.start("sync", "Sincronización en curso")   # la automática ya corre
+                self._sync_badge = True
             return
         self._syncing = True
+        self._sync_badge = manual
+        if manual:
+            task_badges.start("sync")
+
+        def progress(f, text=""):
+            if getattr(self, "_sync_badge", False):
+                task_badges.update("sync", f, text)
 
         def work():
             from drive_backup import Offline, explain
@@ -361,7 +420,7 @@ class FenoRubusApp(MDApp):
                 for wait in (4, 12, 30, None):
                     try:
                         _step("sincroniza")
-                        res = self.sync.run(manual=manual)
+                        res = self.sync.run(manual=manual, progress=progress)
                         msg = summary(res)
                         _step("cuaderno → PDF")
                         self._export_notebooks()
@@ -399,6 +458,16 @@ class FenoRubusApp(MDApp):
         self.drive.enqueue(None, path, remote=photo_remote(path))
 
     def _after_sync(self, res, msg, manual):
+        if getattr(self, "_sync_badge", False):
+            self._sync_badge = False
+            from ui import task_badges
+            if res is None or msg.startswith("No se pudo"):
+                task_badges.finish("sync", "error", msg)
+            elif not any(res.get(k) for k in ("received", "sent", "applied", "created", "downloaded",
+                                              "uploaded", "moved")):
+                task_badges.finish("sync", "empty", "No había nada nuevo que sincronizar")
+            else:
+                task_badges.finish("sync", "done", msg)
         if manual:
             self.toast(msg)
         if res and res.get("downloaded") and res.get("pending_photos"):
@@ -953,6 +1022,8 @@ class FenoRubusApp(MDApp):
         self._syncing = True
         self.toast("Sincronizando los tres cultivos con Google Drive…")
         loaded = self._loaded[0]
+        from ui import task_badges
+        task_badges.start("sync")
         try:
             self.scout_backup()            # AeonScout también
         except Exception:  # noqa: BLE001
@@ -963,27 +1034,37 @@ class FenoRubusApp(MDApp):
             from drive_backup import DriveBackup, explain
             from platform_utils import get_data_dir
             from sync_drive import DriveSync, summary
-            msgs = []
+            msgs, did, failed = [], False, False
+            all_crops = list(crops.CROPS.values())
             try:
-                for crop in crops.CROPS.values():
+                for k, crop in enumerate(all_crops):
+                    def prog(f, text="", k=k, name=crop.app):
+                        task_badges.update("sync", (k + f) / len(all_crops), f"{name}: {text}" if text else name)
                     try:
                         if crop.id == loaded:
-                            res = self.sync.run(manual=True)
+                            res = self.sync.run(manual=True, progress=prog)
                         else:
                             crops.activate(crop.id)
                             data_dir = get_data_dir()
                             wss = Workspaces(data_dir)
                             db = wss.open(wss.last())
                             crops.activate(loaded)       # el resto de la app sigue en su cultivo
-                            res = DriveSync(DriveBackup(db, crop=crop), wss, wss.open, data_dir).run(manual=True)
+                            res = DriveSync(DriveBackup(db, crop=crop), wss, wss.open, data_dir).run(
+                                manual=True, progress=prog)
                         msgs.append(f"{crop.app}: {summary(res)}")
+                        did = did or any(res.get(x) for x in ("received", "sent", "applied", "created",
+                                                              "downloaded", "uploaded", "moved"))
                     except Exception as exc:  # noqa: BLE001
+                        failed = True
                         msgs.append(f"{crop.app}: {explain(str(exc))}")
                     finally:
                         crops.activate(loaded)
             finally:
                 self._syncing = False
-            Clock.schedule_once(lambda *_: self.toast(" · ".join(msgs)))
+            text = " · ".join(msgs)
+            task_badges.finish("sync", "error" if failed else "done" if did else "empty",
+                               text if (failed or did) else "No había nada nuevo que sincronizar")
+            Clock.schedule_once(lambda *_: self.toast(text))
         self.workers.submit(work)
 
     def open_ai_lab(self):

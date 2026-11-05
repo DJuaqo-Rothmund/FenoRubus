@@ -805,10 +805,7 @@ class HomeScreen(MDScreen):
         if getattr(self, "_spin_ev", None):
             a.toast("Trabajando con Google Drive…")
             return
-        st = a.drive.status()
-        if not st["pending"] and not st["errors"]:
-            a.toast("Todo está respaldado en Google Drive ✓")
-        a.drive.retry_errors()   # reintenta errores y sube lo pendiente (en segundo plano)
+        a.backup_now()           # reintenta errores y sube lo pendiente (insignia de avance)
         self._start_spin()
 
     def drive_sync_now(self):
@@ -4585,6 +4582,7 @@ class SettingsTab(MDScreen):
             n = a.drive.enqueue_existing()
             Clock.schedule_once(lambda *_: (a.toast(f"{n} foto(s) añadidas a la cola de respaldo"
                                                     if n else "No hay fotos anteriores pendientes"),
+                                            a.backup_now(),       # insignia de avance del respaldo
                                             self.refresh_drive()))
 
         a.workers.submit(work)

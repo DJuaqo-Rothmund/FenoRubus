@@ -1140,6 +1140,52 @@ class DriveBackup:
             self.log(f"Drive: {moved} archivo(s) ordenados en su carpeta (semana y variedad/parcela)")
         return moved
 
+    def clean_empty_folders(self) -> int:
+        """Carpetas vacías del ensayo o predio en Drive (quedan al ordenar o mover semanas): a
+        la papelera, de abajo hacia arriba (la del ensayo no se toca). Devuelve cuántas."""
+        prefix = self.prefix.strip("/")
+        if not prefix:
+            return 0
+        top = self._find_path(prefix)
+        if not top:
+            return 0
+        trashed = 0
+
+        def visit(fid: str) -> bool:
+            """True si la carpeta quedó vacía (y ya se mandó a la papelera)."""
+            nonlocal trashed
+            kids, token = [], None
+            while True:
+                params = {"q": f"'{fid}' in parents and trashed=false",
+                          "fields": "nextPageToken, files(id,mimeType)", "pageSize": "1000"}
+                if token:
+                    params["pageToken"] = token
+                res = self._call("GET", f"{API}?" + urllib.parse.urlencode(params))
+                kids += res.get("files", [])
+                token = res.get("nextPageToken")
+                if not token:
+                    break
+            left = 0
+            for k in kids:
+                if k.get("mimeType") == FOLDER_MIME and visit(k["id"]):
+                    continue
+                left += 1
+            if left or fid == top:
+                return False
+            self._call("PATCH", f"{API}/{fid}?fields=id", json.dumps({"trashed": True}).encode(),
+                       "application/json; charset=UTF-8")
+            trashed += 1
+            return True
+
+        try:
+            visit(top)
+        except (DriveError, KeyError, ValueError):
+            pass
+        if trashed:
+            self.db.set_setting("drive_folders", {})      # rutas en caché
+            self.log(f"Drive: {trashed} carpeta(s) vacía(s) a la papelera")
+        return trashed
+
     def _trash_folder_if_empty(self, fid: str, depth: int = 0) -> None:
         """La carpeta (por id) a la papelera si quedó vacía, y luego su carpeta de arriba si
         también quedó vacía (hasta la de la semana: «Año …» y el ensayo no se tocan)."""
@@ -1308,6 +1354,9 @@ class DriveBackup:
                 for i, r in enumerate(rows, 1):
                     if i == 1 or i % 5 == 0:
                         self._set_message(f"Subiendo {i} de {len(rows)}…")
+                    cb = getattr(self, "progress_cb", None)
+                    if cb:
+                        cb((i - 1) / len(rows), f"Subiendo {i} de {len(rows)}")
                     if not os.path.exists(r["path"]):
                         # Foto borrada o reemplazada en la app: no hay nada que subir.
                         self.db.execute("UPDATE drive_queue SET status='skipped', error=? WHERE id=?",

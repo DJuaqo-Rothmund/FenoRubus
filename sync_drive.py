@@ -211,21 +211,36 @@ class DriveSync:
         db.execute("DELETE FROM sync_missing WHERE path=?", (path,))
 
     # ------------------------------------------------------------ todo
-    def run(self, manual: bool = False) -> dict:
+    def run(self, manual: bool = False, progress=None) -> dict:
         """Sincroniza todos los ensayos y predios. Devuelve un resumen para la pantalla.
-        manual=True (botón «Sincronizar»): baja todas las fotos pendientes."""
+        manual=True (botón «Sincronizar»): baja todas las fotos pendientes.
+        progress(fracción 0-1, texto): avance (insignia flotante)."""
+        def p(f, text=""):
+            if progress:
+                progress(f, text)
+        p(.01, "Leyendo Drive")
         root = self._root()
         files = self._list(root)
         device = sync.device_id(self.workspaces.shared)
         total = {"workspaces": 0, "created": 0, "received": 0, "sent": 0, "applied": 0,
                  "missing_files": [], "downloaded": 0, "pending_photos": 0, "when": _dt.datetime.now().isoformat(timespec="seconds")}
         total["created"] = self._sync_workspaces(root, device, files)
+        total["uploaded"] = total["moved"] = 0
         folders = {f["name"]: f["id"] for f in files}
-        for ws in self.workspaces.list():
+        wss = self.workspaces.list()
+        for idx, ws in enumerate(wss):
+            base, step = .03 + .95 * idx / max(1, len(wss)), .95 / max(1, len(wss))
+            name = ws.get("name") or ws["code"]
+            p(base, f"{name}: registros")
             db = self.open_db(ws)
             folder = folders.get(ws["code"]) or self.drive._folder(ws["code"], root)
             res = self.sync_db(db, folder)
-            self._backup_photos(db, manual)
+            p(base + step * .3, f"{name}: fotos")
+            up, mv = self._backup_photos(db, manual, lambda f, t="", b=base, s=step, n=name:
+                                         p(b + s * (.3 + .5 * f), f"{n}: {t or 'fotos'}"))
+            total["uploaded"] += up
+            total["moved"] += mv
+            p(base + step * .8, f"{name}: bajando fotos")
             total["workspaces"] += 1
             for k in ("received", "sent", "applied"):
                 total[k] += res[k]
@@ -237,7 +252,7 @@ class DriveSync:
                 total["pending_photos"] += db.query_one("SELECT COUNT(*) AS n FROM sync_missing")["n"]
         return total
 
-    def _backup_photos(self, db, manual: bool = False) -> None:
+    def _backup_photos(self, db, manual: bool = False, progress=None) -> tuple[int, int]:
         """Respaldo de las fotos de ESTE ensayo o predio (no solo del abierto): ordena en Drive
         lo que no esté en su carpeta (lo haya subido quien sea), sube lo pendiente y ordena
         lo movido de semana (carpeta y nombre)."""
@@ -248,12 +263,22 @@ class DriveSync:
                 from drive_backup import DriveBackup
                 backup = DriveBackup(db, authorizer=self.drive.authorizer, transport=self.drive.transport,
                                      metered=self.drive.metered, crop=self.drive.crop)
+            moved = 0
             if backup.enabled:
-                backup.relocate_weeks()
-                backup.reorganize(force=manual)
-            backup.flush()
+                moved += backup.relocate_weeks()
+                checked = backup.db.get_setting("layout_checked_at")
+                moved += backup.reorganize(force=manual)
+                if manual or backup.db.get_setting("layout_checked_at") != checked:
+                    backup.clean_empty_folders()      # carpetas que quedaron vacías
+            backup.progress_cb = progress
+            try:
+                up = backup.flush()
+            finally:
+                backup.progress_cb = None
+            return up, moved
         except Exception as exc:  # noqa: BLE001 (lo que falte se reintenta en la próxima)
             print("respaldo de fotos:", exc)
+            return 0, 0
 
     def photos_allowed(self) -> bool:
         """Las fotos se bajan con Wi-Fi si así está el respaldo («Subir solo con Wi-Fi»)."""

@@ -3106,3 +3106,36 @@ def test_reorganize_files_uploaded_by_other_app(tmp_path):
     assert drive.reorganize(force=True) == 0
     db.close()
     wss.close()
+
+
+def test_clean_empty_folders_after_reorganize(tmp_path):
+    """Al sincronizar, las carpetas vacías del ensayo (semanas, parcelas, «Adjuntas») van a
+    la papelera; las que tienen archivos y la del ensayo se quedan."""
+    from drive_backup import DriveBackup
+    from workspaces import Workspaces
+
+    class Auth:
+        def get_token(self, interactive):
+            return "t"
+    wss = Workspaces(str(tmp_path / "data"))
+    db = wss.open(wss.create("id", "tratamientos", "Urea", "AUF"))
+    db.set_setting("drive_enabled", True)
+    fake = MovableDrive()
+    drive = DriveBackup(db, authorizer=Auth(), transport=fake, metered=lambda: False)
+    full = f"{drive.prefix}Año 2026/Semana 44 · 26-10-2026/T1R1"
+    for path in (f"{drive.prefix}Año 2026/Semana 45 · 02-11-2026/T0R1",
+                 f"{drive.prefix}Año 2026/Semana 45 · 02-11-2026/Adjuntas",
+                 f"{drive.prefix}Año 2026/Semana 38 · 14-09-2026", full):
+        parent = drive.root_id()
+        for part in path.strip("/").split("/"):
+            parent = drive._folder(part, parent)
+    p = str(tmp_path / "20261026-AUF-T1R1G.jpg")
+    synthetic_photo(61, "canopy", p, 1)
+    drive._upload(p, f"{full}/{os.path.basename(p)}")
+    assert drive.clean_empty_folders() == 4          # semana 45 (+ T0R1 y Adjuntas) y semana 38
+    alive = {f["name"] for f in fake.files.values() if f["folder"] and not f.get("trashed")}
+    assert {"Semana 44 · 26-10-2026", "T1R1", "Año 2026", "Urea", "I+D"} <= alive
+    assert not {"Semana 45 · 02-11-2026", "Semana 38 · 14-09-2026", "T0R1", "Adjuntas"} & alive
+    assert drive.clean_empty_folders() == 0
+    db.close()
+    wss.close()
