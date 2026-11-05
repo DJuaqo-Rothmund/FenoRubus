@@ -1,8 +1,9 @@
 """
 tools/make_scout_assets.py
 ==========================
-Íconos de AeonScout (assets/src/AeonScout.svg, Plagas.svg, Malezas.svg, Enfermedades.svg)
-y una burbuja suave del color de cada uno (como las del inicio):
+Burbuja suave del color de cada botón de AeonScout (como las del inicio). Los íconos
+salen ahora de los dibujos de Flow (tools/make_scout_from_art.py); los SVG de assets/src
+quedan como respaldo (con --svg se vuelven a usar):
 
     node tools/render_svgs.js 480 /tmp/scout assets/src/AeonScout.svg assets/src/Plagas.svg \\
         assets/src/Malezas.svg assets/src/Enfermedades.svg
@@ -38,13 +39,13 @@ def bubble(rgb) -> Image.Image:
     return out
 
 
-def main(src: str):
+def main(src: str | None, use_svg: bool = False):
     for key, name in NAMES.items():
-        icon = Image.open(os.path.join(src, name + ".png")).convert("RGBA")
-        icon.crop(icon.getchannel("A").getbbox())
-        icon.resize((360, 360), Image.LANCZOS).save(os.path.join(UI, f"scout_{key}.png"))
+        if use_svg and src:
+            icon = Image.open(os.path.join(src, name + ".png")).convert("RGBA")
+            icon.resize((360, 360), Image.LANCZOS).save(os.path.join(UI, f"scout_{key}.png"))
         bubble(TINTS[key]).save(os.path.join(UI, f"blob_scout_{key}.png"))
 
 
 if __name__ == "__main__":
-    main(sys.argv[1])
+    main(sys.argv[1] if len(sys.argv) > 1 else None, "--svg" in sys.argv)
