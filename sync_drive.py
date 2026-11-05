@@ -269,7 +269,8 @@ class DriveSync:
                 checked = backup.db.get_setting("layout_checked_at")
                 moved += backup.reorganize(force=manual)
                 if manual or backup.db.get_setting("layout_checked_at") != checked:
-                    backup.clean_empty_folders()      # carpetas que quedaron vacías
+                    t = backup.tidy()      # repetidas, fechas viejas, copias y carpetas vacías
+                    moved += t["moved"] + t["renamed"]
             backup.progress_cb = progress
             try:
                 up = backup.flush()

@@ -1141,50 +1141,159 @@ class DriveBackup:
         return moved
 
     def clean_empty_folders(self) -> int:
-        """Carpetas vacías del ensayo o predio en Drive (quedan al ordenar o mover semanas): a
-        la papelera, de abajo hacia arriba (la del ensayo no se toca). Devuelve cuántas."""
-        prefix = self.prefix.strip("/")
-        if not prefix:
-            return 0
-        top = self._find_path(prefix)
-        if not top:
-            return 0
-        trashed = 0
+        """Orden completo (ver tidy); devuelve cuántas carpetas vacías fueron a la papelera."""
+        return self.tidy()["folders"]
 
-        def visit(fid: str) -> bool:
-            """True si la carpeta quedó vacía (y ya se mandó a la papelera)."""
-            nonlocal trashed
-            kids, token = [], None
-            while True:
-                params = {"q": f"'{fid}' in parents and trashed=false",
-                          "fields": "nextPageToken, files(id,mimeType)", "pageSize": "1000"}
-                if token:
-                    params["pageToken"] = token
-                res = self._call("GET", f"{API}?" + urllib.parse.urlencode(params))
-                kids += res.get("files", [])
-                token = res.get("nextPageToken")
-                if not token:
-                    break
-            left = 0
+    def _kids(self, fid: str) -> list[dict]:
+        out, token = [], None
+        while True:
+            params = {"q": f"'{fid}' in parents and trashed=false", "pageSize": "1000",
+                      "fields": "nextPageToken, files(id,name,mimeType,createdTime,size)"}
+            if token:
+                params["pageToken"] = token
+            res = self._call("GET", f"{API}?" + urllib.parse.urlencode(params))
+            out += res.get("files", [])
+            token = res.get("nextPageToken")
+            if not token:
+                return out
+
+    def tidy(self) -> dict:
+        """Orden completo de la carpeta del ensayo o predio en Drive (al sincronizar):
+
+        1. Carpetas repetidas con el mismo nombre (dos «Respaldos», dos «Semana 37…»): se
+           juntan en la más antigua.
+        2. Fotos cuyo registro se movió de semana y que en Drive conservan la fecha vieja en
+           el nombre (20261102-NV-C31G.jpg, y en el teléfono ya es 20261026-NV-C31G.jpg): se
+           reconocen por el resto del nombre y se renombran y mueven a su semana y variedad.
+        3. Copias exactas (mismo nombre y tamaño en la misma carpeta): queda una; las demás
+           a la papelera (recuperables 30 días).
+        4. Carpetas vacías: a la papelera (la del ensayo no se toca).
+        """
+        stats = {"merged": 0, "renamed": 0, "moved": 0, "dupes": 0, "folders": 0}
+        prefix = self.prefix.strip("/")
+        top = self._find_path(prefix) if prefix else None
+        if not top:
+            return stats
+        local: dict[str, str] = {}
+        rows = [r["path"] for r in self.db.query("SELECT path FROM photos")]
+        rows += [r["path"] for r in self.db.query("SELECT path FROM variety_attachments WHERE path IS NOT NULL")]
+        rows += [r["path"] for r in self.db.query(
+            "SELECT path FROM measure_entries WHERE path IS NOT NULL AND path != ''")]
+        pending = {r["path"] for r in self.db.query("SELECT path FROM drive_queue WHERE status='pending'")}
+        by_suffix: dict[str, list] = {}
+        for path in rows:
+            t = self._target_for(path)
+            if not t:
+                continue
+            name = os.path.basename(path)
+            local[name] = t
+            m = re.match(r"(\d{8})(\D.*)$", name)
+            if m and path not in pending:
+                by_suffix.setdefault(m[2], []).append((m[1], name))
+        files: list[dict] = []
+
+        def walk(fid: str) -> None:
+            kids = self._kids(fid)
+            groups: dict[str, list] = {}
             for k in kids:
-                if k.get("mimeType") == FOLDER_MIME and visit(k["id"]):
+                if k.get("mimeType") == FOLDER_MIME:
+                    groups.setdefault(k["name"], []).append(k)
+            merged = False
+            for same in groups.values():
+                if len(same) > 1:
+                    same.sort(key=lambda k: k.get("createdTime") or "")
+                    for dup in same[1:]:
+                        self._merge_folder(dup["id"], same[0]["id"])
+                        stats["merged"] += 1
+                        merged = True
+            if merged:
+                kids = self._kids(fid)
+            for k in kids:
+                if k.get("mimeType") == FOLDER_MIME:
+                    walk(k["id"])
+                else:
+                    files.append(dict(k, parent=fid))
+
+        walk(top)
+        present = {f["name"] for f in files}
+        dir_ids: dict[str, str] = {}
+
+        def dir_id(path: str) -> str:
+            if path not in dir_ids:
+                parent = self.root_id()
+                for part in path.split("/"):
+                    parent = self._folder(part, parent)
+                dir_ids[path] = parent
+            return dir_ids[path]
+
+        renamed_from: dict[tuple, bool] = {}
+        for f in files:
+            name, want = f["name"], local.get(f["name"])
+            if not want:
+                m = re.match(r"(\d{8})(\D.*)$", name)
+                cands = [(d, n) for d, n in by_suffix.get(m[2], []) if n not in present] if m else []
+                if cands:
+                    try:
+                        day = _dt.datetime.strptime(m[1], "%Y%m%d").date()
+                        best = min(cands, key=lambda c: abs((_dt.datetime.strptime(c[0], "%Y%m%d").date()
+                                                             - day).days))
+                        if abs((_dt.datetime.strptime(best[0], "%Y%m%d").date() - day).days) <= 14:
+                            name, want = best[1], local[best[1]]
+                    except ValueError:
+                        pass
+            if not want:
+                continue
+            folder = dir_id(want.rpartition("/")[0])
+            params, body = {"fields": "id"}, {}
+            if folder != f["parent"]:
+                params.update(addParents=folder, removeParents=f["parent"])
+            if name != f["name"]:
+                body["name"] = name
+            if len(params) == 1 and not body:
+                continue
+            try:
+                self._call("PATCH", f"{API}/{f['id']}?" + urllib.parse.urlencode(params),
+                           json.dumps(body).encode(), "application/json; charset=UTF-8")
+            except DriveError as exc:
+                if exc.status in (403, 404):
+                    continue
+                raise
+            if name != f["name"]:
+                stats["renamed"] += 1
+                present.add(name)
+                renamed_from[(f["name"], f.get("size"))] = True
+            stats["moved"] += folder != f["parent"]
+            f["name"], f["parent"] = name, folder
+        seen: dict[tuple, str] = {}
+        for f in sorted(files, key=lambda f: f.get("createdTime") or ""):
+            key = (f["parent"], f["name"], f.get("size"))
+            # Copia exacta en la misma carpeta, o copia (mismo nombre viejo y tamaño) de una
+            # foto que ya se renombró y movió a su semana.
+            if f.get("size") and (key in seen or (f["name"], f.get("size")) in renamed_from):
+                self._call("PATCH", f"{API}/{f['id']}?fields=id", json.dumps({"trashed": True}).encode(),
+                           "application/json; charset=UTF-8")
+                stats["dupes"] += 1
+            else:
+                seen[key] = f["id"]
+
+        def empty(fid: str) -> bool:
+            left = 0
+            for k in self._kids(fid):
+                if k.get("mimeType") == FOLDER_MIME and empty(k["id"]):
                     continue
                 left += 1
             if left or fid == top:
                 return False
             self._call("PATCH", f"{API}/{fid}?fields=id", json.dumps({"trashed": True}).encode(),
                        "application/json; charset=UTF-8")
-            trashed += 1
+            stats["folders"] += 1
             return True
 
-        try:
-            visit(top)
-        except (DriveError, KeyError, ValueError):
-            pass
-        if trashed:
+        empty(top)
+        if any(stats.values()):
             self.db.set_setting("drive_folders", {})      # rutas en caché
-            self.log(f"Drive: {trashed} carpeta(s) vacía(s) a la papelera")
-        return trashed
+            self.log("Drive ordenado: " + ", ".join(f"{k} {v}" for k, v in stats.items() if v))
+        return stats
 
     def _trash_folder_if_empty(self, fid: str, depth: int = 0) -> None:
         """La carpeta (por id) a la papelera si quedó vacía, y luego su carpeta de arriba si

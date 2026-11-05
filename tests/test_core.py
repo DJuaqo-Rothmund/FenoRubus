@@ -2992,7 +2992,9 @@ class MovableDrive(FakeDrive):
         if method == "GET" and "q" in qs:
             code, data = super().__call__(method, url, headers, body)
             hits = [dict(h, mimeType="application/vnd.google-apps.folder" if self.files[h["id"]]["folder"]
-                         else "image/jpeg", parents=self.files[h["id"]]["parents"])
+                         else "image/jpeg", parents=self.files[h["id"]]["parents"],
+                         size=str(len(self.files[h["id"]]["data"])),
+                         createdTime=f"2026-01-01T00:00:{int(h['id'][1:]):05d}")
                     for h in json.loads(data)["files"] if not self.files[h["id"]].get("trashed")]
             if "mimeType!=" in qs["q"][0]:
                 hits = [h for h in hits if not self.files[h["id"]]["folder"]]
@@ -3137,5 +3139,63 @@ def test_clean_empty_folders_after_reorganize(tmp_path):
     assert {"Semana 44 · 26-10-2026", "T1R1", "Año 2026", "Urea", "I+D"} <= alive
     assert not {"Semana 45 · 02-11-2026", "Semana 38 · 14-09-2026", "T0R1", "Adjuntas"} & alive
     assert drive.clean_empty_folders() == 0
+    db.close()
+    wss.close()
+
+
+def test_tidy_merges_dupes_renames_old_dates_and_trashes_copies(tmp_path):
+    """Orden completo al sincronizar (caso «Nuevas variedades»): dos «Respaldos» y dos
+    «Semana 37» se juntan; las fotos que en Drive siguen con la fecha de la semana 45 pero en
+    el teléfono ya son de la 44 se renombran y mueven; la copia exacta va a la papelera; las
+    carpetas vacías también."""
+    from drive_backup import DriveBackup
+    from workspaces import Workspaces
+
+    class Auth:
+        def get_token(self, interactive):
+            return "t"
+    wss = Workspaces(str(tmp_path / "data"))
+    db = wss.open(wss.by_code("NV"))
+    db.set_setting("drive_enabled", True)
+    fake = MovableDrive()
+    drive = DriveBackup(db, authorizer=Auth(), transport=fake, metered=lambda: False)
+    db.set_season_start(2026, dt.date(2026, 9, 7))
+    v = db.list_varieties()[0]
+    w44 = db.week_for_date(dt.date(2026, 10, 26))
+    o = db.get_or_create_observation(v["id"], w44["id"])
+    local = str(tmp_path / f"20261026-NV-{v['code']}G.jpg")       # ya renombrada en el teléfono
+    synthetic_photo(61, "canopy", local, 1)
+    db.add_photo(o["id"], "canopy", local)
+    root = drive.root_id()
+
+    def mk(name, parent):
+        import json
+        code, data = fake("POST", "https://x/drive/v3/files?fields=id", {}, json.dumps(
+            {"name": name, "parents": [parent], "mimeType": "application/vnd.google-apps.folder"}).encode())
+        return json.loads(data)["id"]
+    ens = root
+    for part in drive.prefix.strip("/").split("/"):
+        ens = drive._folder(part, ens)
+    mk("Respaldos", ens)
+    r2 = mk("Respaldos", ens)
+    drive._upload(local, f"{drive.prefix}Respaldos/x.sqlite3".replace(drive.prefix, drive.prefix))
+    anio = drive._folder("Año 2026", ens)
+    mk("Semana 37 · 07-09-2026", anio)
+    old45 = f"{drive.prefix}Año 2026/Semana 45 · 02-11-2026"
+    for _ in range(2):                                           # la foto y su copia exacta
+        drive._upload(local, f"{old45}/20261102-NV-{v['code']}G.jpg")
+    mk("Semana 37 · 07-09-2026", anio)
+    db.set_setting("drive_folders", {})
+    t = drive.tidy()
+    live = fake.live()
+    assert t["merged"] == 1 and t["renamed"] == 1 and t["dupes"] == 1
+    want = f"Semana 44 · 26-10-2026/{v['name']}/20261026-NV-{v['code']}G.jpg"
+    assert sum(x.endswith(want) for x in live) == 1
+    assert not any("Semana 45" in x for x in live)
+    alive = [f["name"] for f in fake.files.values() if f["folder"] and not f.get("trashed")]
+    assert alive.count("Respaldos") == 1 and "Semana 37 · 07-09-2026" not in alive
+    assert not any(f["name"] == "Semana 45 · 02-11-2026" and not f.get("trashed")
+                   for f in fake.files.values())
+    assert drive.tidy() == {"merged": 0, "renamed": 0, "moved": 0, "dupes": 0, "folders": 0}
     db.close()
     wss.close()
