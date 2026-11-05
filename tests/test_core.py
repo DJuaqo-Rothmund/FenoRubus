@@ -2974,7 +2974,10 @@ class MovableDrive(FakeDrive):
         fid = url.split("/files/")[1].split("?")[0] if "/files/" in url else ""
         qs = urllib.parse.parse_qs(urllib.parse.urlsplit(url).query)
         if method == "GET" and fid and "q" not in qs and "alt=media" not in url:
-            return 200, json.dumps({"parents": self.files[fid]["parents"]}).encode()
+            f = self.files[fid]
+            return 200, json.dumps({"id": fid, "name": f["name"], "parents": f["parents"],
+                                    "mimeType": "application/vnd.google-apps.folder" if f["folder"]
+                                    else "image/jpeg"}).encode()
         if method == "PATCH" and fid and "uploadType" not in url:
             meta = json.loads(body or b"{}")
             f = self.files[fid]
@@ -2989,8 +2992,10 @@ class MovableDrive(FakeDrive):
         if method == "GET" and "q" in qs:
             code, data = super().__call__(method, url, headers, body)
             hits = [dict(h, mimeType="application/vnd.google-apps.folder" if self.files[h["id"]]["folder"]
-                         else "image/jpeg")
+                         else "image/jpeg", parents=self.files[h["id"]]["parents"])
                     for h in json.loads(data)["files"] if not self.files[h["id"]].get("trashed")]
+            if "mimeType!=" in qs["q"][0]:
+                hits = [h for h in hits if not self.files[h["id"]]["folder"]]
             return code, json.dumps({"files": hits}).encode()
         return super().__call__(method, url, headers, body)
 
@@ -3056,5 +3061,48 @@ def test_drive_subfolder_per_parcel_in_id(tmp_path):
     pd = DriveBackup(am, authorizer=Auth(), transport=fake, metered=lambda: False)
     assert pd._unit_folder(1) == ""                            # predio: sin subcarpeta de unidad
     am.close()
+    db.close()
+    wss.close()
+
+
+def test_reorganize_files_uploaded_by_other_app(tmp_path):
+    """Fotos de las primeras semanas subidas por OTRA app (PhenoRubus) o equipo: no están en
+    la cola de este teléfono, pero al sincronizar se buscan por nombre y pasan a su carpeta
+    (semana y parcela); la carpeta vieja vacía va a la papelera."""
+    from drive_backup import DriveBackup
+    from workspaces import Workspaces
+
+    class Auth:
+        def get_token(self, interactive):
+            return "t"
+    wss = Workspaces(str(tmp_path / "data"))
+    db = wss.open(wss.create("id", "tratamientos", "Urea", "AUF"))
+    db.setup_trial(2, 1, t0=True)
+    db.set_setting("drive_enabled", True)
+    fake = MovableDrive()
+    drive = DriveBackup(db, authorizer=Auth(), transport=fake, metered=lambda: False)
+    w = db.week_for_date(dt.date(2026, 9, 14))
+    paths = []
+    for v in db.list_varieties():
+        o = db.get_or_create_observation(v["id"], w["id"])
+        p = str(tmp_path / f"20260914-AUF-{v['name']}G.jpg")
+        synthetic_photo(61, "canopy", p, 1)
+        db.add_photo(o["id"], "canopy", p)
+        paths.append(p)
+    # La otra app las subió sueltas en la semana (y en «Adjuntas», que quedará vacía).
+    week_dir = drive.week_path(w["start_date"])
+    for p in paths:
+        drive._upload(p, f"{week_dir}/{os.path.basename(p)}")
+    drive._upload(paths[0], f"{week_dir}/Adjuntas/x.jpg")
+    for f in fake.files.values():
+        if f["name"] == "x.jpg":
+            f["trashed"] = True                             # Adjuntas queda vacía
+    assert not db.query("SELECT 1 FROM drive_queue")        # no están en la cola de este teléfono
+    assert drive.reorganize(force=True) == 2
+    live = fake.live()
+    assert any(x.endswith("Semana 38 · 14-09-2026/T0R1/20260914-AUF-T0R1G.jpg") for x in live)
+    assert any(x.endswith("Semana 38 · 14-09-2026/T1R1/20260914-AUF-T1R1G.jpg") for x in live)
+    assert drive.reorganize() == 0                          # ya ordenado (y no repite antes de 6 h)
+    assert drive.reorganize(force=True) == 0
     db.close()
     wss.close()

@@ -748,6 +748,13 @@ class DriveBackup:
         crop = self.crop
         cache = self.db.get_setting("drive_folders") or {}
         key = f"module/{crop.drive_folder}"
+        # Una vez por módulo: se busca de nuevo para juntar carpetas del módulo repetidas
+        # (p. ej. dos «PhenoBlue» creadas a la vez antes del arreglo de duplicados).
+        once = f"module_dupes_checked_v1/{crop.drive_folder}"
+        if key in cache and not self.db.get_setting(once):
+            cache.pop(key, None)
+            self.db.set_setting("drive_folders", cache)
+            self.db.set_setting(once, True)
         if key in cache:
             return cache[key]
         with _FOLDER_LOCK:
@@ -1055,6 +1062,107 @@ class DriveBackup:
         if moved:
             self.log(f"Drive: {moved} archivo(s) ordenados en su carpeta de semana y variedad/parcela")
         return moved
+
+    def reorganize(self, force: bool = False) -> int:
+        """Ordena en Drive TODAS las fotos del ensayo o predio (del registro, adjuntas y de
+        mediciones), las haya subido este teléfono, otro equipo u otra app (p. ej. PhenoRubus):
+        se buscan por nombre y la que no esté en su carpeta (semana y, en I+D, variedad o
+        parcela) se mueve allá (nada se sube de nuevo). Las carpetas que quedan vacías van a la
+        papelera. Corre al sincronizar (como mucho cada 6 h, salvo `force`)."""
+        last = self.db.get_setting("layout_checked_at")
+        now = time.time()
+        if not force and last and now - float(last) < 6 * 3600:
+            return 0
+        targets: dict[str, str] = {}
+        rows = [r["path"] for r in self.db.query("SELECT path FROM photos")]
+        rows += [r["path"] for r in self.db.query("SELECT path FROM variety_attachments WHERE path IS NOT NULL")]
+        rows += [r["path"] for r in self.db.query(
+            "SELECT path FROM measure_entries WHERE path IS NOT NULL AND path != ''")]
+        for path in rows:
+            t = self._target_for(path)
+            if t:
+                targets[os.path.basename(path)] = t
+        names = sorted(targets)
+        dir_ids: dict[str, str] = {}
+
+        def dir_id(path: str) -> str:
+            if path not in dir_ids:
+                parent = self.root_id()
+                for part in path.split("/"):
+                    parent = self._folder(part, parent)
+                dir_ids[path] = parent
+            return dir_ids[path]
+
+        moved, vacated = 0, set()
+        for i in range(0, len(names), 40):
+            part = names[i:i + 40]
+            esc = [n.replace("\\", "\\\\").replace("'", "\\'") for n in part]
+            q = "(" + " or ".join(f"name='{n}'" for n in esc) + f") and trashed=false and mimeType!='{FOLDER_MIME}'"
+            found, token = [], None
+            while True:
+                params = {"q": q, "fields": "nextPageToken, files(id,name,parents)", "pageSize": "1000",
+                          "spaces": "drive"}
+                if token:
+                    params["pageToken"] = token
+                res = self._call("GET", f"{API}?" + urllib.parse.urlencode(params))
+                found += res.get("files", [])
+                token = res.get("nextPageToken")
+                if not token:
+                    break
+            for f in found:
+                want = targets.get(f["name"])
+                if not want:
+                    continue
+                folder = dir_id(want.rpartition("/")[0])
+                parents = f.get("parents") or []
+                if folder in parents:
+                    continue
+                if moved == 0:
+                    self._set_message("Ordenando Drive…")
+                params = {"fields": "id", "addParents": folder}
+                if parents:
+                    params["removeParents"] = ",".join(parents)
+                try:
+                    self._call("PATCH", f"{API}/{f['id']}?" + urllib.parse.urlencode(params), b"{}",
+                               "application/json; charset=UTF-8")
+                except DriveError as exc:
+                    if exc.status in (403, 404):
+                        continue
+                    raise
+                vacated.update(parents)
+                moved += 1
+                if moved % 20 == 0:
+                    self._set_message(f"Ordenando Drive: {moved} archivo(s) movidos…")
+        for fid in vacated:
+            self._trash_folder_if_empty(fid)
+        self.db.set_setting("layout_checked_at", now)
+        if moved:
+            self.log(f"Drive: {moved} archivo(s) ordenados en su carpeta (semana y variedad/parcela)")
+        return moved
+
+    def _trash_folder_if_empty(self, fid: str, depth: int = 0) -> None:
+        """La carpeta (por id) a la papelera si quedó vacía, y luego su carpeta de arriba si
+        también quedó vacía (hasta la de la semana: «Año …» y el ensayo no se tocan)."""
+        try:
+            meta = self._call("GET", f"{API}/{fid}?fields=id,name,parents,mimeType")
+            if meta.get("mimeType") not in (None, FOLDER_MIME):
+                return
+            name = meta.get("name") or ""
+            if name.startswith("Año ") or depth > 3:
+                return
+            kids = self._call("GET", f"{API}?" + urllib.parse.urlencode(
+                {"q": f"'{fid}' in parents and trashed=false", "fields": "files(id)", "pageSize": "5"})
+                ).get("files", [])
+            if kids:
+                return
+            self._call("PATCH", f"{API}/{fid}?fields=id", json.dumps({"trashed": True}).encode(),
+                       "application/json; charset=UTF-8")
+            self.db.set_setting("drive_folders", {})
+            if not self.WEEK_DIR_RE.search(f"Año 2000/{name}"):     # no era la semana: ver la de arriba
+                for p in meta.get("parents") or []:
+                    self._trash_folder_if_empty(p, depth + 1)
+        except (DriveError, KeyError, ValueError):
+            pass
 
     def _trash_if_empty(self, path: str) -> None:
         """La carpeta «<módulo>/<path>» a la papelera si quedó vacía (también sus subcarpetas
