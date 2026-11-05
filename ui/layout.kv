@@ -471,14 +471,14 @@
             disabled: root.ai_shown < .5
             pos_hint: {"center_x": .84, "center_y": .845 - .03 * (1 - root.ai_shown)}
         # AeonScout: plagas, malezas y enfermedades (banco de imágenes para la IA).
-        StartIcon:
+        FloatCrop:
+            # Mismo estilo que los Pheno: logo suelto con su anillo y estadios, flotando.
             id: scout
-            source: theme.SCOUT_ICON
-            bubble: theme.SCOUT_BUBBLE
-            label: "AeonScout"
-            color: c("#1D5E63")
-            diameter: dp(78)
-            pos_hint: {"center_x": .5, "center_y": .215}
+            logo: theme.SCOUT_LOGO
+            app_name: "AeonScout"
+            accent: "#1D5E63"
+            side: dp(112)
+            pos_hint: {"center_x": .5, "center_y": .21}
             on_release: app.open_scout()
         MDBoxLayout:
             orientation: "vertical"

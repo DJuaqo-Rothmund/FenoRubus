@@ -181,7 +181,7 @@ class ScoutHome(ScoutScreenBase):
     def refresh(self):
         body = self.clear()
         head = MDBoxLayout(adaptive_height=True, spacing=dp(12))
-        head.add_widget(Image(source=icon("aeonscout"), size_hint=(None, None), size=(dp(76), dp(76)),
+        head.add_widget(Image(source=theme.SCOUT_LOGO, size_hint=(None, None), size=(dp(84), dp(84)),
                               fit_mode="contain", mipmap=True))
         head.add_widget(Factory.Muted(
             text="Banco de imágenes del campo: saque fotos de plagas, malezas y enfermedades en sus "

@@ -1,0 +1,89 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 400">
+  <defs>
+    <radialGradient id="glass" cx="40%" cy="35%" r="70%">
+      <stop offset="0" stop-color="#F4FCFA"/><stop offset=".7" stop-color="#D3EFEA"/><stop offset="1" stop-color="#B7E1DA"/>
+    </radialGradient>
+    <linearGradient id="rim" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#3FA29B"/><stop offset="1" stop-color="#1D5E63"/>
+    </linearGradient>
+    <linearGradient id="wood" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#A9744A"/><stop offset="1" stop-color="#6E4528"/>
+    </linearGradient>
+    <linearGradient id="leaf" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#8CC66A"/><stop offset="1" stop-color="#3F8A3A"/>
+    </linearGradient>
+  </defs>
+  <!-- anillo de guiones (como los Pheno) -->
+  <circle cx="200" cy="200" r="172" fill="none" stroke="#B5AFA7" stroke-width="9" stroke-dasharray="15 11"/>
+
+  <g transform="translate(178 176) scale(1.08) translate(-178 -176)">
+  <!-- mango -->
+  <g transform="rotate(45 262 262)">
+    <rect x="240" y="226" width="44" height="120" rx="20" fill="url(#wood)" stroke="#2B231C" stroke-width="5"/>
+    <rect x="250" y="240" width="8" height="92" rx="4" fill="#C99A6E" opacity=".7"/>
+    <rect x="236" y="214" width="52" height="26" rx="8" fill="#1D5E63" stroke="#123C3F" stroke-width="5"/>
+  </g>
+
+  <!-- lupa -->
+  <circle cx="178" cy="176" r="104" fill="url(#rim)" stroke="#123C3F" stroke-width="6"/>
+  <circle cx="178" cy="176" r="82" fill="url(#glass)" stroke="#123C3F" stroke-width="4"/>
+  <!-- hoja dentro del vidrio -->
+  <path d="M118 222 C112 160 150 112 228 106 C236 172 196 222 118 222 Z" fill="url(#leaf)" stroke="#1F4A22" stroke-width="5" stroke-linejoin="round"/>
+  <path d="M124 216 C156 186 184 154 220 114" fill="none" stroke="#1F4A22" stroke-width="4" stroke-linecap="round"/>
+  <path d="M150 190 L140 160 M170 170 L162 136 M192 148 L190 120 M160 180 L186 186 M182 160 L208 158" stroke="#1F4A22" stroke-width="3" stroke-linecap="round" fill="none" opacity=".75"/>
+  <!-- escarabajo sobre la hoja -->
+  <g transform="translate(188 176) rotate(-35)">
+    <path d="M-16 -4 L-28 -12 M-16 6 L-30 6 M-14 14 L-26 24 M16 -4 L28 -12 M16 6 L30 6 M14 14 L26 24" stroke="#2B1A12" stroke-width="3.5" stroke-linecap="round"/>
+    <path d="M-6 -26 L-12 -38 M6 -26 L12 -38" stroke="#2B1A12" stroke-width="3" stroke-linecap="round"/>
+    <ellipse cx="0" cy="6" rx="18" ry="24" fill="#B4532A" stroke="#2B1A12" stroke-width="4"/>
+    <ellipse cx="0" cy="-20" rx="10" ry="8" fill="#5A2A16" stroke="#2B1A12" stroke-width="4"/>
+    <path d="M0 -14 L0 29" stroke="#2B1A12" stroke-width="3"/>
+    <ellipse cx="-7" cy="0" rx="4" ry="7" fill="#E39A6F" opacity=".8"/>
+  </g>
+  <!-- brillo del vidrio -->
+  <path d="M120 140 A70 70 0 0 1 172 102" fill="none" stroke="#FFFFFF" stroke-width="10" stroke-linecap="round" opacity=".85"/>
+  <circle cx="114" cy="160" r="5" fill="#FFFFFF" opacity=".85"/>
+
+  </g>
+  <!-- íconos pequeños sobre el anillo -->
+  <!-- maleza (arriba a la izquierda) -->
+  <g transform="translate(62 108) scale(1.45)">
+    <path d="M0 22 C-2 8 -14 0 -20 -10 C-8 -8 -2 0 0 10 C2 0 8 -10 20 -14 C14 0 4 8 0 22 Z" fill="#7DBB5C" stroke="#1F4A22" stroke-width="3.5" stroke-linejoin="round"/>
+    <path d="M0 22 L0 -18" stroke="#1F4A22" stroke-width="3" stroke-linecap="round"/>
+    <circle cx="0" cy="-22" r="7" fill="#F3EFDB" stroke="#1F4A22" stroke-width="3"/>
+  </g>
+  <!-- hoja enferma (izquierda) -->
+  <g transform="translate(30 222) rotate(-20) scale(1.45)">
+    <path d="M-16 16 C-20 -8 -4 -22 18 -24 C20 0 6 16 -16 16 Z" fill="#9BC46F" stroke="#1F4A22" stroke-width="3.5" stroke-linejoin="round"/>
+    <circle cx="0" cy="-2" r="5" fill="#7A4E8E" stroke="#3B2347" stroke-width="2"/>
+    <circle cx="8" cy="-12" r="3.5" fill="#7A4E8E"/>
+    <circle cx="-8" cy="8" r="3" fill="#7A4E8E"/>
+  </g>
+  <!-- cuncunilla (abajo a la izquierda) -->
+  <g transform="translate(86 330) rotate(-25) scale(1.45)">
+    <circle cx="-16" cy="0" r="8" fill="#A6CF63" stroke="#2E4A18" stroke-width="3"/>
+    <circle cx="-4" cy="-3" r="8" fill="#A6CF63" stroke="#2E4A18" stroke-width="3"/>
+    <circle cx="8" cy="-3" r="8" fill="#A6CF63" stroke="#2E4A18" stroke-width="3"/>
+    <circle cx="20" cy="0" r="9" fill="#7DAA3F" stroke="#2E4A18" stroke-width="3"/>
+    <circle cx="23" cy="-2" r="2" fill="#2E4A18"/>
+  </g>
+  <!-- escarabajo pequeño (abajo) -->
+  <g transform="translate(176 372) scale(1.45)">
+    <path d="M-10 -2 L-18 -6 M-10 6 L-18 10 M10 -2 L18 -6 M10 6 L18 10" stroke="#2B1A12" stroke-width="3" stroke-linecap="round"/>
+    <ellipse cx="0" cy="2" rx="11" ry="14" fill="#C2662F" stroke="#2B1A12" stroke-width="3.5"/>
+    <circle cx="0" cy="-13" r="6" fill="#5A2A16" stroke="#2B1A12" stroke-width="3"/>
+    <path d="M0 -7 L0 15" stroke="#2B1A12" stroke-width="2.5"/>
+  </g>
+  <!-- espora / hongo (arriba a la derecha) -->
+  <g transform="translate(330 96) scale(1.45)">
+    <path d="M-16 2 C-16 -16 16 -16 16 2 Z" fill="#B78FD0" stroke="#3B2347" stroke-width="3.5" stroke-linejoin="round"/>
+    <rect x="-5" y="2" width="10" height="14" rx="4" fill="#F3EFDB" stroke="#3B2347" stroke-width="3"/>
+    <circle cx="-6" cy="-6" r="2.5" fill="#F3EFDB"/><circle cx="5" cy="-9" r="2" fill="#F3EFDB"/>
+  </g>
+  <!-- pulgón (derecha) -->
+  <g transform="translate(372 196) scale(1.45)">
+    <ellipse cx="0" cy="0" rx="12" ry="9" fill="#8FC25A" stroke="#2E4A18" stroke-width="3"/>
+    <path d="M-10 6 L-16 12 M0 9 L0 16 M10 6 L16 12 M10 -6 L18 -14" stroke="#2E4A18" stroke-width="2.5" stroke-linecap="round"/>
+    <circle cx="-8" cy="-2" r="2" fill="#2E4A18"/>
+  </g>
+</svg>
