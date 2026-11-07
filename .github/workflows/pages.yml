@@ -51,6 +51,11 @@ jobs:
           cp -r stable/web/. site/
           rm -rf site/aeoncrop
           cp -r lab/web site/aeoncrop
+          # Cada publicación con su versión en los .js/.css de AeonCrop Web: el navegador baja
+          # los nuevos al tiro (si no, puede mezclar archivos viejos y nuevos hasta 10 min).
+          V="${GITHUB_SHA::8}"
+          sed -i -E "s#([\"'])(\./)?([A-Za-z0-9_-]+\.(js|css))\1#\1\2\3?v=$V\1#g" site/aeoncrop/*.js site/aeoncrop/index.html
+          grep -o 'app.js?v=[a-z0-9]*' site/aeoncrop/index.html
           ls site site/aeoncrop
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3
