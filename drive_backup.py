@@ -34,6 +34,7 @@ FOLDER_MIME = "application/vnd.google-apps.folder"
 API = "https://www.googleapis.com/drive/v3/files"
 UPLOAD = "https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=id"
 MAX_ATTEMPTS = 6
+UPLOAD_THREADS = 3                   # fotos que se suben a la vez
 RC_DRIVE_AUTH = 7301
 RC_PICK_ACCOUNT = 7302
 
@@ -848,10 +849,24 @@ class DriveBackup:
         self.log("Drive: se juntó una carpeta repetida")
 
     def _upload(self, path: str, remote: str) -> str:
+        parent, fname = self._parent_of(remote)
+        try:
+            return self._post_file(path, fname, parent)
+        except DriveError as exc:
+            if exc.status == 404:  # la carpeta se borró en Drive: recrearla la próxima vez
+                self.db.set_setting("drive_folders", {})
+            raise
+
+    def _parent_of(self, remote: str) -> tuple[str, str]:
+        """(id de la carpeta, nombre del archivo) de «<carpetas>/<archivo>» (crea las carpetas)."""
         *dirs, fname = remote.split("/")
         parent = self.root_id()
         for d in dirs:
             parent = self._folder(d, parent)
+        return parent, fname
+
+    def _post_file(self, path: str, fname: str, parent: str) -> str:
+        """Sube el archivo a la carpeta `parent` (solo red: se puede llamar desde varios hilos)."""
         with open(path, "rb") as f:
             data = f.read()
         ext = os.path.splitext(path)[1].lower()
@@ -863,12 +878,7 @@ class DriveBackup:
         body = (f"--{boundary}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n".encode()
                 + meta + f"\r\n--{boundary}\r\nContent-Type: {mime}\r\n\r\n".encode()
                 + data + f"\r\n--{boundary}--\r\n".encode())
-        try:
-            return self._call("POST", UPLOAD, body, f"multipart/related; boundary={boundary}")["id"]
-        except DriveError as exc:
-            if exc.status == 404:  # la carpeta se borró en Drive: recrearla la próxima vez
-                self.db.set_setting("drive_folders", {})
-            raise
+        return self._call("POST", UPLOAD, body, f"multipart/related; boundary={boundary}")["id"]
 
     def move_file(self, drive_id: str, remote: str) -> None:
         """Mueve y renombra un archivo ya subido a «<módulo>/<remote>» (sin subirlo de nuevo).
@@ -1063,6 +1073,32 @@ class DriveBackup:
             self.log(f"Drive: {moved} archivo(s) ordenados en su carpeta de semana y variedad/parcela")
         return moved
 
+    def _lookup_names(self, names: list[str], batch: int = 40, threads: int = 4) -> list[dict]:
+        """Archivos (no carpetas) de la app en Drive con esos nombres: id, name, parents. Se
+        consultan de a `batch` nombres y `threads` consultas a la vez (es lo que más demora
+        al ordenar un ensayo con muchas fotos)."""
+        def query(part):
+            esc = [n.replace("\\", "\\\\").replace("'", "\\'") for n in part]
+            q = "(" + " or ".join(f"name='{n}'" for n in esc) + f") and trashed=false and mimeType!='{FOLDER_MIME}'"
+            found, token = [], None
+            while True:
+                params = {"q": q, "fields": "nextPageToken, files(id,name,parents)", "pageSize": "1000",
+                          "spaces": "drive"}
+                if token:
+                    params["pageToken"] = token
+                res = self._call("GET", f"{API}?" + urllib.parse.urlencode(params))
+                found += res.get("files", [])
+                token = res.get("nextPageToken")
+                if not token:
+                    return found
+        parts = [names[i:i + batch] for i in range(0, len(names), batch)]
+        if len(parts) <= 1:
+            return [f for p in parts for f in query(p)]
+        self._get_token()                      # el token se pide una vez, antes de los hilos
+        from concurrent.futures import ThreadPoolExecutor
+        with ThreadPoolExecutor(threads) as ex:
+            return [f for res in ex.map(query, parts) for f in res]
+
     def reorganize(self, force: bool = False) -> int:
         """Ordena en Drive TODAS las fotos del ensayo o predio (del registro, adjuntas y de
         mediciones), las haya subido este teléfono, otro equipo u otra app (p. ej. PhenoRubus):
@@ -1094,45 +1130,30 @@ class DriveBackup:
             return dir_ids[path]
 
         moved, vacated = 0, set()
-        for i in range(0, len(names), 40):
-            part = names[i:i + 40]
-            esc = [n.replace("\\", "\\\\").replace("'", "\\'") for n in part]
-            q = "(" + " or ".join(f"name='{n}'" for n in esc) + f") and trashed=false and mimeType!='{FOLDER_MIME}'"
-            found, token = [], None
-            while True:
-                params = {"q": q, "fields": "nextPageToken, files(id,name,parents)", "pageSize": "1000",
-                          "spaces": "drive"}
-                if token:
-                    params["pageToken"] = token
-                res = self._call("GET", f"{API}?" + urllib.parse.urlencode(params))
-                found += res.get("files", [])
-                token = res.get("nextPageToken")
-                if not token:
-                    break
-            for f in found:
-                want = targets.get(f["name"])
-                if not want:
-                    continue
-                folder = dir_id(want.rpartition("/")[0])
-                parents = f.get("parents") or []
-                if folder in parents:
-                    continue
-                if moved == 0:
-                    self._set_message("Ordenando Drive…")
-                params = {"fields": "id", "addParents": folder}
-                if parents:
-                    params["removeParents"] = ",".join(parents)
-                try:
-                    self._call("PATCH", f"{API}/{f['id']}?" + urllib.parse.urlencode(params), b"{}",
-                               "application/json; charset=UTF-8")
-                except DriveError as exc:
-                    if exc.status in (403, 404):
-                        continue
-                    raise
-                vacated.update(parents)
-                moved += 1
-                if moved % 20 == 0:
-                    self._set_message(f"Ordenando Drive: {moved} archivo(s) movidos…")
+        for f in self._lookup_names(names):
+            want = targets.get(f["name"])
+            if not want:
+                continue
+            folder = dir_id(want.rpartition("/")[0])
+            parents = f.get("parents") or []
+            if folder in parents:
+                continue
+            if moved == 0:
+                self._set_message("Ordenando Drive…")
+            params = {"fields": "id", "addParents": folder}
+            if parents:
+                params["removeParents"] = ",".join(parents)
+            try:
+                self._call("PATCH", f"{API}/{f['id']}?" + urllib.parse.urlencode(params), b"{}",
+                           "application/json; charset=UTF-8")
+            except DriveError as exc:      # uno que falle no frena el resto
+                if exc.status not in (403, 404):
+                    self.log(f"Drive: no se pudo mover {f['name']}: {exc}", error=True)
+                continue
+            vacated.update(parents)
+            moved += 1
+            if moved % 20 == 0:
+                self._set_message(f"Ordenando Drive: {moved} archivo(s) movidos…")
         for fid in vacated:
             self._trash_folder_if_empty(fid)
         self.db.set_setting("layout_checked_at", now)
@@ -1203,7 +1224,11 @@ class DriveBackup:
                 if len(same) > 1:
                     same.sort(key=lambda k: k.get("createdTime") or "")
                     for dup in same[1:]:
-                        self._merge_folder(dup["id"], same[0]["id"])
+                        try:
+                            self._merge_folder(dup["id"], same[0]["id"])
+                        except DriveError as exc:
+                            self.log(f"Drive: no se pudo juntar «{dup['name']}»: {exc}", error=True)
+                            continue
                         stats["merged"] += 1
                         merged = True
             if merged:
@@ -1216,6 +1241,9 @@ class DriveBackup:
 
         walk(top)
         present = {f["name"] for f in files}
+        sizes: dict[str, set] = {}
+        for f in files:
+            sizes.setdefault(f["name"], set()).add(f.get("size"))
         dir_ids: dict[str, str] = {}
 
         def dir_id(path: str) -> str:
@@ -1227,11 +1255,26 @@ class DriveBackup:
             return dir_ids[path]
 
         renamed_from: dict[tuple, bool] = {}
+        stale: list[dict] = []
         for f in files:
             name, want = f["name"], local.get(f["name"])
             if not want:
                 m = re.match(r"(\d{8})(\D.*)$", name)
-                cands = [(d, n) for d, n in by_suffix.get(m[2], []) if n not in present] if m else []
+                near = []
+                for d, n in (by_suffix.get(m[2], []) if m else []):
+                    try:
+                        gap = abs((_dt.datetime.strptime(d, "%Y%m%d").date()
+                                   - _dt.datetime.strptime(m[1], "%Y%m%d").date()).days)
+                    except ValueError:
+                        continue
+                    if gap <= 14:
+                        near.append((gap, d, n))
+                # Ya está en Drive con su nombre nuevo y el mismo tamaño: esta es la copia vieja
+                # (p. ej. la subió la otra app antes de mover la semana).
+                if f.get("size") and any(f.get("size") in sizes.get(n, ()) for _, _, n in near):
+                    stale.append(f)
+                    continue
+                cands = [(d, n) for _, d, n in near if n not in present]
                 if cands:
                     try:
                         day = _dt.datetime.strptime(m[1], "%Y%m%d").date()
@@ -1254,25 +1297,36 @@ class DriveBackup:
             try:
                 self._call("PATCH", f"{API}/{f['id']}?" + urllib.parse.urlencode(params),
                            json.dumps(body).encode(), "application/json; charset=UTF-8")
-            except DriveError as exc:
-                if exc.status in (403, 404):
-                    continue
-                raise
+            except DriveError as exc:      # uno que falle no frena el resto del orden
+                self.log(f"Drive: no se pudo ordenar {f['name']}: {exc}", error=True)
+                continue
             if name != f["name"]:
                 stats["renamed"] += 1
                 present.add(name)
                 renamed_from[(f["name"], f.get("size"))] = True
             stats["moved"] += folder != f["parent"]
             f["name"], f["parent"] = name, folder
+        def trash(fid: str) -> bool:
+            try:
+                self._call("PATCH", f"{API}/{fid}?fields=id", json.dumps({"trashed": True}).encode(),
+                           "application/json; charset=UTF-8")
+                return True
+            except DriveError as exc:
+                self.log(f"Drive: no se pudo mandar a la papelera: {exc}", error=True)
+                return False
+
         seen: dict[tuple, str] = {}
+        for f in stale:
+            stats["dupes"] += trash(f["id"])
+        stale_ids = {f["id"] for f in stale}
         for f in sorted(files, key=lambda f: f.get("createdTime") or ""):
+            if f["id"] in stale_ids:
+                continue
             key = (f["parent"], f["name"], f.get("size"))
             # Copia exacta en la misma carpeta, o copia (mismo nombre viejo y tamaño) de una
             # foto que ya se renombró y movió a su semana.
             if f.get("size") and (key in seen or (f["name"], f.get("size")) in renamed_from):
-                self._call("PATCH", f"{API}/{f['id']}?fields=id", json.dumps({"trashed": True}).encode(),
-                           "application/json; charset=UTF-8")
-                stats["dupes"] += 1
+                stats["dupes"] += trash(f["id"])
             else:
                 seen[key] = f["id"]
 
@@ -1284,12 +1338,13 @@ class DriveBackup:
                 left += 1
             if left or fid == top:
                 return False
-            self._call("PATCH", f"{API}/{fid}?fields=id", json.dumps({"trashed": True}).encode(),
-                       "application/json; charset=UTF-8")
-            stats["folders"] += 1
-            return True
+            if trash(fid):
+                stats["folders"] += 1
+                return True
+            return False
 
         empty(top)
+        self.db.set_setting("layout_tidied_at", time.time())
         if any(stats.values()):
             self.db.set_setting("drive_folders", {})      # rutas en caché
             self.log("Drive ordenado: " + ", ".join(f"{k} {v}" for k, v in stats.items() if v))
@@ -1433,6 +1488,24 @@ class DriveBackup:
         finally:
             _detach()
 
+    def _upload_many(self, jobs: list) -> list:
+        """[(fila, id en Drive o la excepción)] de los trabajos (fila, carpeta, nombre); los
+        envíos van en paralelo (UPLOAD_THREADS a la vez)."""
+        def one(job):
+            r, parent, fname = job
+            if isinstance(parent, Exception):
+                return r, parent
+            try:
+                return r, self._post_file(r["path"], fname, parent)
+            except (DriveError, Offline, NeedsConsent, OSError) as exc:
+                return r, exc
+        if len(jobs) <= 1:
+            return [one(j) for j in jobs]
+        self._get_token()                      # el token se pide una vez, antes de los hilos
+        from concurrent.futures import ThreadPoolExecutor
+        with ThreadPoolExecutor(UPLOAD_THREADS) as ex:
+            return list(ex.map(one, jobs))
+
     def flush(self) -> int:
         """Sube lo pendiente. Devuelve cuántas fotos se subieron."""
         if not self.enabled:
@@ -1460,39 +1533,51 @@ class DriveBackup:
                 rows = self.db.query("SELECT * FROM drive_queue WHERE status='pending' ORDER BY id")
                 if not rows:
                     break
-                for i, r in enumerate(rows, 1):
-                    if i == 1 or i % 5 == 0:
-                        self._set_message(f"Subiendo {i} de {len(rows)}…")
+                # De a UPLOAD_THREADS fotos a la vez: carpetas y nombres se calculan antes (base
+                # de datos, en este hilo) y solo el envío corre en paralelo.
+                step = UPLOAD_THREADS * 2
+                for start in range(0, len(rows), step):
+                    chunk, jobs = rows[start:start + step], []
+                    i = start + 1
+                    self._set_message(f"Subiendo {i} de {len(rows)}…")
                     cb = getattr(self, "progress_cb", None)
                     if cb:
-                        cb((i - 1) / len(rows), f"Subiendo {i} de {len(rows)}")
-                    if not os.path.exists(r["path"]):
-                        # Foto borrada o reemplazada en la app: no hay nada que subir.
-                        self.db.execute("UPDATE drive_queue SET status='skipped', error=? WHERE id=?",
-                                        ("El archivo ya no existe en el teléfono", r["id"]))
-                        self.log(f"Omitida (ya no está en el teléfono): {os.path.basename(r['path'])}")
-                        continue
-                    try:
-                        # Fotos: la carpeta se calcula al subir (semana actual del registro,
-                        # también para lo que quedó en cola con el esquema anterior).
-                        name = (self._remote_name(r["photo_id"], r["path"]) if r["photo_id"]
-                                else r["name"])
-                        fid = self._upload(r["path"], name)
-                    except (Offline, NeedsConsent):
-                        raise
-                    except DriveError as exc:
-                        failed += 1
-                        if failed <= 3:   # en el diagnóstico, sin llenarlo
-                            self.log(f"{os.path.basename(r['path'])}: {explain(str(exc))[:140]}", error=True)
-                        attempts = r["attempts"] + 1
-                        self.db.execute(
-                            "UPDATE drive_queue SET attempts=?, error=?, status=? WHERE id=?",
-                            (attempts, str(exc), "error" if attempts >= MAX_ATTEMPTS else "pending",
-                             r["id"]))
-                        continue
-                    self.db.execute("UPDATE drive_queue SET status='done', drive_id=?, error='', "
-                                    "uploaded_at=? WHERE id=?", (fid, _now(), r["id"]))
-                    uploaded += 1
+                        cb(start / len(rows), f"Subiendo {i} de {len(rows)}")
+                    for r in chunk:
+                        if not os.path.exists(r["path"]):
+                            # Foto borrada o reemplazada en la app: no hay nada que subir.
+                            self.db.execute("UPDATE drive_queue SET status='skipped', error=? WHERE id=?",
+                                            ("El archivo ya no existe en el teléfono", r["id"]))
+                            self.log(f"Omitida (ya no está en el teléfono): {os.path.basename(r['path'])}")
+                            continue
+                        try:
+                            # Fotos: la carpeta se calcula al subir (semana actual del registro,
+                            # también para lo que quedó en cola con el esquema anterior).
+                            name = (self._remote_name(r["photo_id"], r["path"]) if r["photo_id"]
+                                    else r["name"])
+                            jobs.append((r, *self._parent_of(name)))
+                        except (Offline, NeedsConsent):
+                            raise
+                        except DriveError as exc:
+                            jobs.append((r, exc, None))
+                    for r, res in self._upload_many(jobs):
+                        if isinstance(res, (Offline, NeedsConsent)):
+                            raise res
+                        if isinstance(res, Exception):
+                            failed += 1
+                            if failed <= 3:   # en el diagnóstico, sin llenarlo
+                                self.log(f"{os.path.basename(r['path'])}: {explain(str(res))[:140]}", error=True)
+                            if isinstance(res, DriveError) and res.status == 404:
+                                self.db.set_setting("drive_folders", {})   # carpeta borrada en Drive
+                            attempts = r["attempts"] + 1
+                            self.db.execute(
+                                "UPDATE drive_queue SET attempts=?, error=?, status=? WHERE id=?",
+                                (attempts, str(res), "error" if attempts >= MAX_ATTEMPTS else "pending",
+                                 r["id"]))
+                            continue
+                        self.db.execute("UPDATE drive_queue SET status='done', drive_id=?, error='', "
+                                        "uploaded_at=? WHERE id=?", (res, _now(), r["id"]))
+                        uploaded += 1
                 if not self._again:
                     left = self.db.query_one(
                         "SELECT COUNT(*) AS n FROM drive_queue WHERE status='pending' AND attempts=0")

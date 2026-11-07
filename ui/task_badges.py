@@ -6,12 +6,15 @@ pantalla, encima de todo: así se puede seguir trabajando mientras corren.
 
 * Aparecen solo cuando el usuario pide sincronizar o respaldar (no en lo automático).
 * Anillo con el avance y el porcentaje: rojo → amarillo → verde.
+* Al tocarla mientras corre: el porcentaje, en qué va y el tiempo estimado que falta.
 * Al terminar quedan en «Listo» (verde) o «Nada» (azul: no había nada que sincronizar o
   respaldar), o «Error» (rojo), y NO desaparecen hasta que se tocan (muestran el detalle).
 
 Se pueden llamar desde cualquier hilo: `start`, `update` y `finish` pasan al hilo de Kivy.
 """
 from __future__ import annotations
+
+import time
 
 from kivy.clock import Clock, mainthread
 from kivy.core.window import Window
@@ -82,6 +85,19 @@ KV = """
 """
 
 
+def remaining(started: float, frac: float, now: float | None = None) -> str:
+    """«quedan ~3 min»: lo que falta a este ritmo (vacío al principio, cuando aún no se sabe)."""
+    now = time.time() if now is None else now
+    spent = now - started
+    if not started or frac < .05 or spent < 3:
+        return "calculando el tiempo restante…"
+    left = spent * (1 - frac) / frac
+    if left < 45:
+        return "queda menos de 1 min"
+    mins = round(left / 60)
+    return f"quedan ~{mins} min" if mins < 60 else f"quedan ~{mins // 60} h {mins % 60:02d} min"
+
+
 def _color(frac: float) -> str:
     return RED if frac < 1 / 3 else YELLOW if frac < 2 / 3 else GREEN
 
@@ -94,6 +110,7 @@ class TaskBadge(ButtonBehavior, FloatLayout):
     angle = NumericProperty(0)
     state_ = StringProperty("run")      # run | done | empty | error
     text = StringProperty("")
+    started = NumericProperty(0)        # time.time() al empezar (para el tiempo restante)
 
     def __init__(self, kind: str, **kw):
         super().__init__(**kw)
@@ -109,7 +126,9 @@ class TaskBadge(ButtonBehavior, FloatLayout):
         app = MDApp.get_running_app()
         name = KINDS[self.kind][1]
         if self.state_ == "run":
-            app.toast(f"{name}: {int(self.frac * 100)} %" + (f" · {self.text}" if self.text else ""))
+            eta = remaining(self.started, self.frac)
+            app.toast(f"{name}: {int(self.frac * 100)} %" + (f" · {self.text}" if self.text else "")
+                      + (f" · {eta}" if eta else ""))
             return
         if self.text:
             app.toast(f"{name}: {self.text}")
@@ -146,6 +165,7 @@ def start(kind: str, text: str = "") -> None:
         b = _badges[kind] = TaskBadge(kind)
         Window.add_widget(b)
     b.state_, b.frac, b.label, b.ring, b.text, b.angle = "run", 0, "0%", RED, text, 0
+    b.started = time.time()
     b.icon = KINDS[kind][0]
     _place()
 
@@ -172,6 +192,9 @@ def finish(kind: str, state: str = "done", text: str = "") -> None:
     b = _badges.get(kind)
     if b is None:
         return
+    took = time.time() - b.started if b.started else 0
+    if took >= 60 and state != "error":
+        text = (text + " · " if text else "") + f"demoró {round(took / 60)} min"
     b.state_, b.frac, b.angle, b.text = state, 1, 0, text
     b.label, b.ring = {"done": ("Listo", GREEN), "empty": ("Nada", BLUE),
                        "error": ("Error", RED)}.get(state, ("Listo", GREEN))

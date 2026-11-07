@@ -34,6 +34,18 @@ MAX_DOWNLOADS = 200         # fotos por sincronización automática (la manual l
 LOOKUP_BATCH = 40           # nombres de foto por consulta a Drive
 THREADS = 4                 # descargas simultáneas
 WS_FIELDS = ("profile", "kind", "name", "code")
+REORDER_EVERY = 3600        # s: orden completo de Drive al sincronizar a mano, como mucho cada hora
+GIVE_UP_TRIES = 15          # foto que el otro equipo nunca subió: deja de contarse como pendiente
+
+
+def _older(backup, key: str, seconds: float) -> bool:
+    """True si el ajuste `key` (marca de tiempo) no existe o es más viejo que `seconds`."""
+    import time
+    last = backup.db.get_setting(key)
+    try:
+        return not last or time.time() - float(last) >= seconds
+    except (TypeError, ValueError):
+        return True
 
 
 def _stamp() -> str:
@@ -172,8 +184,11 @@ class DriveSync:
         bajan THREADS a la vez; si el otro equipo aún no la subió, se reintenta en la próxima
         sincronización. limit=None: todas. Devuelve (bajadas, pendientes)."""
         rows = []
+        used = self._referenced(db)
         for r in db.query("SELECT * FROM sync_missing ORDER BY tries, path"):
-            if os.path.exists(r["path"]):
+            if os.path.exists(r["path"]) or r["path"] not in used:
+                # Ya está, o el registro ya no la usa (foto borrada o reemplazada, o datos
+                # movidos de semana: la foto cambió de nombre).
                 db.execute("DELETE FROM sync_missing WHERE path=?", (r["path"],))
             else:
                 rows.append(r)
@@ -192,8 +207,24 @@ class DriveSync:
             for (path, fid), data in zip(chunk, self._parallel(lambda t: self._get(t[1]), chunk)):
                 self._store(db, path, fid, data)
                 got += 1
-        left = db.query_one("SELECT COUNT(*) AS n FROM sync_missing")["n"]
-        return got, left
+        return got, self.pending_count(db)
+
+    @staticmethod
+    def _referenced(db) -> set:
+        """Rutas de archivo que algún registro de este ensayo usa hoy."""
+        used = set()
+        for table, col in sync.PATH_COLUMNS.items():
+            try:
+                used |= {r["p"] for r in db.query(f"SELECT {col} AS p FROM {table} WHERE {col} IS NOT NULL")}
+            except Exception:  # noqa: BLE001 (tabla que este ensayo no tiene)
+                pass
+        return used
+
+    @staticmethod
+    def pending_count(db) -> int:
+        """Fotos del otro equipo que aún no están en Drive (las que se buscaron muchas veces
+        sin encontrarlas ya no se cuentan: el otro equipo las borró o nunca las subirá)."""
+        return db.query_one("SELECT COUNT(*) AS n FROM sync_missing WHERE tries < ?", (GIVE_UP_TRIES,))["n"]
 
     def _store(self, db, path: str, file_id: str, data: bytes) -> None:
         os.makedirs(os.path.dirname(path), exist_ok=True)
@@ -249,7 +280,7 @@ class DriveSync:
                 total["downloaded"] += got
                 total["pending_photos"] += left
             else:
-                total["pending_photos"] += db.query_one("SELECT COUNT(*) AS n FROM sync_missing")["n"]
+                total["pending_photos"] += self.pending_count(db)
         return total
 
     def _backup_photos(self, db, manual: bool = False, progress=None) -> tuple[int, int]:
@@ -265,12 +296,23 @@ class DriveSync:
                                      metered=self.drive.metered, crop=self.drive.crop)
             moved = 0
             if backup.enabled:
-                moved += backup.relocate_weeks()
-                checked = backup.db.get_setting("layout_checked_at")
-                moved += backup.reorganize(force=manual)
-                if manual or backup.db.get_setting("layout_checked_at") != checked:
-                    t = backup.tidy()      # repetidas, fechas viejas, copias y carpetas vacías
-                    moved += t["moved"] + t["renamed"]
+                # Cada paso por separado: si uno falla (red, permiso), los demás igual corren y
+                # el error queda en el diagnóstico del respaldo.
+                for step in ("relocate", "reorganize", "tidy"):
+                    try:
+                        if step == "relocate":
+                            moved += backup.relocate_weeks()
+                        elif step == "reorganize":
+                            # Revisar todas las fotos en Drive demora: a mano, como mucho cada
+                            # hora (lo nuevo ya sube directo a su carpeta); solo, cada 6 h.
+                            moved += backup.reorganize(force=manual and _older(backup, "layout_checked_at", REORDER_EVERY))
+                        elif moved or _older(backup, "layout_tidied_at", REORDER_EVERY if manual else 6 * 3600):
+                            if progress:
+                                progress(0, "ordenando Drive")
+                            t = backup.tidy()      # repetidas, fechas viejas, copias y carpetas vacías
+                            moved += t["moved"] + t["renamed"]
+                    except Exception as exc:  # noqa: BLE001
+                        backup.log(f"Ordenar Drive ({step}): {exc}", error=True)
             backup.progress_cb = progress
             try:
                 up = backup.flush()
@@ -296,5 +338,5 @@ def summary(res: dict) -> str:
     if res.get("downloaded"):
         parts.append(f"{res['downloaded']} foto(s) descargada(s)")
     if res.get("pending_photos"):
-        parts.append(f"{res['pending_photos']} foto(s) por bajar")
+        parts.append(f"{res['pending_photos']} foto(s) del otro equipo aún sin subir a Drive")
     return "Sincronizado: " + ", ".join(parts)

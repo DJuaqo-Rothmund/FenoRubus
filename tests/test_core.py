@@ -3199,3 +3199,95 @@ def test_tidy_merges_dupes_renames_old_dates_and_trashes_copies(tmp_path):
     assert drive.tidy() == {"merged": 0, "renamed": 0, "moved": 0, "dupes": 0, "folders": 0}
     db.close()
     wss.close()
+
+
+def test_tidy_trashes_old_dated_copies_already_in_their_week(tmp_path):
+    """Caso «Urea»: la otra app subió 20261102-AUF-T6R1G.jpg a la semana 45 y la versión
+    movida (20261026-…, mismo tamaño) ya está en la 44: la copia vieja va a la papelera y la
+    carpeta de la semana 45 también (quedó vacía). Una foto distinta (otro tamaño) no se toca."""
+    from drive_backup import DriveBackup
+    from workspaces import Workspaces
+
+    class Auth:
+        def get_token(self, interactive):
+            return "t"
+    wss = Workspaces(str(tmp_path / "data"))
+    db = wss.open(wss.create("id", "tratamientos", "Urea", "AUF"))
+    db.setup_trial(2, 1, t0=False)
+    db.set_setting("drive_enabled", True)
+    fake = MovableDrive()
+    drive = DriveBackup(db, authorizer=Auth(), transport=fake, metered=lambda: False)
+    w44 = db.week_for_date(dt.date(2026, 10, 26))
+    t1, t2 = db.list_varieties()
+    paths = {}
+    for v, seed in ((t1, 1), (t2, 2)):
+        o = db.get_or_create_observation(v["id"], w44["id"])
+        p = str(tmp_path / f"20261026-AUF-{v['name']}G.jpg")
+        synthetic_photo(61, "canopy", p, seed)
+        db.add_photo(o["id"], "canopy", p)
+        paths[v["name"]] = p
+        drive._upload(p, drive._target_for(p))                       # ya en su semana
+    old45 = f"{drive.prefix}Año 2026/Semana 45 · 02-11-2026"
+    drive._upload(paths["T1R1"], f"{old45}/20261102-AUF-T1R1G.jpg")    # copia exacta, nombre viejo
+    other = str(tmp_path / "otra.jpg")
+    synthetic_photo(40, "canopy", other, 9)                              # otro tamaño: otra foto
+    drive._upload(other, f"{old45}/20261102-AUF-T2R1G.jpg")
+    t = drive.tidy()
+    live = fake.live()
+    assert t["dupes"] == 1
+    assert not any(x.endswith("20261102-AUF-T1R1G.jpg") for x in live)
+    assert sum(x.endswith("Semana 44 · 26-10-2026/T1R1/20261026-AUF-T1R1G.jpg") for x in live) == 1
+    assert any(x.endswith("20261102-AUF-T2R1G.jpg") for x in live)      # distinta: se conserva
+    db.close()
+    wss.close()
+
+
+def test_sync_missing_forgets_photos_no_record_uses(tmp_path):
+    """«N fotos por bajar» que nunca se van: si el registro ya no usa ese archivo (foto
+    borrada, o datos movidos de semana y la foto cambió de nombre) deja de esperarse; y las
+    que se buscaron muchas veces sin encontrarlas ya no se cuentan."""
+    import sync_drive
+
+    s, ws, open_db, data = _device(tmp_path, "A", FakeDrive())
+    db = open_db(ws.by_code("NV"))
+    db.execute("INSERT INTO sync_missing(path, tries) VALUES (?, 0)", (str(tmp_path / "ya-no-existe.jpg"),))
+    v = db.list_varieties()[0]
+    w = db.week_for_date(dt.date(2026, 10, 26))
+    o = db.get_or_create_observation(v["id"], w["id"])
+    gone = str(tmp_path / "A" / "20261026-NV-X.jpg")
+    db.add_photo(o["id"], "canopy", gone)                 # el registro la usa, pero no está en Drive
+    db.execute("INSERT INTO sync_missing(path, tries) VALUES (?, ?)", (gone, sync_drive.GIVE_UP_TRIES - 1))
+    got, left = s.fetch_missing(db)
+    assert got == 0 and left == 0                         # la vieja se olvida; la otra llegó al tope
+    assert [r["path"] for r in db.query("SELECT path FROM sync_missing")] == [gone]
+
+
+def test_backup_photos_keeps_tidying_when_a_step_fails(tmp_path, monkeypatch):
+    """Si mover lo de semanas falla (red, permiso), igual se ordena y limpia Drive y se
+    sube lo pendiente; el error queda en el diagnóstico. Y el orden completo, a mano, como
+    mucho cada hora (para que sincronizar no demore de más)."""
+    from drive_backup import DriveBackup
+
+    s, ws, open_db, data = _device(tmp_path, "A", FakeDrive())
+    db = open_db(ws.by_code("NV"))
+    db.set_setting("drive_enabled", True)
+    calls = []
+
+    def boom(self):
+        calls.append("relocate")
+        raise RuntimeError("sin red")
+    monkeypatch.setattr(DriveBackup, "relocate_weeks", boom)
+    monkeypatch.setattr(DriveBackup, "reorganize", lambda self, force=False: calls.append(("reorganize", force)) or 0)
+
+    def tidy(self):
+        calls.append("tidy")
+        self.db.set_setting("layout_tidied_at", __import__("time").time())
+        return {"merged": 0, "renamed": 0, "moved": 0, "dupes": 0, "folders": 0}
+    monkeypatch.setattr(DriveBackup, "tidy", tidy)
+    monkeypatch.setattr(DriveBackup, "flush", lambda self: calls.append("flush") or 0)
+    s._backup_photos(db, manual=True)
+    assert calls == ["relocate", ("reorganize", True), "tidy", "flush"]
+    db.set_setting("layout_checked_at", __import__("time").time())
+    calls.clear()
+    s._backup_photos(db, manual=True)                    # recién ordenado: no se repite
+    assert calls == ["relocate", ("reorganize", False), "flush"]
