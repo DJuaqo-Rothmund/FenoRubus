@@ -242,6 +242,8 @@ const Ed = {
     this.cv = $("tcanvas");
     this.g = this.cv.getContext("2d");
     this.renderClasses();
+    $("tundo").onclick = () => this.undo(-1);
+    $("tredo").onclick = () => this.undo(1);
     $("tprev").onclick = () => this.go(-1);
     $("tnext").onclick = () => this.go(1);
     $("tdel").onclick = () => this.deleteSel();
@@ -269,6 +271,11 @@ const Ed = {
     this.photo = p;
     this.sel = null;
     this.rec = data.photos[p.name] ||= { w: 0, h: 0, boxes: [], empty: false };
+    // Deshacer / rehacer (Ctrl+Z / Ctrl+Y): historial de cada foto mientras la página está abierta.
+    this.hists ||= new Map();
+    if (!this.hists.has(p.name)) this.hists.set(p.name, { list: [this.snap()], pos: 0 });
+    this.hist = this.hists.get(p.name);
+    this.undoButtons();
     $("ttitle").textContent = `${p.wsName} · ${p.variety || "Foto"} · ${p.week ? C.weekLabel(p.week) : ""}`;
     $("tname").textContent = p.name;
     $("tsaved").textContent = "";
@@ -310,11 +317,39 @@ const Ed = {
     const r = this.rec;
     if (r && !r.ts && !r.boxes.length && !r.empty) delete data.photos[this.photo.name];
   },
-  changed() {
+  snap() { return JSON.stringify({ boxes: this.rec.boxes, empty: !!this.rec.empty }); },
+  undoButtons() {
+    $("tundo").disabled = !this.hist || this.hist.pos <= 0;
+    $("tredo").disabled = !this.hist || this.hist.pos >= this.hist.list.length - 1;
+  },
+  record() {                     // tras cada cambio: queda en el historial (y se pierde lo rehecho)
+    const h = this.hist, now = this.snap();
+    if (!h || h.list[h.pos] === now) return;
+    h.list.splice(h.pos + 1);
+    h.list.push(now);
+    if (h.list.length > 200) h.list.shift();
+    h.pos = h.list.length - 1;
+  },
+  undo(dir = -1) {
+    const h = this.hist;
+    if (!h || !this.rec) return;
+    const j = h.pos + dir;
+    if (j < 0 || j >= h.list.length) return;
+    h.pos = j;
+    const st = JSON.parse(h.list[j]);
+    this.rec.boxes = st.boxes;
+    this.rec.empty = st.empty;
+    this.sel = null;
+    this.changed(false);
+    $("tsaved").textContent = dir < 0 ? "Deshecho" : "Rehecho";
+  },
+  changed(record = true) {
     this.rec.by = X.email() || "";
     this.rec.ts = C.nowTs();
     if (this.rec.boxes.length) this.rec.empty = false;
     data.photos[this.photo.name] = this.rec;
+    if (record) this.record();
+    this.undoButtons();
     this.summary(); this.draw(); this.progress(); scheduleSave();
   },
   summary() {
@@ -347,6 +382,12 @@ const Ed = {
   },
   key(e) {
     if (!$("tdialog").open || e.target.tagName === "INPUT") return;
+    if (e.ctrlKey || e.metaKey) {              // Ctrl+Z deshacer · Ctrl+Y o Ctrl+Shift+Z rehacer
+      const k = e.key.toLowerCase();
+      if (k === "z") { this.undo(e.shiftKey ? 1 : -1); e.preventDefault(); }
+      else if (k === "y") { this.undo(1); e.preventDefault(); }
+      return;
+    }
     if (/^[0-9]$/.test(e.key) && CLASSES[Number(e.key)]) { this.setClass(CLASSES[Number(e.key)][0]); e.preventDefault(); }
     else if (e.key === "Delete" || e.key === "Backspace") { this.deleteSel(); e.preventDefault(); }
     else if (e.key === "ArrowRight" || e.key === "Enter") { this.go(1); e.preventDefault(); }

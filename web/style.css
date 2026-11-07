@@ -471,3 +471,4 @@ dialog.tpage[open] { display: flex; }
 .tprogress { font-size: 14px; color: #fff; opacity: .92; margin-right: 8px; }
 .tprogress b { color: #fff; }
 @media (max-width: 700px) { .tarrow { width: 44px; height: 44px; font-size: 28px; } .tprogress { font-size: 12px; } }
+.tbarx .ghost:disabled { opacity: .35; cursor: default; }
