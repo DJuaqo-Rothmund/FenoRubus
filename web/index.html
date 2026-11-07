@@ -465,12 +465,15 @@
     <div class="tbarx">
       <button type="button" id="tclose" class="round" aria-label="Cerrar">✕</button>
       <div class="grow"><b id="ttitle"></b><div id="tname" class="small"></div></div>
+      <span id="tprogress" class="tprogress"></span>
       <span id="tsaved" class="small"></span>
-      <button type="button" id="tprev" class="ghost" title="Foto anterior (←)">‹</button>
-      <button type="button" id="tnext" class="primary" title="Guardar y siguiente (→ o Enter)">Siguiente ›</button>
     </div>
     <div id="tclassbar" class="tclassbar"></div>
-    <canvas id="tcanvas"></canvas>
+    <div class="tstage">
+      <canvas id="tcanvas"></canvas>
+      <button type="button" id="tprev" class="tarrow left" title="Foto anterior (←)" aria-label="Foto anterior">‹</button>
+      <button type="button" id="tnext" class="tarrow right" title="Guardar y siguiente (→ o Enter)" aria-label="Foto siguiente">›</button>
+    </div>
     <div class="tbarx">
       <span id="tcount" class="tcount"></span>
       <span class="spacer"></span>

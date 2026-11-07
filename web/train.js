@@ -287,8 +287,16 @@ const Ed = {
     };
     img.src = url;
     this.summary();
-    $("tprev").disabled = i <= 0;
-    $("tnext").disabled = i >= list.length - 1;
+    $("tprev").hidden = i <= 0;                 // sin más fotos hacia ese lado: sin flecha
+    $("tnext").hidden = i >= list.length - 1;
+    this.progress();
+  },
+  // «Foto 12 de 240 · 30 analizadas · 210 por ver» (todas las fotos del sistema, sin filtro).
+  progress() {
+    const all = photos || [];
+    const done = all.filter((p) => marked(p.name)).length;
+    const pos = all.indexOf(this.photo) + 1 || this.i + 1;
+    $("tprogress").innerHTML = `Foto <b>${pos}</b> de <b>${all.length}</b> · <b>${done}</b> analizadas · <b>${all.length - done}</b> por ver`;
   },
   close() { $("tdialog").close(); },
   go(d) {
@@ -307,7 +315,7 @@ const Ed = {
     this.rec.ts = C.nowTs();
     if (this.rec.boxes.length) this.rec.empty = false;
     data.photos[this.photo.name] = this.rec;
-    this.summary(); this.draw(); scheduleSave();
+    this.summary(); this.draw(); this.progress(); scheduleSave();
   },
   summary() {
     const r = this.rec || { boxes: [] };

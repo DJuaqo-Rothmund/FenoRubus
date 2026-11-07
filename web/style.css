@@ -459,3 +459,15 @@ dialog.tpage[open] { display: flex; }
 #app.empty > :not(.nodata) { display: none !important; }
 .iacard { --crop: #1E6FD9; }
 .iacard img { filter: drop-shadow(0 0 6px rgba(214, 69, 69, .35)); }
+/* IA+: flechas a los lados de la foto y avance arriba */
+.tstage { position: relative; flex: 1; min-height: 0; display: flex; }
+.tstage #tcanvas { flex: 1; }
+.tarrow { position: absolute; top: 50%; transform: translateY(-50%); width: 56px; height: 56px; border-radius: 50%;
+  border: 0; background: var(--berry); color: #fff; font-size: 34px; line-height: 1; cursor: pointer; z-index: 2;
+  box-shadow: 0 4px 14px rgba(0,0,0,.35); display: grid; place-items: center; padding-bottom: 4px; }
+.tarrow:hover { background: var(--berry-dark); }
+.tarrow.left { left: 14px; } .tarrow.right { right: 14px; }
+.tarrow[hidden] { display: none; }
+.tprogress { font-size: 14px; color: #fff; opacity: .92; margin-right: 8px; }
+.tprogress b { color: #fff; }
+@media (max-width: 700px) { .tarrow { width: 44px; height: 44px; font-size: 28px; } .tprogress { font-size: 12px; } }
