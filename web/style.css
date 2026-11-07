@@ -457,3 +457,5 @@ dialog.tpage[open] { display: flex; }
 #app .nodata { display: none; margin: 24px auto; }
 #app.empty .nodata { display: block; }
 #app.empty > :not(.nodata) { display: none !important; }
+.iacard { --crop: #1E6FD9; }
+.iacard img { filter: drop-shadow(0 0 6px rgba(214, 69, 69, .35)); }

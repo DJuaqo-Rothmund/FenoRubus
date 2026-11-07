@@ -48,11 +48,14 @@ let wsFilter = "";         // código del ensayo/predio o «» (todos)
 let list = [];             // fotos de detalle visibles (orden de la lista)
 let saveTimer = null;
 
-export function enabled() {
-  try {
-    if (location.hash.includes("lab")) localStorage.setItem("ac_lab", "1");
-    return localStorage.getItem("ac_lab") === "1";
-  } catch { return location.hash.includes("lab"); }
+// AeonCrop Web es la de laboratorio: IA+ siempre a la vista.
+export function enabled() { return true; }
+
+// Abre IA+ (botón flotante o tarjeta del inicio) con el cultivo abierto o el último entrenado.
+export function openPage(mod) {
+  wsFilter = "";
+  $("tpage").showModal();
+  setCrop(mod || savedCrop());
 }
 
 export function init(ctx) {
@@ -62,7 +65,7 @@ export function init(ctx) {
     document.querySelectorAll("#tfilter button").forEach((x) => x.classList.toggle("on", x === b));
     renderList();
   }));
-  $("iaplusfab").onclick = () => { wsFilter = ""; $("tpage").showModal(); setCrop(savedCrop()); };
+  $("iaplusfab").onclick = () => openPage(X.crop?.());
   document.querySelectorAll("#tcrop button").forEach((b) => (b.onclick = () => setCrop(b.dataset.m)));
   $("tpageclose").onclick = () => $("tpage").close();
   $("treload").onclick = () => load(true);

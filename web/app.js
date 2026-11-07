@@ -1809,6 +1809,11 @@ function showCrops() {
     b.onclick = () => openCrop(c.mod).catch((e) => status(e.message));
     box.appendChild(b);
   }
+  const ib = document.createElement("button");
+  ib.className = "cropcard iacard";
+  ib.innerHTML = `<img src="iaplus.png" alt=""><b>IA+</b><span>Entrenar: marcar yemas, flores y frutos</span>`;
+  ib.onclick = () => TR.openPage();
+  box.appendChild(ib);
   const sb = document.createElement("button");
   sb.className = "cropcard scoutcard";
   sb.innerHTML = `<img src="scout/scout_logo.png" alt=""><b>AeonScout</b><span>Plagas, malezas y enfermedades</span>`;
@@ -1998,6 +2003,7 @@ async function boot() {
   document.body.classList.toggle("withfabs", TR.enabled());      // se activa abriendo la web con «#lab» una vez
   TR.init({ S, photoUrl, loadLabels, saveLabels, allStates, extraList, extraUrl, extraUpload,
     setCrop: (mod) => { trainMod = mod; },
+    crop: () => (S.workspaces.length && !$("app").hidden ? CROP : null),
     email: () => store.get("ac_email") });
   $("dsave").onclick = saveDetail;
   $("msave").onclick = saveMeasure;
