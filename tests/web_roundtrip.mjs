@@ -26,6 +26,24 @@ if (mode === "stats") {
 } else if (mode === "exif") {
   const out = data.files.map((f) => { const b = readFileSync(f); return C.exifGps(b.buffer.slice(b.byteOffset, b.byteOffset + b.byteLength)); });
   writeFileSync(output, JSON.stringify(out));
+} else if (mode === "lab") {
+  // AeonCrop Web: ensayo con T0, fenología unificada por tratamiento y mover una semana.
+  const st = C.emptyState();
+  C.applyBundle(st, "p1.json", data);
+  const local = (changes, settings = {}) => C.applyBundle(st, `l${Math.random()}`, { changes, settings });
+  const t = C.trialSetup(st, 3, 2, true);
+  local(t.changes, t.settings);
+  const u = C.phenoUnitChanges(st, true, "treatment", ["Caña gruesa", "Caña delgada"]);
+  local(u.changes, u.settings);
+  const units = C.phenoUnits(st).map((x) => x.name);
+  const parcels = C.varieties(st).filter(C.isParcel).map((x) => x.name);
+  const trts = C.treatments(st).map((x) => x.num);
+  const m = C.weekMoveChanges(st, "2026-10-12", "2026-10-19");
+  local(m.changes);
+  const all = [...t.changes, ...u.changes, ...m.changes];
+  writeFileSync(output, JSON.stringify({ bundle: C.bundle("webtest", "AUF", all, { ...t.settings, ...u.settings }),
+    units, parcels, trts, renames: m.renames.map((r) => [r.from, r.to, r.kind]),
+    moved: { records: m.records, merged: m.merged, photos: m.photos, entries: m.entries } }));
 } else if (mode === "settings") {
   // Ajustes hechos en la web: unidad de predio, edición de variedad, ensayo de tratamientos,
   // nombre de un tratamiento y primera semana fija.

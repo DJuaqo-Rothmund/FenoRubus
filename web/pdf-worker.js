@@ -1,4 +1,4 @@
-// PhenoRubus Web · generador de PDF en segundo plano (Web Worker): Pyodide y el código de
+// AeonCrop Web · generador de PDF en segundo plano (Web Worker): Pyodide y el código de
 // informes de la app (py.zip) corren aquí, así la página nunca se congela.
 let booting = null;
 
@@ -26,6 +26,7 @@ self.onmessage = async ({ data: m }) => {
     say("Cargando el generador de informes (la primera vez tarda un poco)…");
     const { py, wr } = await boot(m.indexURL);
     say("Preparando los datos…");
+    wr.use_crop(m.crop || "PhenoRubus");
     wr.load(m.ws.code, JSON.stringify(m.ws), JSON.stringify(m.bundles));
     const paths = ["treatments", "excel"].includes(m.kind) ? [] : JSON.parse(wr.photos(m.ws.code, m.kind, m.arg, m.season));
     const need = [...new Set(paths)].filter((p) => !py.FS.analyzePath(`/data/${p}`).exists);
@@ -38,7 +39,7 @@ self.onmessage = async ({ data: m }) => {
       }
     }
     say(m.kind === "excel" ? "Generando la planilla Excel…" : "Generando el PDF…");
-    const path = wr.report(m.ws.code, m.kind, m.arg, m.season);
+    const path = wr.report(m.ws.code, m.kind, m.arg, m.season, !!m.plain);
     const bytes = py.FS.readFile(path);
     py.FS.unlink(path);
     self.postMessage({ id: m.id, name: path.split("/").pop(), pdf: bytes.buffer }, [bytes.buffer]);

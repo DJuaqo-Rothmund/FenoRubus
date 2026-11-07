@@ -3,16 +3,17 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>PhenoRubus Web</title>
-  <meta name="description" content="Registro fenológico de frambueso: muestreo semanal sincronizado con la app por Google Drive.">
-  <link rel="icon" href="icon.png">
+  <title>AeonCrop Web</title>
+  <meta name="description" content="AeonCrop: registro fenológico de frambueso, arándano y cranberry, y banco de imágenes AeonScout, sincronizado con la app por Google Drive.">
+  <link rel="icon" href="aeon_icon.png">
   <link rel="stylesheet" href="style.css">
   <script src="https://accounts.google.com/gsi/client" async defer></script>
 </head>
 <body>
   <header class="bar">
-    <img src="icon.png" alt="" class="logo">
-    <div class="brand">PhenoRubus <span>Web</span></div>
+    <img src="aeon_icon.png" alt="" class="logo">
+    <div class="brand">AeonCrop <span>Web</span></div>
+    <button id="cropbtn" class="chip cropbtn" hidden title="Cambiar de cultivo o abrir AeonScout"></button>
     <select id="ws" aria-label="Ensayo o predio" hidden></select>
     <div class="spacer"></div>
     <span id="status" class="status"></span>
@@ -23,18 +24,42 @@
 
   <main id="login" class="center">
     <section class="card hero">
-      <img src="icon.png" alt="" width="96" height="96">
-      <h1>PhenoRubus Web</h1>
-      <p>Vea y complete el muestreo semanal desde el computador, sin instalar nada. Los
-        registros y fotos se comparten con la app del celular por su Google Drive.</p>
+      <img src="aeon_logo.png" alt="AeonCrop" class="herologo">
+      <h1>AeonCrop Web</h1>
+      <p>Vea y complete el muestreo semanal de frambueso, arándano y cranberry desde el
+        computador, sin instalar nada, y revise el banco de imágenes de AeonScout. Los registros
+        y fotos se comparten con la app AeonCrop del celular por su Google Drive.</p>
       <button id="signin" class="primary">Iniciar sesión con Google</button>
       <p class="muted small">Use la misma cuenta de Google que en el celular. La página solo ve
-        los archivos que crea PhenoRubus en su Drive (permiso «drive.file»).</p>
+        los archivos que crea AeonCrop en su Drive (permiso «drive.file»).</p>
       <p id="login-msg" class="warn small"></p>
     </section>
   </main>
 
+  <main id="crops" class="center" hidden>
+    <section class="card hero cropshero">
+      <img src="aeon_logo.png" alt="AeonCrop" class="herologo">
+      <p class="muted">Elija el cultivo (cada uno con sus ensayos, predios y escala BBCH) o AeonScout.</p>
+      <div id="cropgrid" class="cropgrid"></div>
+    </section>
+  </main>
+
+  <main id="scout" hidden>
+    <section class="card scouthead">
+      <img src="scout/scout_logo.png" alt="" width="72" height="72">
+      <div class="grow"><h2>AeonScout</h2>
+        <div class="muted small">Banco de imágenes de plagas, malezas y enfermedades tomadas con la app
+          (carpeta «AeonCrop/AeonScout» de su Drive). Toque una foto para verla grande.</div></div>
+      <button id="screload" class="ghost" title="Volver a leer Drive">⟳</button>
+    </section>
+    <nav id="ssections" class="scoutsec"></nav>
+    <div id="smsg" class="muted small"></div>
+    <section id="sspecies" class="rows"></section>
+  </main>
+
   <main id="app" hidden>
+    <section id="nodata" class="card hero nodata"><img id="nodatalogo" alt="" width="96" height="96">
+      <h2 id="nodatatitle"></h2><p id="nodatamsg" class="muted"></p></section>
     <nav id="profiles" class="profiles" hidden></nav>
     <nav class="tabs">
       <button data-tab="sampling" class="on">Muestreo</button>
@@ -49,7 +74,7 @@
       <div class="week">
         <select id="season" class="chip" aria-label="Temporada"></select>
         <div id="kicker" class="kicker"></div>
-        <div id="wtitle" class="wtitle pickable" role="button" tabindex="0" title="Elegir un día en el calendario"></div>
+        <div id="wtitle" class="wtitle pickable" role="button" tabindex="0" title="Elegir un día en el calendario · mantener presionado 3 s: mover los datos a otra semana"></div>
         <input type="date" id="wpick" class="wpick" min="2020-01-01" max="2050-12-31" tabindex="-1" aria-hidden="true">
         <div id="wrange" class="muted"></div>
       </div>
@@ -110,6 +135,8 @@
       <section class="card reports">
         <div class="row-h"><div class="label">INFORMES</div><select id="rseason" class="pill"></select></div>
         <p class="muted small">«PDF» descarga el mismo informe que genera la app. «Ver» lo abre en una pestaña nueva.</p>
+        <label class="skip" title="Sin logo, nombre de la app, productor ni autor: solo la información y las imágenes">
+          <input type="checkbox" id="rplain"> PDF simple (sin logo ni marca)</label>
         <div class="rep">
           <div><b>Semanal</b><div class="muted small">Fotos, estado BBCH y notas de cada variedad en una semana.</div></div>
           <select id="rweek" class="pill"></select><span class="btns"><button class="ghost" data-rep="weekly" title="Ver en una pestaña nueva">Ver</button><button class="primary" data-pdf="weekly">PDF</button></span>
@@ -156,9 +183,25 @@
           <label>Repeticiones <input id="trep" type="number" min="1" max="12"></label>
           <button id="tapply" class="ghost">Aplicar</button>
         </div>
-        <p class="muted small">Crea las parcelas T1R1, T1R2…; si se reducen, las que sobran se archivan (sus registros se conservan).</p>
+        <label class="skip" title="Con 7 tratamientos: T0 … T6 (en vez de T1 … T7)"><input type="checkbox" id="tt0"> El ensayo tiene T0 (testigo)</label>
+        <p class="muted small">Crea las parcelas T1R1, T1R2… (con T0: T0R1…); si se reducen, las que sobran se archivan (sus registros se conservan).</p>
         <div id="tlist" class="tlist"></div>
         <p id="tmsg" class="muted small"></p>
+      </section>
+      <section class="card" id="unicard" hidden>
+        <div class="label">FENOLOGÍA UNIFICADA</div>
+        <label class="skip"><input type="checkbox" id="uon"> Registrar la fenología en puntos propios (no en cada parcela)</label>
+        <div id="uopts" class="uopts">
+          <label class="skip"><input type="radio" name="uscope" value="trial"> Puntos comunes para todo el ensayo</label>
+          <label class="skip"><input type="radio" name="uscope" value="treatment"> Los mismos puntos en cada tratamiento</label>
+          <label class="field">Nombres de los puntos (separados por coma; vacío = uno solo)
+            <input id="unames" placeholder="Ej. Caña gruesa, Caña media, Caña delgada"></label>
+          <button id="uapply" class="ghost">Guardar</button>
+        </div>
+        <p id="uprev" class="muted small"></p>
+        <p class="muted small">Las parcelas T×R siguen para las mediciones. Con puntos por tratamiento, el informe de
+          tratamientos usa los puntos como repeticiones. Pasar las fotos de las parcelas a los puntos se hace en la app.</p>
+        <p id="umsg" class="muted small"></p>
       </section>
       <section class="card">
         <div class="label">TEMPORADA</div>
@@ -169,6 +212,25 @@
       </section>
     </div>
   </main>
+
+  <dialog id="movedlg">
+    <form method="dialog" class="detail">
+      <div class="dhead"><div><h2>Mover datos de semana</h2><div id="mvfrom" class="muted small"></div></div>
+        <button value="cancel" class="round" aria-label="Cerrar">✕</button></div>
+      <p class="small">Pasa los registros (estado BBCH, notas y fotos), las mediciones y las adjuntas de esta
+        semana a otra. Las fotos cambian la fecha de su nombre y se mueven en Drive a la carpeta de la
+        nueva semana. Si el destino ya tiene un registro con datos, se juntan (nunca se sobrescribe).</p>
+      <div class="chips" id="mvchips">
+        <button type="button" data-d="-1">‹ Semana anterior</button>
+        <button type="button" data-d="1">Semana siguiente ›</button>
+        <label class="chip">Otra: <input type="date" id="mvdate" min="2020-01-01" max="2050-12-31"></label>
+      </div>
+      <p id="mvto" class="small"></p>
+      <p id="mvmsg" class="warn small"></p>
+      <div class="actions"><button value="cancel" class="ghost">Cancelar</button>
+        <button id="mvgo" type="button" class="primary" disabled>Mover</button></div>
+    </form>
+  </dialog>
 
   <dialog id="pickmap">
     <form method="dialog" class="detail">
@@ -366,12 +428,14 @@
   <dialog id="tpage" class="tpage">
     <div class="tpagebar">
       <img src="iaplus.png" alt="" width="40" height="40">
-      <div class="grow"><b>IA+</b><div class="small">Fotos de detalle de todos los ensayos y predios, y fotos extra · una sola meta</div></div>
+      <div class="grow"><b>IA+</b> <span id="tcropname" class="small"></span><div class="small">Fotos de detalle de todos los ensayos y predios, y fotos extra · una sola meta por cultivo</div></div>
       <button type="button" id="treload" class="ghost" title="Volver a leer las fotos de Drive">⟳</button>
       <button type="button" id="tpageclose" class="round" aria-label="Cerrar">✕</button>
     </div>
     <div class="tpagebody">
       <section class="card">
+        <div class="row-h"><div class="label">CULTIVO A ENTRENAR</div>
+          <div class="chips" id="tcrop"><button data-m="PhenoRubus">PhenoRubus · frambuesa</button><button data-m="PhenoBlue">PhenoBlue · arándano</button><button data-m="PhenoCran">PhenoCran · cranberry</button></div></div>
         <div class="row-h"><div class="label">MARCAR YEMAS, BROTES, LATERALES, FLORES Y FRUTOS</div>
           <div class="chips" id="tfilter"><button data-f="todo" class="on">Todas</button><button data-f="sin">Sin marcar</button><button data-f="con">Marcadas</button></div></div>
         <div class="chips" id="tws"></div>

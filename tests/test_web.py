@@ -169,3 +169,42 @@ def test_web_exif_gps_matches_python(tmp_path):
         if py:
             assert abs(r[0] - py[0]) < 1e-6 and abs(r[1] - py[1]) < 1e-6
     assert res[0][0] < 0 and res[0][1] < 0 and res[2] is None
+
+
+def test_aeoncrop_web_t0_units_and_week_move_apply_in_app(tmp_path):
+    """AeonCrop Web: ensayo con T0 (T0…T2), fenología unificada con dos puntos por tratamiento
+    y mover una semana a otra (renombra fotos y junta con lo que ya había): la app lo recibe
+    igual que si se hubiera hecho ahí."""
+    ws = {"profile": "id", "kind": "tratamientos", "name": "Urea", "code": "AUF"}
+    data = tmp_path / "app"
+    db = Database(str(data / "AUF.sqlite3"), code="AUF", workspace=ws, seed=False)
+    v = db.add_variety("Meeker", code="MEE")
+    w1 = db.week_for_date(dt.date(2026, 10, 12))
+    w2 = db.week_for_date(dt.date(2026, 10, 19))
+    o1 = db.get_or_create_observation(v, w1["id"])
+    db.update_observation(o1["id"], bbch_code=61, notes="semana equivocada")
+    photo = data / "photos" / "20261012-AUF-MEEG.jpg"
+    photo.parent.mkdir(parents=True, exist_ok=True)
+    photo.write_bytes(b"jpg")
+    db.add_photo(o1["id"], "canopy", str(photo))
+    o2 = db.get_or_create_observation(v, w2["id"])
+    db.update_observation(o2["id"], bbch_code=65)                 # el destino ya tiene datos
+    bundle = sync.export_changes(db, str(data))
+    res = _node("lab", bundle, tmp_path)
+    assert res["trts"] == [0, 1, 2]
+    assert res["parcels"][:2] == ["T0R1", "T0R2"] and "T2R2" in res["parcels"] and "T3R1" not in res["parcels"]
+    assert res["units"] == ["T0 · Caña gruesa", "T0 · Caña delgada", "T1 · Caña gruesa", "T1 · Caña delgada",
+                            "T2 · Caña gruesa", "T2 · Caña delgada"]
+    assert res["renames"] == [["20261012-AUF-MEEG.jpg", "20261019-AUF-MEEG.jpg", "photo"]]
+    assert res["moved"] == {"records": 0, "merged": 1, "photos": 1, "entries": 0}
+    sync.apply_changes(db, res["bundle"], str(data), week_for_date=db.week_for_date)
+    assert db.trial_has_t0 and db.trial_size() == (3, 2) and db.trial_nums() == [0, 1, 2]
+    assert db.unified_pheno and db.pheno_config() == {"scope": "treatment", "names": ["Caña gruesa", "Caña delgada"]}
+    names = [u["name"] for u in db.pheno_units()]
+    assert names == res["units"]
+    assert [u["name"] for u in db.sync_pheno_units()] == names          # la app no cambia nada
+    assert not db.query("SELECT 1 FROM observations WHERE week_id=?", (w1["id"],))
+    o = db.query_one("SELECT * FROM observations WHERE week_id=? AND variety_id=?", (w2["id"], v))
+    assert o["bbch_code"] == 65 and "semana equivocada" in o["notes"] and "BBCH 61" in o["notes"]
+    p = db.query_one("SELECT * FROM photos")
+    assert p["observation_id"] == o["id"] and os.path.basename(p["path"]) == "20261019-AUF-MEEG.jpg"

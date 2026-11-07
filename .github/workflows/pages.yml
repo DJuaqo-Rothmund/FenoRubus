@@ -1,12 +1,15 @@
 name: Web (GitHub Pages)
 
-# PhenoRubus Web: página estática (web/) publicada gratis en GitHub Pages. La escala BBCH
-# se genera desde phenology.py en cada publicación, así nunca difiere de la app.
+# Sitio publicado en GitHub Pages:
+#   /           PhenoRubus Web (la estable, rama claude/practical-einstein-5tag9g, sin cambios)
+#   /aeoncrop/  AeonCrop Web (esta rama, la de laboratorio)
+# Las dos se arman en cada publicación desde su rama (la escala BBCH, el estilo de los
+# informes y el código de los PDF se generan desde la app de cada una).
 on:
   push:
-    branches: ["main", "master", "claude/**", "!claude/lab-1.2"]   # la web publicada es la estable
-    paths: ["web/**", "*.py", "templates/**", "assets/ui/**", "tools/make_web_data.py", "tools/web/**",
-            ".github/workflows/pages.yml"]
+    branches: ["claude/lab-1.2"]
+    paths: ["web/**", "*.py", "templates/**", "assets/ui/**", "assets/crops/**", "tools/make_web_data.py",
+            "tools/web/**", ".github/workflows/pages.yml"]
   workflow_dispatch:
 
 permissions:
@@ -25,17 +28,33 @@ jobs:
       name: github-pages
       url: ${{ steps.deploy.outputs.page_url }}
     steps:
-      - uses: actions/checkout@v4
+      - name: AeonCrop (esta rama)
+        uses: actions/checkout@v4
+        with:
+          path: lab
+      - name: PhenoRubus (rama estable)
+        uses: actions/checkout@v4
+        with:
+          ref: claude/practical-einstein-5tag9g
+          path: stable
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
-      - name: Escala BBCH, estilo de informes y planos para la web
+      - name: Escala BBCH, estilo de informes y planos para las dos webs
         run: |
           pip install jinja2 pillow
-          python tools/make_web_data.py
+          python stable/tools/make_web_data.py
+          python lab/tools/make_web_data.py
+      - name: Armar el sitio
+        run: |
+          mkdir site
+          cp -r stable/web/. site/
+          rm -rf site/aeoncrop
+          cp -r lab/web site/aeoncrop
+          ls site site/aeoncrop
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3
         with:
-          path: web
+          path: site
       - id: deploy
         uses: actions/deploy-pages@v4

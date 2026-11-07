@@ -17,17 +17,33 @@ from reporter import ReportGenerator
 
 DATA = os.environ.setdefault("FENORUBUS_DATA", "/data")
 _dbs: dict[str, tuple[Database, set]] = {}
+_crop = "frambuesa"
+
+
+def use_crop(module: str) -> str:
+    """Cultivo de los informes (AeonCrop Web): «PhenoBlue» -> arándano (su escala BBCH)."""
+    global _crop
+    import crops
+    _crop = next((c.id for c in crops.CROPS.values() if c.app == module), "frambuesa")
+    crops._current = _crop          # nombre del módulo en los informes (sin cambiar carpetas)
+    ph.set_crop(_crop)
+    return _crop
+
+
+def _key(code: str) -> str:
+    return code if _crop == "frambuesa" else f"{_crop}-{code}"
 
 
 def _db(code: str, workspace: dict) -> tuple[Database, set]:
-    if code not in _dbs:
-        db = Database(os.path.join(DATA, f"{code}.sqlite3"), seed=False, code=code, workspace=workspace)
+    key = _key(code)
+    if key not in _dbs:
+        db = Database(os.path.join(DATA, f"{key}.sqlite3"), seed=False, code=code, workspace=workspace)
         for c, label, desc, kw in ph.BBCH_SCALE:          # escala BBCH, sin variedades de ejemplo
             db.upsert_bbch(c, label, desc, kw, source="base")
         db.execute("INSERT OR REPLACE INTO meta(key, value) VALUES ('seeded', '1')")
         db.refresh_bbch_scale()
-        _dbs[code] = (db, set())
-    return _dbs[code]
+        _dbs[key] = (db, set())
+    return _dbs[key]
 
 
 def load(code: str, workspace_json: str, bundles_json: str) -> int:
@@ -67,7 +83,7 @@ def _week_number(db, start: str) -> int:
 
 def photos(code: str, kind: str, arg: str, season: int) -> str:
     """Rutas de fotos (relativas a la carpeta de datos) que usa el informe: se bajan antes."""
-    db, _ = _dbs[code]
+    db, _ = _dbs[_key(code)]
     q = ("SELECT p.path FROM photos p JOIN observations o ON o.id = p.observation_id "
          "JOIN sampling_weeks w ON w.id = o.week_id WHERE p.is_primary = 1 AND w.season = ?")
     params: list = [season]
@@ -99,10 +115,11 @@ def photos(code: str, kind: str, arg: str, season: int) -> str:
     return json.dumps([os.path.relpath(p, DATA) if os.path.isabs(p) else p for p in paths if p])
 
 
-def report(code: str, kind: str, arg: str, season: int) -> str:
-    """Genera el PDF y devuelve su ruta."""
-    db, _ = _dbs[code]
+def report(code: str, kind: str, arg: str, season: int, plain: bool = False) -> str:
+    """Genera el PDF y devuelve su ruta. plain: PDF simple (sin logo ni marca)."""
+    db, _ = _dbs[_key(code)]
     r = ReportGenerator(db, os.path.join(DATA, "reports"))
+    r.plain_pdf = bool(plain)
     if kind == "weekly":
         res = r.weekly(_week_id(db, arg), "pdf")
     elif kind == "month":

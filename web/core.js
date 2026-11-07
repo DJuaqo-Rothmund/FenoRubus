@@ -80,8 +80,12 @@ export function macroOf(code) {
 }
 
 // ------------------------------------------------------------------ variedades
-export function isUnit(v) {
-  return !!((v.cultivar || "").trim() && (v.sector || v.irrigation) && !v.treatment);
+export function isUnit(v) {              // = phenology.is_unit (la T0 sí es una parcela)
+  return !!((v.cultivar || "").trim() && (v.sector || v.irrigation) && (v.treatment == null || v.treatment < 0) && !v.pheno_unit);
+}
+// ¿Parcela TxRy de un ensayo (también T0)? (= Database.is_parcel; no los puntos de fenología)
+export function isParcel(v) {
+  return v != null && v.treatment != null && Number(v.treatment) >= 0 && !v.pheno_unit;
 }
 export function unitMain(v) {
   if (!isUnit(v)) return v.name || "";
@@ -153,9 +157,84 @@ export function newUid() {
   return Array.from(a, (b) => b.toString(16).padStart(2, "0")).join("");
 }
 
+// Variedades, sectores o parcelas (= Database.list_varieties: sin los puntos de la
+// fenología unificada, que son solo para la fenología).
 export function varieties(state) {
-  return rows(state, "varieties").filter((v) => v.active !== 0)
+  return rows(state, "varieties").filter((v) => v.active !== 0 && !v.pheno_unit)
     .sort((a, b) => (a.sort_order || 0) - (b.sort_order || 0) || (a.name || "").localeCompare(b.name || "", "es"));
+}
+
+// ------------------------------------------------------------------ fenología unificada
+// (= Database.unified_pheno / pheno_config / pheno_units / sync_pheno_units) La fenología de
+// un ensayo de tratamientos se registra en PUNTOS propios: uno para todo el ensayo, varios
+// comunes («Caña gruesa», «Caña media»…) o esos mismos en cada tratamiento. Las parcelas
+// T×R siguen para las mediciones.
+export const UNIT_NAME = "Fenología del ensayo";
+export function isTrial(state) {
+  return Number(setting(state, "trial_treatments", 0)) > 0 || rows(state, "varieties").some(isParcel);
+}
+export function unified(state) {
+  return isTrial(state) && !!setting(state, "trial_unified", false);
+}
+export function phenoConfig(state) {
+  const scope = setting(state, "trial_unit_scope", "trial");
+  let names = setting(state, "trial_unit_names", null);
+  names = (Array.isArray(names) ? names : [""]).map((n) => String(n ?? "").trim());
+  return { scope: scope === "treatment" ? "treatment" : "trial", names: names.length ? names : [""] };
+}
+export function trialNums(state) {       // [0 … n-1] con T0, si no [1 … n] (= Database.trial_nums)
+  const nt = Number(setting(state, "trial_treatments", 0)) || 0;
+  const first = setting(state, "trial_t0", false) ? 0 : 1;
+  return Array.from({ length: nt }, (_, i) => first + i);
+}
+export function phenoUnitName(scope, names, t, i) {   // = Database._unit_name
+  const label = names[i - 1] || (names.length > 1 ? `Punto ${i}` : "");
+  if (scope === "trial") return label ? `Ensayo · ${label}` : UNIT_NAME;
+  return label ? `T${t} · ${label}` : `T${t} · Fenología`;
+}
+// Lo que se registra en el muestreo y muestran la matriz y la ficha: los puntos de la
+// fenología unificada o cada variedad/sector/parcela.
+export function phenoUnits(state) {
+  if (!unified(state)) return varieties(state);
+  return rows(state, "varieties").filter((v) => v.active !== 0 && v.pheno_unit)
+    .sort((a, b) => (a.sort_order || 0) - (b.sort_order || 0) || (a.name || "").localeCompare(b.name || "", "es"));
+}
+// Activa (o quita) la fenología unificada y crea, renombra o archiva sus puntos (nada se
+// borra). Devuelve {changes, settings}.
+export function phenoUnitChanges(state, on, scope = "trial", names = [""]) {
+  const ts = nowTs();
+  names = (names || []).map((n) => String(n ?? "").trim()).slice(0, MAX_REPS);
+  if (!names.length) names = [""];
+  scope = scope === "treatment" ? "treatment" : "trial";
+  const settings = { trial_unified: JSON.stringify(!!on), trial_unit_scope: JSON.stringify(scope),
+    trial_unit_names: JSON.stringify(names) };
+  const want = new Map();
+  if (on) {
+    const groups = scope === "trial" ? [null] : trialNums(state);
+    for (const t of groups) for (let i = 1; i <= names.length; i++) want.set(`${t}|${i}`, [t, i, phenoUnitName(scope, names, t, i)]);
+  }
+  const all = rows(state, "varieties");
+  const have = new Map(all.filter((v) => v.pheno_unit).map((v) => [`${v.treatment ?? null}|${v.rep}`, v]));
+  const changes = [];
+  for (const [key, [t, i, name0]] of want) {
+    const sort = (t === null ? -100 : t * 100 - 50) + i;
+    const cur = have.get(key) || all.find((v) => v.pheno_unit && sameName(v.name, name0));
+    let name = name0;
+    if (!cur && all.some((v) => !v.pheno_unit && sameName(v.name, name0))) name = `${name0} (fenología)`;
+    const base = cur ? (({ uid: _u, ...o }) => o)(cur)
+      : { code: "ENS", notes: "", sector: null, irrigation: null, cultivar: null, plant_year: null, created_at: ts };
+    const data = { ...base, name, treatment: t, rep: i, active: 1, sort_order: sort, pheno_unit: 1, updated_at: ts };
+    if (cur && cur.name === data.name && cur.active !== 0 && cur.treatment === data.treatment && Number(cur.rep) === i
+      && Number(cur.sort_order) === sort) continue;
+    changes.push({ entity: "varieties", uid: cur?.uid || newUid(), ts, deleted: 0, data });
+  }
+  for (const [key, v] of have) {
+    if (!want.has(key) && v.active !== 0) {
+      const { uid, ...o } = v;
+      changes.push({ entity: "varieties", uid, ts, deleted: 0, data: { ...o, active: 0, updated_at: ts } });
+    }
+  }
+  return { changes, settings };
 }
 // ------------------------------------------------------------------ muestreo extra
 // Segundo muestreo de una semana (= Database.add_extra_week): «Semana 42.5». Se identifica
@@ -358,7 +437,7 @@ export function seasons(state) {
 
 // Matriz: filas por variedad con su código BBCH en cada semana + precocidad e hitos.
 export function matrix(state, weeks) {
-  const vs = varieties(state);
+  const vs = phenoUnits(state);
   const obsBy = new Map(rows(state, "observations").map((o) => [`${o.variety_id}|${o.week_id}`, o]));
   const heat = vs.map((v) => ({ variety: v,
     cells: weeks.map((w) => { const o = obsBy.get(`${v.uid}|${w}`); return { week: w, code: o ? o.bbch_code ?? null : null, obs: o || null }; }) }));
@@ -547,36 +626,45 @@ export function unitChange(state, v, { cultivar, code = "", sector = null, irrig
 // Ensayo de tratamientos × repeticiones (= Database.setup_trial): parcelas T1R1…TnRm; las que
 // sobran se archivan (sus registros quedan) y reaparecen al volver a aumentar.
 export const MAX_TREATMENTS = 30, MAX_REPS = 12;
-export function trialSetup(state, nt, nr) {
+export function trialSetup(state, nt, nr, t0 = null) {
   nt = Number(nt); nr = Number(nr);
   if (!(nt >= 1 && nt <= MAX_TREATMENTS) || !(nr >= 1 && nr <= MAX_REPS)) {
     throw new Error(`Tratamientos: 1 a ${MAX_TREATMENTS} · repeticiones: 1 a ${MAX_REPS}.`);
   }
+  t0 = t0 === null ? !!setting(state, "trial_t0", false) : !!t0;
+  const first = t0 ? 0 : 1, last = t0 ? nt - 1 : nt;
   const ts = nowTs();
   const changes = [];
   const out = { added: 0, restored: 0, archived: 0 };
-  const all = allVarieties(state);
+  const all = allVarieties(state).filter((x) => !x.pheno_unit);
   const tre = new Map(rows(state, "treatments").map((t) => [Number(t.num), t]));
-  for (let t = 1; t <= nt; t++) {
+  for (let t = first; t <= last; t++) {
     if (!tre.has(t)) changes.push({ entity: "treatments", uid: `T${t}`, ts, deleted: 0, data: { num: t, name: "", description: "", cultivar: null } });
     for (let r = 1; r <= nr; r++) {
       const name = `T${t}R${r}`;
-      const cur = all.find((x) => Number(x.treatment) === t && Number(x.rep) === r) || all.find((x) => sameName(x.name, name));
+      const cur = all.find((x) => x.treatment != null && Number(x.treatment) === t && Number(x.rep) === r) || all.find((x) => sameName(x.name, name));
       if (!cur) out.added++; else if (cur.active === 0) out.restored++;
       if (cur && cur.active !== 0 && Number(cur.treatment) === t && Number(cur.rep) === r && Number(cur.sort_order) === t * 100 + r) continue;
-      const base = cur ? (({ uid: _u, ...o }) => o)(cur) : { name, code: name, sector: null, irrigation: null, notes: "", created_at: ts, cultivar: null, plant_year: null };
+      const base = cur ? (({ uid: _u, ...o }) => o)(cur) : { name, code: name, sector: null, irrigation: null, notes: "", created_at: ts, cultivar: null, plant_year: null, pheno_unit: 0 };
       changes.push({ entity: "varieties", uid: cur?.uid || newUid(), ts, deleted: 0,
         data: { ...base, treatment: t, rep: r, active: 1, sort_order: t * 100 + r, updated_at: ts } });
     }
   }
   for (const v of all) {
-    if (v.active !== 0 && v.treatment != null && (Number(v.treatment) > nt || Number(v.rep) > nr)) {
+    if (v.active !== 0 && isParcel(v) && (Number(v.treatment) < first || Number(v.treatment) > last || Number(v.rep) > nr)) {
       const { uid, ...o } = v;
       changes.push({ entity: "varieties", uid, ts, deleted: 0, data: { ...o, active: 0, updated_at: ts } });
       out.archived++;
     }
   }
-  return { ...out, changes, settings: { trial_treatments: JSON.stringify(nt), trial_reps: JSON.stringify(nr) } };
+  const settings = { trial_treatments: JSON.stringify(nt), trial_reps: JSON.stringify(nr), trial_t0: JSON.stringify(t0) };
+  // Puntos de fenología por tratamiento: siguen a los tratamientos.
+  if (unified(state) && phenoConfig(state).scope === "treatment") {
+    const tmp = { ...state, settings: { ...state.settings, ...settings } };
+    const cfg = phenoConfig(state);
+    changes.push(...phenoUnitChanges(tmp, true, cfg.scope, cfg.names).changes);
+  }
+  return { ...out, changes, settings };
 }
 export function treatmentChange(state, num, { name = "", description = "", cultivar = null }) {
   return { entity: "treatments", uid: `T${num}`, ts: nowTs(), deleted: 0,
@@ -589,7 +677,7 @@ export function firstWeekSettings(season, start) {
 
 // ------------------------------------------------------------------ tratamientos
 export function treatments(state) {
-  const vs = varieties(state).filter((v) => v.treatment);
+  const vs = varieties(state).filter(isParcel);
   const meta = new Map(rows(state, "treatments").map((t) => [Number(t.num), t]));
   const nums = [...new Set(vs.map((v) => Number(v.treatment)))].sort((a, b) => a - b);
   return nums.map((num) => {
@@ -660,4 +748,102 @@ export function annotatedName(name, taken) {
   let n = m[2] ? Number(m[2]) + 1 : 1;
   while (taken.has(`${stem}-a${n}${ext}`)) n++;
   return `${stem}-a${n}${ext}`;
+}
+
+// ------------------------------------------------------------------ mover datos de semana
+// (= Database.move_week_data) Pasa los registros (estado, notas, fotos), las mediciones y las
+// adjuntas de la semana `src` a `dst`. En el destino: si la variedad no tiene registro o lo
+// tiene vacío, el registro se mueve tal cual; si tiene datos, se juntan (las fotos pasan, el
+// estado del destino se conserva y el del registro movido queda en las notas). Las fotos
+// cambian la fecha de su nombre (aaaammdd de la semana) solo si `canRename(nombre)`: en la web,
+// las que se encontraron en Drive (se renombran y mueven allá antes de enviar los cambios).
+export function weekSummary(state, weekStart) {
+  const obs = rows(state, "observations").filter((o) => o.week_id === weekStart && hasData(state, o));
+  const ids = new Set(obs.map((o) => o.uid));
+  return { records: obs.length, photos: rows(state, "photos").filter((p) => ids.has(p.observation_id)).length,
+    entries: rows(state, "measure_entries").filter((e) => e.week_id === weekStart).length,
+    attachments: rows(state, "variety_attachments").filter((a) => a.week_id === weekStart).length };
+}
+export function renamedPath(path, src, dst, taken) {
+  const b = (path || "").split(/[\\/]/).pop();
+  const d1 = src.slice(0, 10).replaceAll("-", ""), d2 = dst.slice(0, 10).replaceAll("-", "");
+  if (!b.startsWith(d1)) return null;
+  const dir = path.slice(0, path.length - b.length);
+  const dot = b.lastIndexOf(".");
+  const stem = d2 + b.slice(d1.length, dot > 0 ? dot : undefined), ext = dot > 0 ? b.slice(dot) : "";
+  let name = stem + ext;
+  for (let k = 2; taken.has(name); k++) name = `${stem.replace(/-\d+$/, "")}-${k}${ext}`;
+  taken.add(name);
+  return { from: b, to: name, path: dir + name };
+}
+export function weekMoveChanges(state, src, dst, canRename = () => true) {
+  if (src === dst) throw new Error("Elija otra semana.");
+  const ts = nowTs();
+  const changes = [...weekChange(state, dst)];
+  const renames = [];
+  const out = { records: 0, merged: 0, photos: 0, entries: 0, attachments: 0 };
+  const taken = new Set([...rows(state, "photos"), ...rows(state, "measure_entries"), ...rows(state, "variety_attachments")]
+    .map((r) => (r.path || "").split(/[\\/]/).pop()).filter(Boolean));
+  const allPhotos = rows(state, "photos");
+  const vName = new Map(rows(state, "varieties").map((v) => [v.uid, v]));
+  const movePath = (r, kind, extra = {}) => {
+    const base = (r.path || "").split(/[\\/]/).pop();
+    if (!base || !canRename(base)) return r.path;
+    const rn = renamedPath(r.path, src, dst, taken);
+    if (!rn) return r.path;
+    renames.push({ ...rn, kind, ...extra });
+    return rn.path;
+  };
+  for (const o of rows(state, "observations").filter((x) => x.week_id === src)) {
+    const photos = allPhotos.filter((p) => p.observation_id === o.uid);
+    const v = vName.get(o.variety_id);
+    const d = observationFor(state, o.variety_id, dst);
+    const { uid, ...od } = o;
+    if (!d || !hasData(state, d)) {
+      if (d) changes.push({ entity: "observations", uid: d.uid, ts, deleted: 1 });
+      changes.push({ entity: "observations", uid, ts, deleted: 0, data: { ...od, week_id: dst, updated_at: ts } });
+      for (const p of photos) {
+        const { uid: pu, ...pd } = p;
+        changes.push({ entity: "photos", uid: pu, ts, deleted: 0, data: { ...pd, path: movePath(p, "photo", { variety: v }) } });
+        out.photos++;
+      }
+      if (hasData(state, o)) out.records++;
+      continue;
+    }
+    // Juntar con el registro que ya tiene datos en el destino.
+    const dPhotos = allPhotos.filter((p) => p.observation_id === d.uid);
+    for (const p of photos) {
+      const { uid: pu, ...pd } = p;
+      const primary = pd.is_primary && !dPhotos.some((x) => x.kind === pd.kind && x.is_primary) ? 1 : 0;
+      if (primary) dPhotos.push({ ...pd, is_primary: 1 });
+      changes.push({ entity: "photos", uid: pu, ts, deleted: 0,
+        data: { ...pd, observation_id: d.uid, is_primary: primary, path: movePath(p, "photo", { variety: v }) } });
+      out.photos++;
+    }
+    const { uid: du, ...dd } = d;
+    const notes = [dd.notes, od.notes].map((n) => (n || "").trim()).filter(Boolean);
+    if (od.bbch_code != null && dd.bbch_code != null && Number(od.bbch_code) !== Number(dd.bbch_code)) {
+      notes.push(`Estado del registro movido: BBCH ${codeStr(od.bbch_code)}`);
+    }
+    const data = { ...dd, notes: notes.join(" · "), updated_at: ts };
+    if (dd.bbch_code == null && od.bbch_code != null) Object.assign(data, { bbch_code: od.bbch_code, bbch_label: od.bbch_label, observed_at: od.observed_at });
+    for (const k of ["latitude", "longitude", "gps_accuracy", "gps_source"]) if (data[k] == null && od[k] != null) data[k] = od[k];
+    changes.push({ entity: "observations", uid: du, ts, deleted: 0, data });
+    changes.push({ entity: "observations", uid, ts, deleted: 1 });
+    out.merged++;
+  }
+  const measures = new Map(rows(state, "measures").map((m) => [m.uid, m]));
+  for (const e of rows(state, "measure_entries").filter((x) => x.week_id === src)) {
+    const { uid, ...ed } = e;
+    const path = e.path ? movePath(e, "entry", { variety: vName.get(e.variety_id), measure: measures.get(e.measure_id)?.name || "Otras" }) : e.path;
+    changes.push({ entity: "measure_entries", uid, ts, deleted: 0, data: { ...ed, week_id: dst, path } });
+    out.entries++;
+  }
+  for (const a of rows(state, "variety_attachments").filter((x) => x.week_id === src)) {
+    const { uid, ...ad } = a;
+    const path = a.path ? movePath(a, "attachment", { variety: vName.get(a.variety_id) }) : a.path;
+    changes.push({ entity: "variety_attachments", uid, ts, deleted: 0, data: { ...ad, week_id: dst, path } });
+    out.attachments++;
+  }
+  return { ...out, changes, renames };
 }

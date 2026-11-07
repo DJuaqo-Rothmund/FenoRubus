@@ -1,5 +1,6 @@
-// PhenoRubus Web: inicio de sesión con Google, lectura/escritura de los paquetes de
-// sincronización en Drive (los mismos de la app) y pantallas de muestreo semanal.
+// AeonCrop Web: inicio de sesión con Google, lectura/escritura de los paquetes de
+// sincronización en Drive (los mismos de la app AeonCrop) y pantallas de muestreo semanal,
+// para cada cultivo (PhenoRubus, PhenoBlue, PhenoCran) y el visor de AeonScout.
 import * as C from "./core.js";
 import * as NB from "./notebook.js";
 import * as TR from "./train.js";
@@ -8,13 +9,27 @@ import { makeReports } from "./reports.js";
 import { warm as warmPdf, makePdf } from "./pdf.js";
 import { weekCompleted } from "./celebrate.js";
 import { photoHeat, pickPoint, sectorMap } from "./maps.js";
+import * as SC from "./scout.js";
 
 const SCOPE = "https://www.googleapis.com/auth/drive.file";
 const API = "https://www.googleapis.com/drive/v3/files";
 const UPLOAD = "https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=id";
-// Carpeta del módulo en Drive: «App Fenología/PhenoRubus» (como la app). La antigua
-// «PhenoRubus · Imágenes de Fenología» se mueve ahí la primera vez (con todo lo que tenía).
-const TOP = "App Fenología", MODULE = "PhenoRubus", LEGACY_ROOT = "PhenoRubus · Imágenes de Fenología";
+// Carpeta del módulo en Drive: «AeonCrop/<módulo>» (como la app AeonCrop). Se encuentra
+// también si sigue como «App Fenología/<módulo>» (nombre anterior) o, para PhenoRubus, la
+// antigua «PhenoRubus · Imágenes de Fenología».
+const TOP = "AeonCrop", TOP_OLD = "App Fenología", MODULE = "PhenoRubus", LEGACY_ROOT = "PhenoRubus · Imágenes de Fenología";
+// Cultivos (= crops.py): módulo, nombre, fruta y su color.
+export const CROPS = [
+  { mod: "PhenoRubus", name: "Frambuesa", logo: "crops/phenorubus.png", color: "#B5174B" },
+  { mod: "PhenoBlue", name: "Arándano", logo: "crops/phenoblue.png", color: "#3F51B5" },
+  { mod: "PhenoCran", name: "Cranberry", logo: "crops/phenocran.png", color: "#A3122B" },
+];
+// Cultivo abierto (cambia en la pantalla de cultivos). Lo guardado en el navegador (ensayos,
+// paquetes, fotos, pendientes) va por cultivo: PhenoRubus con las claves de siempre.
+let CROP = MODULE;
+const K = (key) => (CROP === MODULE ? key : `${CROP}:${key}`);
+// IA+ entrena cada cultivo por separado: el módulo elegido en su página (train.js).
+let trainMod = MODULE;
 const SYNC = "Sincronización";
 const FOLDER = "application/vnd.google-apps.folder";
 const PROFILES = { id: "I+D", predio: "Predio" };
@@ -30,8 +45,8 @@ const S = {
 
 // ================================================================== Google
 function device() {
-  let d = localStorage.getItem("pr_device");
-  if (!d) { d = "web" + C.newUid().slice(0, 9); localStorage.setItem("pr_device", d); }
+  let d = localStorage.getItem("ac_device");
+  if (!d) { d = "web" + C.newUid().slice(0, 9); localStorage.setItem("ac_device", d); }
   return d;
 }
 
@@ -42,7 +57,7 @@ const store = {
   set(k, v) { try { v === null ? localStorage.removeItem(k) : localStorage.setItem(k, v); } catch { /* sin almacenamiento */ } },
 };
 function savedToken() {
-  try { const o = JSON.parse(store.get("pr_token") || "null"); return o && o.exp > Date.now() ? o.t : null; } catch { return null; }
+  try { const o = JSON.parse(store.get("ac_token") || "null"); return o && o.exp > Date.now() ? o.t : null; } catch { return null; }
 }
 
 function signIn(prompt = "") {
@@ -54,12 +69,12 @@ function signIn(prompt = "") {
     S.tokenClient.callback = (r) => {
       if (r.error) return reject(new Error(r.error_description || r.error));
       S.token = r.access_token;
-      store.set("pr_token", JSON.stringify({ t: r.access_token, exp: Date.now() + (Number(r.expires_in || 3600) - 120) * 1000 }));
+      store.set("ac_token", JSON.stringify({ t: r.access_token, exp: Date.now() + (Number(r.expires_in || 3600) - 120) * 1000 }));
       $("relogin").hidden = true;
       resolve(S.token);
     };
     S.tokenClient.error_callback = (e) => reject(new Error(e.message || e.type || "inicio de sesión cancelado"));
-    const hint = store.get("pr_email");
+    const hint = store.get("ac_email");
     S.tokenClient.requestAccessToken({ prompt, ...(hint ? { login_hint: hint } : {}) });
   });
 }
@@ -67,12 +82,12 @@ function signIn(prompt = "") {
 async function rememberUser() {
   try {
     const r = await api("GET", "https://www.googleapis.com/drive/v3/about?fields=user(emailAddress)");
-    if (r.user?.emailAddress) store.set("pr_email", r.user.emailAddress);
+    if (r.user?.emailAddress) store.set("ac_email", r.user.emailAddress);
   } catch { /* no es indispensable */ }
 }
 
 function loginLabel() {
-  const hint = store.get("pr_email");
+  const hint = store.get("ac_email");
   $("signin").textContent = hint ? `Continuar como ${hint}` : "Iniciar sesión con Google";
 }
 
@@ -82,7 +97,7 @@ async function api(method, url, body, ctype, raw = false) {
     if (ctype) headers["Content-Type"] = ctype;
     const r = await fetch(url, { method, headers, body });
     if (r.status === 401) {                 // venció la sesión: un clic en «Reconectar»
-      store.set("pr_token", null);
+      store.set("ac_token", null);
       if (!window.__PR_TOKEN__) $("relogin").hidden = false;
       throw new Error("La sesión de Google venció: pulse «Reconectar».");
     }
@@ -121,25 +136,24 @@ async function folder(name, parent, create = true) {
   return id;
 }
 
-async function rootFolder(create = true) {
-  if (S.folders.has("module")) return S.folders.get("module");
-  const top = await folder(TOP, null, create);
-  let id = top && await folder(MODULE, top, false);
-  if (!id) {
-    const old = (await list(`name='${q(LEGACY_ROOT)}' and mimeType='${FOLDER}' and trashed=false`, "files(id,parents)"))[0];
-    if (old && top) {
-      const qs = new URLSearchParams({ addParents: top, removeParents: (old.parents || []).join(","), fields: "id" });
-      await api("PATCH", `${API}/${old.id}?${qs}`, JSON.stringify({ name: MODULE }), "application/json");
-      id = old.id;
-    } else if (old) {
-      id = old.id;          // solo lectura: se usa donde está
-    } else if (top) {
-      id = await folder(MODULE, top, create);
-    }
+// Carpeta de un módulo (cultivo) en Drive, esté donde esté: «AeonCrop/<módulo>»,
+// «App Fenología/<módulo>» o, para PhenoRubus, la de siempre. Si no existe, se crea en
+// «AeonCrop». No mueve nada.
+async function moduleRoot(mod = CROP, create = true) {
+  const key = `module/${mod}`;
+  if (S.folders.has(key)) return S.folders.get(key);
+  let id = null;
+  for (const top of [TOP, TOP_OLD]) {
+    const t = await folder(top, null, false);
+    id = t && await folder(mod, t, false);
+    if (id) break;
   }
-  if (id) S.folders.set("module", id);
+  if (!id && mod === MODULE) id = await folder(LEGACY_ROOT, null, false);
+  if (!id && create) id = await folder(mod, await folder(TOP, null, true), true);
+  if (id) S.folders.set(key, id);
   return id;
 }
+const rootFolder = (create = true) => moduleRoot(CROP, create);
 
 async function upload(parent, name, blob, mime) {
   const b = "pr" + C.newUid();
@@ -162,13 +176,14 @@ async function updateFile(id, blob, mime) {
 // marcas.json», aparte de los registros. Los archivos por ensayo de la primera versión
 // (<código>.json) se suman al leer.
 const TRAIN_DIR = "Entrenamiento IA", TRAIN_FILE = "marcas.json";
+const trainKey = () => (trainMod === MODULE ? "train/all" : `train/${trainMod}`);
 async function trainDir(create) {
-  const root = await rootFolder(create);
+  const root = await moduleRoot(trainMod, create);
   return root && await folder(TRAIN_DIR, root, create);
 }
 async function loadLabels() {
   const dir = await trainDir(false);
-  if (!dir) return (await cacheGet("train/all")) || null;
+  if (!dir) return (await cacheGet(trainKey())) || null;
   const files = (await list(`'${dir}' in parents and trashed=false`, "files(id,name)")).filter((f) => f.name.endsWith(".json"));
   const main = files.find((f) => f.name === TRAIN_FILE);
   const out = main ? await (await download(main.id)).json() : { version: 1, photos: {} };
@@ -178,7 +193,7 @@ async function loadLabels() {
     const old = await (await download(f.id)).json().catch(() => null);
     for (const [k, v] of Object.entries(old?.photos || {})) if (!out.photos[k] || (v.ts || "") > (out.photos[k].ts || "")) out.photos[k] = v;
   }
-  cachePut("train/all", out);
+  cachePut(trainKey(), out);
   return out;
 }
 // Antes de escribir se suma lo que otro equipo (teléfono o PC) guardó entretanto: por foto
@@ -192,7 +207,7 @@ async function saveLabels(data) {
       if (!data.photos[k] || (v.ts || "") > (data.photos[k].ts || "")) data.photos[k] = v;
     }
   }
-  cachePut("train/all", data);
+  cachePut(trainKey(), data);
   const blob = new Blob([JSON.stringify(data)], { type: "application/json" });
   if (f[0]) await updateFile(f[0].id, blob, "application/json");
   else await upload(dir, TRAIN_FILE, blob, "application/json");
@@ -203,7 +218,7 @@ async function saveLabels(data) {
 // clave de cada foto en marcas.json es «ext/<subcarpetas>/<nombre>».
 const EXTRA_DIR = "IA+ Conocimiento ampliado";
 async function extraDir(create) {
-  const root = await rootFolder(create);
+  const root = await moduleRoot(trainMod, create);
   return root && await folder(EXTRA_DIR, root, create);
 }
 async function extraList() {
@@ -222,11 +237,12 @@ async function extraList() {
   return out.sort((a, b) => a.folder.localeCompare(b.folder) || a.name.localeCompare(b.name));
 }
 async function extraUrl(p) {
-  if (S.photoUrls.has(p.key)) return S.photoUrls.get(p.key);
-  let blob = await cacheGet(p.key, "photos");
-  if (!blob) { blob = await (await download(p.id)).blob(); cachePut(p.key, blob, "photos"); }
+  const ck = trainMod === MODULE ? p.key : `${trainMod}:${p.key}`;   // «ext/…» se repite entre cultivos
+  if (S.photoUrls.has(ck)) return S.photoUrls.get(ck);
+  let blob = await cacheGet(ck, "photos");
+  if (!blob) { blob = await (await download(p.id)).blob(); cachePut(ck, blob, "photos"); }
   const url = URL.createObjectURL(blob);
-  S.photoUrls.set(p.key, url);
+  S.photoUrls.set(ck, url);
   return url;
 }
 // Sube fotos (o carpetas enteras, con sus subcarpetas) a la carpeta de fotos extra. Las que
@@ -283,6 +299,7 @@ async function resizeTo(file, side, quality) {
 // Registros de TODOS los ensayos y predios (para entrenar con las fotos de todos): lo
 // guardado en el navegador y, si hay conexión, lo nuevo de Drive.
 async function allStates(progress = () => {}) {
+  if (trainMod !== CROP) return moduleStates(trainMod, progress);
   const out = [];
   let i = 0;
   for (const ws of S.workspaces) {
@@ -312,6 +329,34 @@ async function allStates(progress = () => {}) {
   return out;
 }
 
+// Registros de otro cultivo (para IA+): sus paquetes de sincronización.
+async function moduleStates(mod, progress) {
+  const out = [];
+  const root = await moduleRoot(mod, false);
+  const sync = root && await folder(SYNC, root, false);
+  if (!sync) return out;
+  const items = await list(`'${sync}' in parents and trashed=false`);
+  const dirs = items.filter((f) => f.mimeType === FOLDER);
+  let i = 0;
+  for (const d of dirs) {
+    progress(`Leyendo ${mod} · ${d.name} (${++i}/${dirs.length})…`);
+    const ws = { code: d.name, name: d.name, profile: "" };
+    const st = C.emptyState();
+    const files = (await list(`'${d.id}' in parents and trashed=false`))
+      .filter((f) => f.name.endsWith(".json")).sort((a, b) => a.name.localeCompare(b.name));
+    const got = new Array(files.length);
+    await pool(files, 8, async (f, k) => {
+      const key = `${mod}:${d.name}/${f.name}`;
+      let b = await cacheGet(key);
+      if (!b) { b = await (await download(f.id)).json(); cachePut(key, b); }
+      got[k] = b;
+    });
+    files.forEach((f, k) => C.applyBundle(st, f.name, got[k]));
+    out.push({ ws, state: st });
+  }
+  return out;
+}
+
 async function download(id) {
   return api("GET", `${API}/${id}?alt=media`, undefined, undefined, true);
 }
@@ -320,7 +365,7 @@ async function download(id) {
 // «bundles»: paquetes ya leídos; «photos»: fotos ya bajadas (no se vuelven a pedir a Drive).
 const idb = new Promise((resolve) => {
   try {
-    const r = indexedDB.open("phenorubus", 2);
+    const r = indexedDB.open("aeoncrop", 2);
     r.onupgradeneeded = () => {
       for (const st of ["bundles", "photos"]) if (!r.result.objectStoreNames.contains(st)) r.result.createObjectStore(st);
     };
@@ -332,14 +377,14 @@ async function cacheGet(key, store = "bundles") {
   const db = await idb; if (!db) return null;
   return new Promise((res) => {
     try {
-      const r = db.transaction(store).objectStore(store).get(key);
+      const r = db.transaction(store).objectStore(store).get(K(key));
       r.onsuccess = () => res(r.result || null); r.onerror = () => res(null);
     } catch { res(null); }
   });
 }
 async function cachePut(key, val, store = "bundles") {
   const db = await idb; if (!db) return;
-  try { db.transaction(store, "readwrite").objectStore(store).put(val, key); } catch { /* caché llena: se ignora */ }
+  try { db.transaction(store, "readwrite").objectStore(store).put(val, K(key)); } catch { /* caché llena: se ignora */ }
 }
 
 async function pool(items, n, fn) {        // fn(item, i) con n en paralelo
@@ -370,8 +415,8 @@ async function loadWorkspaces() {
 // Abre el ensayo al instante con lo guardado en el navegador; Drive se consulta después.
 async function openCached(code) {
   S.ws = S.workspaces.find((w) => w.code === code) || S.workspaces[0];
-  store.set("pr_ws", S.ws.code);
-  store.set(`pr_ws_${profileOf(S.ws)}`, S.ws.code);
+  store.set(K("ac_ws"), S.ws.code);
+  store.set(K(`ac_ws_${profileOf(S.ws)}`), S.ws.code);
   fillWorkspaces();
   S.state = C.emptyState();
   S.bundles = [];
@@ -418,8 +463,8 @@ async function pull() {
   return n;
 }
 
-function pending() { return JSON.parse(localStorage.getItem(`pr_pending_${S.ws.code}`) || "[]"); }
-function setPending(list_) { localStorage.setItem(`pr_pending_${S.ws.code}`, JSON.stringify(list_)); }
+function pending() { return JSON.parse(localStorage.getItem(K(`ac_pending_${S.ws.code}`)) || "[]"); }
+function setPending(list_) { localStorage.setItem(K(`ac_pending_${S.ws.code}`), JSON.stringify(list_)); }
 
 async function send(changes, settings = {}) {
   const name = `${C.stamp()}-${S.device}.json`;
@@ -514,6 +559,12 @@ async function resize(file) {
   return new Promise((res) => cv.toBlob(res, "image/jpeg", 0.78));
 }
 
+// En I+D, la subcarpeta de la variedad, parcela o punto de fenología dentro de la semana
+// (= DriveBackup._unit_folder); en los predios, ninguna.
+function unitFolder(v) {
+  return S.ws?.profile === "id" && v ? (v.name || "").replace(/\//g, "-").trim() : "";
+}
+
 async function weekFolderId(week = S.week, sub = "") {
   const prefix = `${PROFILES[S.ws.profile] || "Otros"}/${(S.ws.name || S.ws.code).replace(/\//g, "-").trim()}`;
   let parent = await rootFolder(true);
@@ -540,7 +591,7 @@ async function addPhotos(v, files, kind) {
     obs = C.observationFor(S.state, v.uid, S.week);
   }
   const taken = new Set(C.rows(S.state, "photos").map((p) => base(p.path)));
-  const dir = await weekFolderId();
+  const dir = await weekFolderId(S.week, unitFolder(v));
   const season = C.seasonOf(C.parseDate(S.week));
   // Sin ubicación: la toma del GPS de la primera foto que lo traiga (como la app).
   if (obs.latitude == null || obs.longitude == null) {
@@ -649,12 +700,13 @@ function renderSampling() {
   $("skipweek").checked = skipped;
   if (skipped) $("kicker").textContent += " · NO MUESTREADA";
   $("rows").classList.toggle("faded", skipped);
-  const vs = C.varieties(S.state);
+  const vs = C.phenoUnits(S.state);
   const box = $("rows");
   box.innerHTML = "";
   let done = 0;
   const isPredio = S.ws.profile === "predio";
-  $("listlabel").textContent = (isPredio ? "SECTORES" : "VARIEDADES") + " · TOQUE PARA REGISTRAR";
+  $("listlabel").textContent = (isPredio ? "SECTORES" : C.unified(S.state) ? "FENOLOGÍA UNIFICADA" : "VARIEDADES")
+    + " · TOQUE PARA REGISTRAR";
   if (!vs.length) {
     box.innerHTML = `<p class="muted">Este ${isPredio ? "predio" : "ensayo"} aún no tiene registros en Drive. Ábralo en el celular y sincronice.</p>`;
   }
@@ -1198,24 +1250,28 @@ function renderSettings() {
     b.innerHTML = `<div><div class="place"></div><b></b><div class="tag"></div></div><span class="badge"></span>`;
     b.querySelector(".place").textContent = C.unitPlace(v);
     b.querySelector("b").textContent = C.unitMain(v);
-    b.querySelector(".tag").textContent = [v.code && `Código ${v.code}`, v.treatment && `Tratamiento ${v.treatment} · repetición ${v.rep}`,
-      v.notes].filter(Boolean).join(" · ");
-    b.querySelector(".badge").textContent = v.active === 0 ? "ARCHIVADA" : "EDITAR";
+    b.querySelector(".tag").textContent = v.pheno_unit ? "Punto de la fenología unificada (se configura abajo)"
+      : [v.code && `Código ${v.code}`, C.isParcel(v) && `Tratamiento ${v.treatment} · repetición ${v.rep}`,
+        v.notes].filter(Boolean).join(" · ");
+    b.querySelector(".badge").textContent = v.active === 0 ? "ARCHIVADA" : v.pheno_unit ? "FENOLOGÍA" : "EDITAR";
+    if (v.pheno_unit) b.disabled = true;
     b.onclick = () => openVariety(v);
     box.appendChild(b);
   }
   // Ensayo de tratamientos (solo I+D)
   $("trialcard").hidden = predio;
   if (!predio) {
-    const parcels = C.allVarieties(S.state).filter((v) => v.active !== 0 && v.treatment != null);
-    const nt = C.setting(S.state, "trial_treatments", 0) || Math.max(0, ...parcels.map((v) => Number(v.treatment)));
+    const parcels = C.allVarieties(S.state).filter((v) => v.active !== 0 && C.isParcel(v));
+    const hasT0 = !!C.setting(S.state, "trial_t0", parcels.some((v) => Number(v.treatment) === 0));
+    const nt = C.setting(S.state, "trial_treatments", 0) || new Set(parcels.map((v) => Number(v.treatment))).size;
     const nr = C.setting(S.state, "trial_reps", 0) || Math.max(0, ...parcels.map((v) => Number(v.rep)));
     if (document.activeElement !== $("tnum")) $("tnum").value = nt || "";
     if (document.activeElement !== $("trep")) $("trep").value = nr || "";
+    $("tt0").checked = hasT0;
     const tl = $("tlist");
     tl.innerHTML = "";
     const meta = new Map(C.rows(S.state, "treatments").map((t) => [Number(t.num), t]));
-    for (let t = 1; t <= nt; t++) {
+    for (let t = hasT0 ? 0 : 1; t <= (hasT0 ? nt - 1 : nt); t++) {
       const m = meta.get(t) || {};
       const row = document.createElement("div");
       row.className = "trow";
@@ -1230,6 +1286,7 @@ function renderSettings() {
       };
       tl.appendChild(row);
     }
+    renderUnified(nt > 0 || parcels.length > 0);
   }
   // Primera semana
   const season = C.seasonOf(C.parseDate(S.week));
@@ -1299,9 +1356,35 @@ async function toggleArchive() {
   } catch (e) { $("vmsg").textContent = e.message; }
 }
 
+// Fenología unificada (= unified_dialog de la app): puntos del ensayo o por tratamiento.
+function renderUnified(isTrial) {
+  $("unicard").hidden = !isTrial;
+  if (!isTrial) return;
+  const on = C.unified(S.state), cfg = C.phenoConfig(S.state);
+  if (document.activeElement?.closest?.("#unicard")) return;      // no pisar lo que se está escribiendo
+  $("uon").checked = on;
+  document.querySelectorAll("input[name=uscope]").forEach((r) => (r.checked = r.value === cfg.scope));
+  $("unames").value = cfg.names.filter(Boolean).join(", ");
+  $("uopts").classList.toggle("off", !$("uon").checked);
+  const units = C.phenoUnits(S.state);
+  $("uprev").textContent = on ? `Puntos: ${units.map((u) => u.name).join(" · ")}` : "La fenología se registra en cada parcela.";
+}
+
+async function applyUnified() {
+  const on = $("uon").checked;
+  const scope = document.querySelector("input[name=uscope]:checked")?.value || "trial";
+  const names = $("unames").value.split(/[,;\n]/).map((x) => x.trim()).filter(Boolean);
+  try {
+    const r = C.phenoUnitChanges(S.state, on, scope, names.length ? names : [""]);
+    await send(r.changes, r.settings);
+    $("umsg").textContent = on ? "Fenología unificada guardada. Las parcelas siguen para las mediciones." : "La fenología vuelve a registrarse por parcela (no se borra nada).";
+    render();
+  } catch (e) { $("umsg").textContent = e.message; }
+}
+
 async function applyTrial() {
   try {
-    const r = C.trialSetup(S.state, $("tnum").value, $("trep").value);
+    const r = C.trialSetup(S.state, $("tnum").value, $("trep").value, $("tt0").checked);
     if (r.archived && !confirm(`Se archivarán ${r.archived} parcela(s) que sobran (sus registros se conservan). ¿Continuar?`)) return;
     await send(r.changes, r.settings);
     $("tmsg").textContent = `Listo: ${r.added} parcela(s) nuevas, ${r.restored} restaurada(s), ${r.archived} archivada(s).`;
@@ -1316,6 +1399,106 @@ async function setFirstWeek() {
     status(sel.value ? `Primera semana: ${C.weekLabel(sel.value)}` : "Primera semana automática");
     render();
   } catch (e) { status(e.message); }
+}
+
+// ================================================================== mover datos de semana
+// Mantener presionado 3 s «Semana del …» (= la app): mover todo a otra semana.
+let longFired = false;
+function longPress(el, ms, fn) {
+  let timer = null;
+  const stop = () => { clearTimeout(timer); timer = null; el.classList.remove("holding"); };
+  el.addEventListener("pointerdown", () => {
+    stop();
+    el.classList.add("holding");
+    timer = setTimeout(() => { stop(); longFired = true; fn(); }, ms);
+  });
+  for (const ev of ["pointerup", "pointerleave", "pointercancel"]) el.addEventListener(ev, stop);
+  el.addEventListener("contextmenu", (e) => e.preventDefault());
+}
+
+function moveText(sum) {
+  return [sum.records && `${sum.records} registro(s)`, sum.photos && `${sum.photos} foto(s)`,
+    sum.entries && `${sum.entries} dato(s) de mediciones`, sum.attachments && `${sum.attachments} adjunta(s)`]
+    .filter(Boolean).join(", ");
+}
+
+function openMoveWeek() {
+  const sum = C.weekSummary(S.state, S.week);
+  if (!sum.records && !sum.photos && !sum.entries && !sum.attachments) {
+    status(`${C.weekTitle(S.week)} no tiene datos que mover.`);
+    return;
+  }
+  S.moveTo = null;
+  $("mvfrom").textContent = `${C.weekTitle(S.week)} · ${C.weekLabel(S.week)}: ${moveText(sum)}`;
+  $("mvto").textContent = "Elija la semana de destino.";
+  $("mvmsg").textContent = "";
+  $("mvdate").value = "";
+  $("mvgo").disabled = true;
+  document.querySelectorAll("#mvchips button").forEach((x) => x.classList.remove("on"));
+  $("movedlg").showModal();
+}
+
+function pickMoveTarget(dst) {
+  S.moveTo = dst;
+  const sum = C.weekSummary(S.state, dst);
+  const has = sum.records || sum.photos || sum.entries || sum.attachments;
+  $("mvto").textContent = `Destino: ${C.weekTitle(dst)} · ${C.weekLabel(dst)}` + (has ? ` (ya tiene ${moveText(sum)})` : " (vacía)");
+  $("mvmsg").textContent = dst === S.week ? "Es la misma semana." : has
+    ? "El destino ya tiene datos: los registros de la misma variedad se juntarán (no se pierde nada)." : "";
+  $("mvgo").disabled = dst === S.week;
+}
+
+async function doMoveWeek() {
+  const src = S.week, dst = S.moveTo;
+  if (!dst || dst === src) return;
+  const dsum = C.weekSummary(S.state, dst);
+  if ((dsum.records || dsum.photos || dsum.entries) && !confirm(`${C.weekTitle(dst)} ya tiene datos (${moveText(dsum)}).\n\n¿Está seguro? Los registros de la misma variedad se juntan; nada se sobrescribe.`)) return;
+  $("mvgo").disabled = true;
+  try {
+    // 1) Los archivos de la semana que ya están en Drive (se renombran y mueven allá).
+    const names = [...C.rows(S.state, "photos").filter((p) => C.rows(S.state, "observations").some((o) => o.uid === p.observation_id && o.week_id === src)),
+      ...C.rows(S.state, "measure_entries").filter((e) => e.week_id === src),
+      ...C.rows(S.state, "variety_attachments").filter((a) => a.week_id === src)].map((r) => base(r.path)).filter(Boolean);
+    $("mvmsg").textContent = "Buscando las fotos en Drive…";
+    const ids = new Map();
+    await Promise.all(names.map(async (n) => { const id = S.photoIds.get(n) ?? await findId(n).catch(() => null); if (id) ids.set(n, id); }));
+    const r = C.weekMoveChanges(S.state, src, dst, (n) => ids.has(n));
+    // 2) Drive: nombre nuevo y carpeta de la nueva semana (y de su variedad/parcela en I+D).
+    const failed = new Map();
+    let k = 0;
+    for (const rn of r.renames) {
+      $("mvmsg").textContent = `Moviendo en Drive ${++k}/${r.renames.length}…`;
+      try {
+        let sub = unitFolder(rn.variety);
+        if (rn.kind === "attachment") sub = [sub, "Adjuntas"].filter(Boolean).join("/");
+        if (rn.kind === "entry") sub = [sub, (rn.measure || "Otras").replace(/\//g, "-").trim()].filter(Boolean).join("/");
+        const dir = await weekFolderId(dst, sub);
+        const id = ids.get(rn.from);
+        const cur = await api("GET", `${API}/${id}?fields=parents`);
+        const qs = new URLSearchParams({ fields: "id", addParents: dir });
+        if (cur.parents?.length) qs.set("removeParents", cur.parents.join(","));
+        await api("PATCH", `${API}/${id}?${qs}`, JSON.stringify({ name: rn.to }), "application/json");
+        S.photoIds.set(rn.to, id);
+        if (S.photoUrls.has(rn.from)) S.photoUrls.set(rn.to, S.photoUrls.get(rn.from));
+      } catch (e) { failed.set(rn.to, rn.from); }
+    }
+    // Lo que no se pudo mover en Drive conserva su nombre (el orden de Drive lo corrige después).
+    if (failed.size) {
+      for (const ch of r.changes) {
+        const p = ch.data?.path, b = base(p);
+        if (p && failed.has(b)) ch.data.path = p.slice(0, p.length - b.length) + failed.get(b);
+      }
+    }
+    await send(r.changes);
+    $("movedlg").close();
+    S.week = dst;
+    render();
+    status(`Movido a ${C.weekTitle(dst)}: ${moveText({ records: r.records + r.merged, photos: r.photos, entries: r.entries, attachments: r.attachments })}`
+      + (r.merged ? ` (${r.merged} juntado(s) con lo que ya había)` : "") + (failed.size ? ` · ${failed.size} archivo(s) quedan con su nombre en Drive` : ""));
+  } catch (e) {
+    $("mvmsg").textContent = `No se pudo mover: ${e.message}`;
+    $("mvgo").disabled = false;
+  }
 }
 
 // ================================================================== matriz y plano
@@ -1539,14 +1722,14 @@ function renderReports() {
   $("rxls").hidden = !C.measures(S.state).length;
   fill($("rmonth"), [...new Set(weeks.map((w) => w.slice(0, 7)))].map((m) => [m, `${C.MESES[Number(m.slice(5)) - 1]} ${m.slice(0, 4)}`]));
   $("rtrt").hidden = !C.treatments(S.state).length;
-  fill($("rvar"), C.varieties(S.state).map((v) => [v.uid, C.unitMain(v) + (C.unitPlace(v) ? ` · ${C.unitPlace(v)}` : "")]));
+  fill($("rvar"), C.phenoUnits(S.state).map((v) => [v.uid, C.unitMain(v) + (C.unitPlace(v) ? ` · ${C.unitPlace(v)}` : "")]));
 }
 
 async function runReport(kind) {
   const season = Number($("rseason").value);
   const win = window.open("", "_blank");       // en el mismo clic: así no lo bloquea el navegador
   if (win) win.document.write("<p style='font:16px system-ui;padding:24px'>Preparando informe…</p>");
-  const rep = makeReports({ state: S.state, ws: S.ws, bbch: S.bbch, photoUrl, win,
+  const rep = makeReports({ state: S.state, ws: S.ws, bbch: S.bbch, photoUrl, win, crop: CROP, plain: $("rplain").checked,
     progress: (t) => { $("rmsg").textContent = t; } });
   try {
     if (kind === "weekly") await rep.weekly($("rweek").value);
@@ -1556,7 +1739,7 @@ async function runReport(kind) {
       await rep.matrix(season, C.seasonWeeks(S.state, season).filter((w) => w.startsWith(m)),
         `Reporte mensual · ${C.MESES[Number(m.slice(5)) - 1]} ${m.slice(0, 4)}`, true);
     } else if (kind === "variety") {
-      await rep.variety(C.varieties(S.state).find((v) => v.uid === $("rvar").value), season);
+      await rep.variety(C.phenoUnits(S.state).find((v) => v.uid === $("rvar").value), season);
     } else if (kind === "treatments") await rep.treatments(season);
     else if (kind === "period") {
       const [a, b] = [$("rfrom").value, $("rto").value].sort();
@@ -1582,7 +1765,7 @@ async function runPdf(kind) {
   const btns = document.querySelectorAll("[data-pdf]");
   btns.forEach((b) => (b.disabled = true));
   try {
-    const { name, blob } = await makePdf({ ws: S.ws, bundles: S.bundles, photoBlob,
+    const { name, blob } = await makePdf({ ws: S.ws, bundles: S.bundles, photoBlob, crop: CROP, plain: $("rplain").checked,
       progress: (t) => { $("rmsg").textContent = t; } }, kind, arg, season);
     const a = document.createElement("a");
     a.href = URL.createObjectURL(blob); a.download = name;
@@ -1597,12 +1780,66 @@ async function runPdf(kind) {
 
 async function start() {
   $("login").hidden = true;
-  $("app").hidden = false;
-  ["sync", "logout", "ws"].forEach((id) => ($(id).hidden = false));
+  ["logout"].forEach((id) => ($(id).hidden = false));
   rememberUser();
   setInterval(() => S.wsFolder && pull().then((n) => n && render()).catch(() => {}), 5 * 60 * 1000);
+  const saved = store.get("ac_crop");
+  if (saved && CROPS.some((c) => c.mod === saved)) await openCrop(saved);
+  else showCrops();
+}
+
+// ------------------------------------------------------------------ cultivos
+// Pantalla de inicio de AeonCrop: un botón por cultivo (cada uno con sus ensayos y predios,
+// su escala BBCH y su carpeta en Drive) y AeonScout.
+function showCrops() {
+  $("app").hidden = true;
+  $("scout").hidden = true;
+  $("crops").hidden = false;
+  ["sync", "ws", "profiles", "cropbtn"].forEach((id) => ($(id).hidden = true));
+  const box = $("cropgrid");
+  box.innerHTML = "";
+  for (const c of CROPS) {
+    const b = document.createElement("button");
+    b.className = "cropcard" + (c.mod === CROP && !$("app").dataset.fresh ? " on" : "");
+    b.style.setProperty("--crop", c.color);
+    b.innerHTML = `<img alt=""><b></b><span></span>`;
+    b.querySelector("img").src = c.logo;
+    b.querySelector("b").textContent = c.mod;
+    b.querySelector("span").textContent = c.name;
+    b.onclick = () => openCrop(c.mod).catch((e) => status(e.message));
+    box.appendChild(b);
+  }
+  const sb = document.createElement("button");
+  sb.className = "cropcard scoutcard";
+  sb.innerHTML = `<img src="scout/scout_logo.png" alt=""><b>AeonScout</b><span>Plagas, malezas y enfermedades</span>`;
+  sb.onclick = () => openScout();
+  box.appendChild(sb);
+}
+
+function resetCropState() {
+  S.state = C.emptyState(); S.bundles = []; S.workspaces = []; S.ws = null; S.wsFolder = null;
+  S.root = null; S.sync = null; S.photoIds.clear(); S.photoErr.clear(); S.maps.clear?.();
+  for (const u of S.photoUrls.values()) { try { URL.revokeObjectURL(u); } catch { /* nada */ } }
+  S.photoUrls.clear();
+  S.weekDone = new Map();
+}
+
+async function openCrop(mod) {
+  const crop = CROPS.find((c) => c.mod === mod) || CROPS[0];
+  if (crop.mod !== CROP || !S.workspaces.length) resetCropState();
+  CROP = crop.mod;
+  store.set("ac_crop", CROP);
+  S.bbch = BBCH.crops?.[CROP] || BBCH;
+  document.documentElement.style.setProperty("--crop", crop.color);
+  $("cropbtn").textContent = `${crop.mod} · ${crop.name} ▾`;
+  $("cropbtn").hidden = false;
+  $("crops").hidden = true;
+  $("scout").hidden = true;
+  $("app").hidden = false;
+  $("app").classList.remove("empty");
+  ["sync", "ws"].forEach((id) => ($(id).hidden = false));
   let cached = null;
-  try { cached = JSON.parse(store.get("pr_wslist") || "null"); } catch { /* sin caché */ }
+  try { cached = JSON.parse(store.get(K("ac_wslist")) || "null"); } catch { /* sin caché */ }
   if (cached?.length) {                    // se muestra al instante lo guardado; Drive, en segundo plano
     S.workspaces = cached;
     fillWorkspaces();
@@ -1611,7 +1848,7 @@ async function start() {
     status("Sincronizando…");
     try {
       await loadWorkspaces();
-      store.set("pr_wslist", JSON.stringify(S.workspaces));
+      store.set(K("ac_wslist"), JSON.stringify(S.workspaces));
       fillWorkspaces();
       if (S.workspaces.some((w) => w.code === S.ws.code)) {
         S.ws = S.workspaces.find((w) => w.code === S.ws.code);
@@ -1622,11 +1859,32 @@ async function start() {
     return;
   }
   status("Cargando…");
-  await loadWorkspaces();
-  store.set("pr_wslist", JSON.stringify(S.workspaces));
+  try {
+    await loadWorkspaces();
+  } catch (e) {                            // cultivo aún sin datos en Drive
+    $("ws").hidden = true;
+    $("profiles").hidden = true;
+    $("app").classList.add("empty");
+    $("nodatalogo").src = crop.logo;
+    $("nodatatitle").textContent = `${crop.mod} · ${crop.name}`;
+    $("nodatamsg").textContent = e.message;
+    status("");
+    return;
+  }
+  store.set(K("ac_wslist"), JSON.stringify(S.workspaces));
   fillWorkspaces();
   await loadWorkspace($("ws").value);
   render();
+}
+
+async function openScout() {
+  $("crops").hidden = true;
+  $("app").hidden = true;
+  $("scout").hidden = false;
+  ["sync", "ws", "profiles"].forEach((id) => ($(id).hidden = true));
+  $("cropbtn").textContent = "AeonScout ▾";
+  $("cropbtn").hidden = false;
+  await SC.open({ api, list, folder, download, root: () => folder(TOP, null, false), cacheGet, cachePut, status });
 }
 
 // I+D y Predio separados (como el menú de la app): botones arriba y la lista solo del perfil.
@@ -1635,11 +1893,11 @@ const profileOf = (w) => (PROFILES[w.profile] ? w.profile : "");
 
 function fillWorkspaces() {
   const profs = PROFILE_TABS.filter(([p]) => S.workspaces.some((w) => profileOf(w) === p));
-  const saved = S.workspaces.find((w) => w.code === store.get("pr_ws"));
+  const saved = S.workspaces.find((w) => w.code === store.get(K("ac_ws")));
   const cur = S.ws ? profileOf(S.ws) : saved ? profileOf(saved)
-    : store.get("pr_prof") ?? (S.workspaces[0] ? profileOf(S.workspaces[0]) : "");
+    : store.get(K("ac_prof")) ?? (S.workspaces[0] ? profileOf(S.workspaces[0]) : "");
   const prof = profs.some(([p]) => p === cur) ? cur : profs[0]?.[0] ?? "";
-  store.set("pr_prof", prof);
+  store.set(K("ac_prof"), prof);
   const seg = $("profiles");
   seg.innerHTML = "";
   seg.hidden = profs.length < 2;
@@ -1652,7 +1910,7 @@ function fillWorkspaces() {
   }
   const mine = S.workspaces.filter((w) => profileOf(w) === prof);
   const sel = $("ws");
-  const keep = S.ws?.code || store.get(`pr_ws_${prof}`) || store.get("pr_ws");
+  const keep = S.ws?.code || store.get(K(`ac_ws_${prof}`)) || store.get(K("ac_ws"));
   sel.innerHTML = "";
   for (const w of mine) {
     const o = document.createElement("option");
@@ -1668,13 +1926,15 @@ function openWs(code) {
 
 function switchProfile(p) {                // al último ensayo/predio usado en ese perfil
   const mine = S.workspaces.filter((w) => profileOf(w) === p);
-  const last = store.get(`pr_ws_${p}`);
+  const last = store.get(K(`ac_ws_${p}`));
   openWs((mine.find((w) => w.code === last) || mine[0]).code);
 }
 
+let BBCH = null;            // escalas de los tres cultivos (bbch.json, generado desde la app)
 async function boot() {
   S.device = device();
-  S.bbch = await (await fetch("bbch.json")).json();
+  BBCH = await (await fetch("bbch.json")).json();
+  S.bbch = BBCH.crops?.[CROP] || BBCH;
   $("signin").onclick = async () => {
     $("login-msg").textContent = "";
     try { await signIn(""); await start(); } catch (e) { $("login-msg").textContent = e.message; $("login").hidden = false; $("app").hidden = true; }
@@ -1683,10 +1943,11 @@ async function boot() {
   $("logout").onclick = () => {
     if (S.token && window.google?.accounts?.oauth2) google.accounts.oauth2.revoke(S.token, () => {});
     S.token = null;
-    for (const k of ["pr_token", "pr_email", "pr_wslist", "pr_ws"]) store.set(k, null);
-    idb.then((db) => { db?.close(); indexedDB.deleteDatabase("phenorubus"); }).finally(() => location.reload());   // en un PC compartido no quedan datos
+    try { Object.keys(localStorage).filter((k) => /(^|:)ac_(token|email|wslist|ws|crop)/.test(k)).forEach((k) => localStorage.removeItem(k)); } catch { /* nada */ }
+    idb.then((db) => { db?.close(); indexedDB.deleteDatabase("aeoncrop"); }).finally(() => location.reload());   // en un PC compartido no quedan datos
   };
   $("sync").onclick = () => pull().then(render).catch((e) => status(e.message));
+  $("cropbtn").onclick = showCrops;
   $("ws").onchange = (e) => openWs(e.target.value);
   document.querySelectorAll(".tabs button").forEach((b) => (b.onclick = () => {
     S.tab = b.dataset.tab;
@@ -1707,7 +1968,18 @@ async function boot() {
     i.value = S.week;
     try { i.showPicker(); } catch { i.focus(); i.click(); }
   };
-  $("wtitle").onclick = pickWeek;
+  $("wtitle").onclick = () => { if (!longFired) pickWeek(); longFired = false; };
+  longPress($("wtitle"), 3000, openMoveWeek);
+  document.querySelectorAll("#mvchips button").forEach((b) => (b.onclick = () => {
+    pickMoveTarget(C.nextWeek(S.week, Number(b.dataset.d)));
+    document.querySelectorAll("#mvchips button").forEach((x) => x.classList.toggle("on", x === b));
+  }));
+  $("mvdate").onchange = () => {
+    if (!$("mvdate").value) return;
+    document.querySelectorAll("#mvchips button").forEach((x) => x.classList.remove("on"));
+    pickMoveTarget(C.iso(C.mondayOf(C.parseDate($("mvdate").value))));
+  };
+  $("mvgo").onclick = doMoveWeek;
   $("wtitle").onkeydown = (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); pickWeek(); } };
   $("wpick").onchange = () => {
     if (!$("wpick").value) return;
@@ -1725,7 +1997,8 @@ async function boot() {
   $("aifabs").hidden = !TR.enabled();
   document.body.classList.toggle("withfabs", TR.enabled());      // se activa abriendo la web con «#lab» una vez
   TR.init({ S, photoUrl, loadLabels, saveLabels, allStates, extraList, extraUrl, extraUpload,
-    email: () => store.get("pr_email") });
+    setCrop: (mod) => { trainMod = mod; },
+    email: () => store.get("ac_email") });
   $("dsave").onclick = saveDetail;
   $("msave").onclick = saveMeasure;
   $("vadd").onclick = () => openVariety(null);
@@ -1733,6 +2006,8 @@ async function boot() {
   $("varchive").onclick = toggleArchive;
   $("vshowarch").onchange = renderSettings;
   $("tapply").onclick = applyTrial;
+  $("uapply").onclick = applyUnified;
+  $("uon").onchange = () => $("uopts").classList.toggle("off", !$("uon").checked);
   $("fweek").onchange = setFirstWeek;
   $("mdelweek").onclick = () => deleteMeasure(false);
   $("mdelall").onclick = () => deleteMeasure(true);
@@ -1763,7 +2038,7 @@ async function boot() {
     S.token = saved;
     try { await start(); } catch (e) {
       $("login-msg").textContent = e.message; $("login").hidden = false; $("app").hidden = true;
-      ["sync", "logout", "ws"].forEach((id) => ($(id).hidden = true));
+      ["sync", "logout", "ws", "cropbtn"].forEach((id) => ($(id).hidden = true));
     }
   }
 }

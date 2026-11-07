@@ -35,10 +35,10 @@ function baseMap(L, el, center, zoom) {
     maxNativeZoom: 19, maxZoom: 20, attribution: "© OpenStreetMap" });
   const layers = { "Satélite": sat, "Mapa": osm };
   let pick = "Satélite";
-  try { pick = localStorage.getItem("pr_basemap") || pick; } catch { /* sin almacenamiento */ }
+  try { pick = localStorage.getItem("ac_basemap") || pick; } catch { /* sin almacenamiento */ }
   (layers[pick] || sat).addTo(map);
   L.control.layers(layers, null, { position: "topright", collapsed: false }).addTo(map);
-  map.on("baselayerchange", (e) => { try { localStorage.setItem("pr_basemap", e.name); } catch { /* nada */ } });
+  map.on("baselayerchange", (e) => { try { localStorage.setItem("ac_basemap", e.name); } catch { /* nada */ } });
   return map;
 }
 

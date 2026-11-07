@@ -419,3 +419,41 @@ dialog.tpage[open] { display: flex; }
 .weekbar.extra .progress { background: var(--berry-soft); }
 .weekbar.extra .progress div { background: var(--berry); }
 .weekbar.extra .extrabtn { background: var(--berry); color: #fff; }
+
+/* ---------------------------------------------------------------- AeonCrop: cultivos y AeonScout */
+.bar .cropbtn { background: rgba(255,255,255,.16); color: #fff; border: 1px solid rgba(255,255,255,.35);
+  cursor: pointer; padding: 4px 12px; border-radius: 999px; font-weight: 600; }
+.herologo { width: 200px; max-width: 70%; height: auto; }
+.cropshero { max-width: 760px; width: 100%; }
+.cropgrid { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 14px; margin-top: 16px; }
+.cropcard { display: grid; justify-items: center; gap: 4px; padding: 16px 10px; cursor: pointer;
+  background: #fff; border: 2px solid transparent; border-radius: 22px; box-shadow: 0 4px 16px rgba(30, 74, 58, .08);
+  transition: transform .15s, border-color .15s; }
+.cropcard:hover, .cropcard.on { transform: translateY(-2px); border-color: var(--crop, var(--leaf)); }
+.cropcard img { width: 96px; height: 96px; object-fit: contain; }
+.cropcard b { color: var(--crop, var(--leaf-dark)); font-size: 16px; }
+.cropcard span { color: var(--muted); font-size: 13px; }
+.scoutcard { --crop: #1D5E63; }
+.scouthead { display: flex; align-items: center; gap: 14px; }
+.scouthead h2 { margin: 0; color: #1D5E63; }
+.grow { flex: 1; min-width: 0; }
+.scoutsec { display: flex; flex-wrap: wrap; gap: 10px; margin: 14px 0 6px; }
+.scoutsec button { display: flex; align-items: center; gap: 8px; padding: 6px 14px 6px 6px; cursor: pointer;
+  background: #fff; border: 2px solid var(--line); border-radius: 999px; font-weight: 600; color: var(--sec); }
+.scoutsec button.on { border-color: var(--sec); background: color-mix(in srgb, var(--sec) 10%, #fff); }
+.scoutsec img { width: 34px; height: 34px; object-fit: contain; }
+.scoutsp { margin-bottom: 12px; }
+.scouth { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+.scoutgrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(96px, 1fr)); gap: 8px; }
+.sthumb { aspect-ratio: 1; border: 0; border-radius: 12px; cursor: zoom-in; background: #E6E8E3 center / cover no-repeat; }
+.sthumb.err { background: #F6E3E3; }
+@media (max-width: 560px) { .bar .brand span, .bar .cropbtn { font-size: 13px; } .herologo { width: 150px; } }
+.uopts { display: grid; gap: 6px; margin: 6px 0 4px 24px; }
+.uopts.off { opacity: .45; pointer-events: none; }
+.wtitle.holding { animation: hold 3s linear; }
+@keyframes hold { from { box-shadow: inset 0 -3px 0 transparent; } to { box-shadow: inset 0 -3px 0 var(--berry); } }
+#movedlg .chips { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+#movedlg .chips button.on { background: var(--leaf-dark); color: #fff; }
+#app .nodata { display: none; margin: 24px auto; }
+#app.empty .nodata { display: block; }
+#app.empty > :not(.nodata) { display: none !important; }

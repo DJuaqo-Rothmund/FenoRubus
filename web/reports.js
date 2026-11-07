@@ -1,7 +1,9 @@
-// PhenoRubus Web · informes (mismo diseño que los de la app: templates/*.html + report.css).
+// AeonCrop Web · informes (mismo diseño que los de la app: templates/*.html + report.css).
 // Cada informe se abre en una pestaña nueva con «Imprimir / Guardar PDF».
 import * as C from "./core.js";
 import * as ST from "./stats.js";
+const SPECIES = { PhenoRubus: "Rubus idaeus", PhenoBlue: "Vaccinium corymbosum", PhenoCran: "Vaccinium macrocarpon" };
+const FRUIT = { PhenoRubus: "frambueso", PhenoBlue: "arándano", PhenoCran: "cranberry" };
 
 const esc = (t) => String(t ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 const wkShort = (w) => C.weekShort(w);
@@ -40,12 +42,12 @@ export function makeReports(ctx) {
 .toolbar button.p{background:#9c3350;color:#fff;border-color:#9c3350}
 @media print{.toolbar{display:none}}</style></head><body><div class="wrap">
 <div class="toolbar"><button onclick="window.close()">Cerrar</button><button class="p" onclick="window.print()">Imprimir / Guardar PDF</button></div>
-<header class="doc"><div class="kicker">Cuaderno de campo · Rubus idaeus · Escala BBCH</div>
+<header class="doc"><div class="kicker">${ctx.plain ? "" : "Cuaderno de campo · "}${esc(SPECIES[ctx.crop] || SPECIES.PhenoRubus)} · Escala BBCH</div>
 <h1>${esc(title)}</h1><div class="sub">${esc(subtitle)}</div>
-<div class="meta"><span>Generado: ${esc(now)}</span><span>PhenoRubus Web · ${esc(ctx.ws.name || ctx.ws.code)}</span>${meta.map((m) => `<span>${esc(m)}</span>`).join("")}</div></header>
+<div class="meta"><span>Generado: ${esc(now)}</span>${ctx.plain ? "" : `<span>${esc(ctx.crop || "PhenoRubus")} · AeonCrop Web · ${esc(ctx.ws.name || ctx.ws.code)}</span>`}${meta.map((m) => `<span>${esc(m)}</span>`).join("")}</div></header>
 ${content}
-<footer class="doc"><span>PhenoRubus — seguimiento fenológico y biométrico de ensayos en frambueso.</span>
-<span>Estados BBCH asignados por el evaluador.</span></footer></div></body></html>`;
+${ctx.plain ? "" : `<footer class="doc"><span>AeonCrop — seguimiento fenológico y biométrico de ensayos en ${esc(FRUIT[ctx.crop] || "frambueso")}.</span>
+<span>Estados BBCH asignados por el evaluador.</span></footer>`}</div></body></html>`;
     const win = ctx.win && !ctx.win.closed ? ctx.win : window.open("", "_blank");
     if (!win) throw new Error("El navegador bloqueó la ventana nueva: permita ventanas emergentes para esta página.");
     win.document.open(); win.document.write(html); win.document.close();
@@ -102,7 +104,7 @@ ${content}
 
   // ------------------------------------------------------------ 1. semanal
   async function weekly(week) {
-    const vs = C.varieties(ctx.state);
+    const vs = C.phenoUnits(ctx.state);
     const cards = vs.map((v) => {
       const obs = C.observationFor(ctx.state, v.uid, week);
       const photos = obs ? C.photosFor(ctx.state, obs.uid) : [];
@@ -154,11 +156,16 @@ ${content}
     if (trts.length < 1) throw new Error("Este ensayo no tiene tratamientos ni parcelas (se definen en la app: Ajustes › Parcelas).");
     const parcels = trts.flatMap((t) => t.parcels);
     const where = new Map(parcels.map((p) => [p.uid, [Number(p.treatment), Number(p.rep)]]));
+    // Fenología unificada con puntos por tratamiento: el estado BBCH sale de los puntos de cada
+    // tratamiento, que hacen de repeticiones (= reporter.treatments); las mediciones, de las parcelas.
+    const uni = C.unified(ctx.state) && C.phenoConfig(ctx.state).scope === "treatment";
+    const bParcels = uni ? C.phenoUnits(ctx.state).filter((u) => u.treatment != null) : parcels;
+    const bOf = (t) => (uni ? bParcels.filter((u) => Number(u.treatment) === t.num) : t.parcels);
     let weeks = C.seasonWeeks(ctx.state, season);
     const bbchAt = (p, w) => { const o = C.observationFor(ctx.state, p.uid, w); return o && o.bbch_code != null ? C.bbchValue(o.bbch_code) : null; };
     const tables = C.measures(ctx.state).filter((m) => m.kind === "table");
     const mEntries = tables.map((m) => ({ m, es: C.entriesFor(ctx.state, m.uid).filter((e) => where.has(e.variety_id) && C.seasonOf(C.parseDate(e.week_id)) === season) }));
-    const used = weeks.filter((w) => parcels.some((p) => bbchAt(p, w) !== null) || mEntries.some(({ es }) => es.some((e) => e.week_id === w)));
+    const used = weeks.filter((w) => bParcels.some((p) => bbchAt(p, w) !== null) || mEntries.some(({ es }) => es.some((e) => e.week_id === w)));
     if (used.length) weeks = weeks.filter((w) => w >= used[0] && w <= used[used.length - 1]);
     if (!weeks.length) throw new Error("No hay semanas con registros de las parcelas en esa temporada.");
     const fmtP = (a) => !a ? "—" : (a.p < 0.001 ? "< 0,001" : C.numEs(a.p, 3)) + ` ${a.stars}`;
@@ -166,12 +173,12 @@ ${content}
     const tests = [];
     weeks.forEach((w, i) => {
       const data = new Map();
-      for (const p of parcels) { const v = bbchAt(p, w); if (v !== null) data.set(`${p.treatment}|${p.rep}`, v); }
+      for (const p of bParcels) { const v = bbchAt(p, w); if (v !== null) data.set(`${p.treatment}|${p.rep}`, v); }
       const a = ST.anova(data);
       for (const r of rowsT) {
-        const vals = r.t.parcels.map((p) => data.get(`${r.t.num}|${p.rep}`)).filter((v) => v !== undefined);
+        const vals = bOf(r.t).map((p) => data.get(`${r.t.num}|${p.rep}`)).filter((v) => v !== undefined);
         const [m] = ST.meanSe(vals);
-        r.cells.push({ mean: m, n: vals.length, of: r.t.parcels.length, letter: (a?.letters || {})[r.t.num] || "" });
+        r.cells.push({ mean: m, n: vals.length, of: bOf(r.t).length, letter: (a?.letters || {})[r.t.num] || "" });
         if (m !== null) r.pts.push([i, Math.round(m * 100) / 100]);
       }
       if (a) tests.push({ w, f: Number.isFinite(a.f) && a.f < 1000 ? C.numEs(a.f, 2) : "> 999", p: fmtP(a), df: `${a.df[0]}; ${a.df[1]}`,
@@ -220,16 +227,16 @@ ${content}
     const ms = [];
     for (const [code, name] of C.MILESTONES) {
       const target = C.bbchValue(code), hit = new Map();
-      for (const p of parcels) {
+      for (const p of bParcels) {
         const wk = weeks.find((w) => { const v = bbchAt(p, w); return v !== null && v >= target; });
         if (wk) hit.set(`${p.treatment}|${p.rep}`, C.isoWeek(C.parseDate(wk))[0]);
       }
       if (!hit.size) continue;
       const a = ST.anova(hit);
       ms.push({ code, name, p: fmtP(a), cells: trts.map((t) => {
-        const vals = t.parcels.map((p) => hit.get(`${t.num}|${p.rep}`)).filter((v) => v !== undefined);
+        const vals = bOf(t).map((p) => hit.get(`${t.num}|${p.rep}`)).filter((v) => v !== undefined);
         const [m] = ST.meanSe(vals);
-        return { text: m === null ? "—" : `S${C.numEs(m)}` + (a && Object.keys(a.letters).length ? ` ${a.letters[t.num] || ""}` : ""), n: `${vals.length}/${t.parcels.length}` };
+        return { text: m === null ? "—" : `S${C.numEs(m)}` + (a && Object.keys(a.letters).length ? ` ${a.letters[t.num] || ""}` : ""), n: `${vals.length}/${bOf(t).length}` };
       }) });
     }
     if (ms.length) {
