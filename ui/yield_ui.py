@@ -34,7 +34,7 @@ import rendimiento as R
 from ui import theme
 from ui.theme import c
 
-ACCENT = "#8A4A16"
+ACCENT = "#2F7F92"
 
 
 def app():
@@ -90,7 +90,7 @@ KV = """
             size: self.size
             radius: [dp(16)]
         Color:
-            rgba: c("#8A4A16", .3)
+            rgba: c("#2F7F92", .3)
         Line:
             rounded_rectangle: (self.x, self.y, self.width, self.height, dp(16))
             width: dp(1)
@@ -127,7 +127,7 @@ KV = """
         size_hint_x: None
         width: dp(86)
         theme_text_color: "Custom"
-        text_color: c("#8A4A16")
+        text_color: c("#2F7F92")
 
 <CountRow>:
     size_hint_y: None
