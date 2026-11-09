@@ -1,0 +1,35 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 360 360" width="360" height="360">
+  <!-- Estimaciones de rendimiento: canasta con frambuesas y un gráfico que sube -->
+  <g fill="none" stroke="#8A4A16" stroke-width="9" stroke-linecap="round" stroke-linejoin="round">
+    <!-- gráfico -->
+    <path d="M218 132 V104 M252 132 V84 M286 132 V58"/>
+    <path d="M206 132 H300"/>
+    <path d="M212 70 L246 48 L268 60 L300 30"/>
+    <path d="M282 30 H300 V48"/>
+    <!-- frambuesas -->
+    <g id="b">
+      <path d="M112 146 C86 146 72 168 76 192 C80 216 98 234 112 234 C126 234 144 216 148 192 C152 168 138 146 112 146 Z"/>
+      <g stroke-width="6">
+        <circle cx="96" cy="168" r="7"/><circle cx="112" cy="166" r="7"/><circle cx="128" cy="168" r="7"/>
+        <circle cx="90" cy="186" r="7"/><circle cx="106" cy="186" r="7"/><circle cx="122" cy="186" r="7"/><circle cx="137" cy="186" r="6"/>
+        <circle cx="97" cy="204" r="7"/><circle cx="113" cy="205" r="7"/><circle cx="128" cy="203" r="7"/>
+        <circle cx="105" cy="220" r="6"/><circle cx="120" cy="220" r="6"/>
+      </g>
+      <path d="M96 150 C102 140 108 140 112 146 C116 140 122 140 128 150 M112 146 V128"/>
+    </g>
+    <use href="#b" transform="translate(64 -18)"/>
+    <use href="#b" transform="translate(128 6)"/>
+    <!-- canasta -->
+    <path d="M44 232 H316"/>
+    <path d="M58 232 L84 318 H276 L302 232"/>
+    <path d="M70 262 H290 M78 290 H282"/>
+    <path d="M122 232 L132 318 M180 232 V318 M238 232 L228 318"/>
+    <path d="M44 232 C44 198 70 186 92 186 M316 232 C316 198 290 186 268 186" stroke-width="7"/>
+  </g>
+  <g fill="#8A4A16">
+    <path d="M42 70 l5 13 13 5 -13 5 -5 13 -5 -13 -13 -5 13 -5z"/>
+    <path d="M326 176 l4 10 10 4 -10 4 -4 10 -4 -10 -10 -4 10 -4z"/>
+    <path d="M150 52 l3 8 8 3 -8 3 -3 8 -3 -8 -8 -3 8 -3z"/>
+    <circle cx="34" cy="150" r="5"/><circle cx="330" cy="290" r="5"/>
+  </g>
+</svg>

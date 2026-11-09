@@ -378,6 +378,56 @@ class FenoRubusApp(MDApp):
                 _detach()
         threading.Thread(target=work, daemon=True).start()
 
+    # ------------------------------------------------------------ Estimaciones de rendimiento
+    @property
+    def yields(self):
+        """Base de las estimaciones de rendimiento del cultivo abierto."""
+        import crops
+        from platform_utils import get_data_dir
+        cid = crops.current().id
+        cache = self.__dict__.setdefault("_yield_dbs", {})
+        if cid not in cache:
+            from rendimiento import YieldDB
+            cache[cid] = YieldDB(get_data_dir(), cid)
+        return cache[cid]
+
+    def yield_backup(self, manual: bool = False) -> None:
+        """Sube a «AeonCrop/<módulo>/Estimaciones de rendimiento» lo pendiente (en segundo plano)."""
+        import crops
+        from rendimiento import YieldDrive
+        d = YieldDrive(self.yields, crop=crops.current())
+        if not d.enabled:
+            if manual:
+                self.toast("Conecte su cuenta de Google en la pantalla principal.")
+            return
+        if not d.backup.available:
+            return
+        from ui import task_badges
+        if manual:
+            task_badges.start("backup", "Rendimiento")
+
+        def work():
+            from drive_backup import _detach
+            try:
+                if manual:
+                    d.backup.progress_cb = lambda f, t="": task_badges.update("backup", f, f"Rendimiento · {t}")
+                n = d.run()
+                if manual:
+                    task_badges.finish("backup", "done" if n else "empty",
+                                       f"Rendimiento: {n} foto(s) subidas" if n else "Rendimiento: todo estaba respaldado")
+            except Exception as exc:  # noqa: BLE001
+                if manual:
+                    task_badges.finish("backup", "error", f"Rendimiento: {exc}")
+            finally:
+                d.backup.progress_cb = None
+                _detach()
+        threading.Thread(target=work, daemon=True).start()
+
+    def open_yield(self):
+        """Estimaciones de rendimiento (inicio del cultivo)."""
+        from ui import yield_ui
+        yield_ui.open_home()
+
     def open_scout(self):
         """AeonScout desde la pantalla principal."""
         from ui import scout_ui
@@ -1026,6 +1076,7 @@ class FenoRubusApp(MDApp):
         task_badges.start("sync")
         try:
             self.scout_backup()            # AeonScout también
+            self.yield_backup()            # y las estimaciones de rendimiento del cultivo abierto
         except Exception:  # noqa: BLE001
             pass
 

@@ -131,7 +131,14 @@ async function load(fresh) {
       extra = (await X.extraList()).map((p) => ({ ...p, name: p.key, code: "IA+", wsName: "Conocimiento ampliado",
         week: "", variety: p.folder, extra: true }));
     } catch (e) { say(`No se pudieron leer las fotos extra: ${e.message}`); }
-    photos = [...detail, ...extra];
+    let rend = [];
+    try {
+      say("Leyendo las estimaciones de rendimiento…");
+      rend = (await X.yieldList()).map((p) => ({ ...p, code: "REND", wsName: "Estimaciones de rendimiento",
+        week: (p.folder.match(/^\d{4}-\d{2}-\d{2}/) || [""])[0], variety: p.folder.split(" · ").slice(1).join(" · "),
+        extra: true }));
+    } catch (e) { say(`No se pudieron leer las estimaciones: ${e.message}`); }
+    photos = [...detail, ...rend, ...extra];
   }
   renderWs();
   renderList();

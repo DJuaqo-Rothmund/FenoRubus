@@ -116,6 +116,24 @@ def extra_items(index: list | None = None) -> list[dict]:
     return out
 
 
+YIELD_CODE = "REND"
+
+
+def yield_items() -> list[dict]:
+    """Fotos de las estimaciones de rendimiento del cultivo: también se marcan en IA+ (lo
+    marcado se cuenta solo en la estimación y entrena el detector)."""
+    try:
+        d = app().yields
+        rows = d.query("SELECT p.path, s.place, s.sector, s.taken_on FROM yield_photos p "
+                       "JOIN yield_sets s ON s.id = p.set_id ORDER BY s.taken_on DESC, p.id")
+    except Exception:  # noqa: BLE001
+        return []
+    return [{"name": os.path.basename(r["path"]), "path": r["path"], "code": YIELD_CODE,
+             "ws": "Estimaciones de rendimiento",
+             "variety": " · ".join(x for x in (r["place"], r["sector"]) if x), "week": r["taken_on"],
+             "exists": os.path.exists(r["path"])} for r in rows]
+
+
 def release(p: dict) -> None:
     """Foto extra: al dejar de verla se borra del teléfono (sigue en Drive)."""
     if p.get("extra"):
@@ -346,7 +364,7 @@ class BoxesScreen(MDScreen):
 
     # ------------------------------------------------------------ datos
     def refresh(self):
-        self.photos = detail_photos(app().all_dbs()) + extra_items()
+        self.photos = detail_photos(app().all_dbs()) + yield_items() + extra_items()
         self._header()
         self._grid()
 
@@ -402,6 +420,8 @@ class BoxesScreen(MDScreen):
         for w in a.workspaces.list():
             n, here = counts.get(w["code"], [0, 0])
             entries.append((w["code"], f"{w['code']} ({n})" + (f" · {here} aquí" if here < n else "")))
+        if counts.get(YIELD_CODE):
+            entries.append((YIELD_CODE, f"Rendimiento ({counts[YIELD_CODE][0]})"))
         entries.append((EXTRA_CODE, f"Ampliado ({counts.get(EXTRA_CODE, [0])[0]})"))
         for code, label in entries:
             b = Factory.MindSeg(text=label, selected=self.ws == code, size_hint_x=None)

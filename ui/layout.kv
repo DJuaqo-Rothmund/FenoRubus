@@ -789,8 +789,9 @@
         # La IA y la IA+ están en la pantalla principal de AeonCrop (eligen el cultivo).
         MDBoxLayout:
             size_hint: None, None
-            size: dp(150), dp(170)
+            size: dp(150) * 2 + dp(16), dp(170)
             pos_hint: {"center_x": .5}
+            spacing: dp(16)
             StartIcon:
                 id: ic_nb
                 source: theme.START_NOTEBOOK
@@ -799,6 +800,14 @@
                 color: theme.on_bg("#6B4423")
                 diameter: dp(112)
                 on_release: app.open_notebook()
+            StartIcon:
+                id: ic_yield
+                source: theme.START_YIELD
+                bubble: theme.BLOB_YIELD
+                label: "Rendimiento"
+                color: theme.on_bg("#8A4A16")
+                diameter: dp(112)
+                on_release: app.open_yield()
         Widget:
         AnchorLayout:
             size_hint_y: None

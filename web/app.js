@@ -236,6 +236,23 @@ async function extraList() {
   }
   return out.sort((a, b) => a.folder.localeCompare(b.folder) || a.name.localeCompare(b.name));
 }
+// Fotos de las estimaciones de rendimiento de la app (= rendimiento.py): «<módulo>/
+// Estimaciones de rendimiento/<fecha · lugar · sector>/foto.jpg». En marcas.json van con su
+// nombre de archivo (como en la app), así lo marcado aquí se cuenta solo en la estimación.
+const YIELD_DIR = "Estimaciones de rendimiento";
+async function yieldList() {
+  const root = await moduleRoot(trainMod, false);
+  const top = root && await folder(YIELD_DIR, root, false);
+  if (!top) return [];
+  const out = [];
+  for (const d of (await list(`'${top}' in parents and trashed=false`, "files(id,name,mimeType)")).filter((f) => f.mimeType === FOLDER)) {
+    for (const f of await list(`'${d.id}' in parents and trashed=false`, "files(id,name,mimeType)")) {
+      if ((f.mimeType || "").startsWith("image/")) out.push({ id: f.id, name: f.name, key: `rend/${f.name}`, folder: d.name });
+    }
+  }
+  return out.sort((a, b) => b.folder.localeCompare(a.folder) || a.name.localeCompare(b.name));
+}
+
 async function extraUrl(p) {
   const ck = trainMod === MODULE ? p.key : `${trainMod}:${p.key}`;   // «ext/…» se repite entre cultivos
   if (S.photoUrls.has(ck)) return S.photoUrls.get(ck);
@@ -2001,7 +2018,7 @@ async function boot() {
   NB.init({ S, send, photoUrl, resize, uploadPhoto: uploadNotePhoto });
   $("aifabs").hidden = !TR.enabled();
   document.body.classList.toggle("withfabs", TR.enabled());      // se activa abriendo la web con «#lab» una vez
-  TR.init({ S, photoUrl, loadLabels, saveLabels, allStates, extraList, extraUrl, extraUpload,
+  TR.init({ S, photoUrl, loadLabels, saveLabels, allStates, extraList, extraUrl, extraUpload, yieldList,
     setCrop: (mod) => { trainMod = mod; },
     crop: () => (S.workspaces.length && !$("app").hidden ? CROP : null),
     email: () => store.get("ac_email") });

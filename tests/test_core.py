@@ -3291,3 +3291,55 @@ def test_backup_photos_keeps_tidying_when_a_step_fails(tmp_path, monkeypatch):
     calls.clear()
     s._backup_photos(db, manual=True)                    # recién ordenado: no se repite
     assert calls == ["relocate", ("reorganize", False), "flush"]
+
+
+def test_yield_estimate_counts_boxes_and_drive_folder(tmp_path):
+    """Estimación de rendimiento: conteo por foto (a mano o desde las cajas de IA+), la
+    extrapolación a frutos por planta y kg/ha, y las fotos en «AeonCrop/PhenoRubus/
+    Estimaciones de rendimiento/<fecha · lugar · sector>/» (aparte de I+D y Predio) con la
+    planilla estimaciones.csv."""
+    import crops
+    import rendimiento as R
+    from drive_backup import DriveBackup
+
+    class Auth:
+        def get_token(self, interactive):
+            return "t"
+    d = R.YieldDB(str(tmp_path / "data"), "frambuesa")
+    d.set_setting("drive_enabled", True)
+    sid = d.new_set({"kind": "ensayo", "name": "Nuevas variedades", "code": "NV"}, "Meeker", "2026-11-09",
+                    fruit_g=4.0, fruit_set=80, coverage=50, plants_ha=10000)
+    s = d.get_set(sid)
+    paths = []
+    for i in range(3):
+        p = str(tmp_path / f"{d.photo_basename(s)}-{i}.jpg")
+        synthetic_photo(61, "detail", p, i)
+        paths.append(p)
+    p1, p2, p3 = (d.add_photo(sid, p) for p in paths)
+    d.set_counts(p1, {"boton": 10, "flor": 6, "fruto_verde": 4})          # a mano
+    labels = {os.path.basename(paths[1]): {"boxes": [{"c": "flor", "x": 0, "y": 0, "w": .1, "h": .1}] * 5
+                                           + [{"c": "yema", "x": 0, "y": 0, "w": .1, "h": .1}]},
+              os.path.basename(paths[0]): {"boxes": [{"c": "flor", "x": 0, "y": 0, "w": .1, "h": .1}]}}
+    assert d.apply_boxes(labels) == 1                     # la contada a mano no se pisa
+    assert d.counts(p2)["flor"] == 5 and "yema" not in d.counts(p2) and d.count_source(p2) == "ia"
+    r = d.result(sid)
+    assert (r["fruits"], r["flowers"], r["counted"], r["photos"]) == (4, 21, 2, 3)
+    assert r["sample"] == pytest.approx(4 + .8 * 21)
+    assert r["per_plant"] == pytest.approx((4 + .8 * 21) / .5)
+    assert r["kg_ha"] == pytest.approx(r["per_plant"] * 4 / 1000 * 10000)
+    # Drive: carpeta aparte, una por estimación, y la planilla.
+    fake = MovableDrive()
+    rd = R.YieldDrive(d, DriveBackup(d, authorizer=Auth(), transport=fake, metered=lambda: False,
+                                     crop=crops.get("frambuesa")))
+    assert rd.run() == 3
+    live = fake.live()
+    folder = "AeonCrop/PhenoRubus/Estimaciones de rendimiento/2026-11-09 · Nuevas variedades · Meeker/"
+    assert sum(x.startswith(folder) for x in live) == 3
+    assert "AeonCrop/PhenoRubus/Estimaciones de rendimiento/estimaciones.csv" in live
+    # Cambiar el sector: las fotos ya subidas pasan a la carpeta nueva (sin subirlas de nuevo).
+    d.update_set(sid, sector="Regina")
+    rd.run()
+    assert sum(x.startswith(folder.replace("Meeker", "Regina")) for x in fake.live()) == 3
+    assert len([x for x in fake.live() if x.endswith(".jpg")]) == 3
+    csv = open(d.export_csv(), encoding="utf-8-sig").read()
+    assert ";Regina;3;2;10;0;11;0;4;" in csv and csv.rstrip().endswith(";41,6;0,17;1664;")   # 1,66 t/ha
