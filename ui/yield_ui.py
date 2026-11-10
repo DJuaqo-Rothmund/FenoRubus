@@ -217,7 +217,7 @@ class _Thumb(ButtonBehavior, MDBoxLayout):
     """Miniatura con el total contado encima."""
 
     def __init__(self, path: str, caption: str, counted: bool, **kw):
-        super().__init__(orientation="vertical", size_hint_y=None, height=dp(112), spacing=dp(2), **kw)
+        super().__init__(orientation="vertical", size_hint=(None, None), height=dp(112), spacing=dp(2), **kw)
         self.img = Image(fit_mode="cover", size_hint_y=None, height=dp(86))
         self.add_widget(self.img)
         self.add_widget(MDLabel(text=caption, font_style="Caption", halign="center", adaptive_height=True,
@@ -340,6 +340,8 @@ class YieldSet(YieldScreenBase):
         card = _card(f"SET DE FOTOS · {len(photos)}")
         grid = GridLayout(cols=3, spacing=dp(6), size_hint_y=None)
         grid.bind(minimum_height=grid.setter("height"))
+        # Cada miniatura, un tercio del ancho (con una sola foto se estiraba a todo el ancho).
+        grid.bind(width=lambda g, w: [setattr(ch, "width", (w - 2 * dp(6)) / 3) for ch in g.children])
         for i, p in enumerate(photos):
             cnt = d.counts(p["id"])
             src = d.count_source(p["id"])
@@ -348,14 +350,14 @@ class YieldSet(YieldScreenBase):
             t.bind(on_release=lambda *_, i=i: open_photo(self.set_id, i))
             grid.add_widget(t)
         card.add_widget(grid)
-        row = MDBoxLayout(adaptive_height=True, spacing=dp(8))
-        b = Factory.PrimaryButton(text="Sacar foto" if not photos else "Otra foto", size_hint_x=.55)
+        # Uno bajo el otro y a todo el ancho (lado a lado, KivyMD los dibujaba angostos y con
+        # una sombra negra).
+        b = Factory.PrimaryButton(text="Sacar foto" if not photos else "Sacar otra foto")
         b.bind(on_release=lambda *_: self.add_photos("camera"))
-        row.add_widget(b)
-        b = Factory.GhostButton(icon="image-multiple-outline", text="Galería", size_hint_x=.45)
+        card.add_widget(b)
+        b = Factory.GhostButton(icon="image-multiple-outline", text="Agregar desde la galería")
         b.bind(on_release=lambda *_: self.add_photos("gallery"))
-        row.add_widget(b)
-        card.add_widget(row)
+        card.add_widget(b)
         card.add_widget(Factory.Muted(
             text="Fotos de detalle sin repetir zonas (que entre todas cubran la planta o el tramo). Toque "
                  "una foto para contar."))
@@ -588,14 +590,12 @@ class YieldPhoto(YieldScreenBase):
                                     text=f"Usar las cajas de IA+ ({sum(got.values())} marcadas)")
             b.bind(on_release=lambda *_: (d.set_counts(p["id"], got, "ia"), self.refresh()))
             body.add_widget(b)
-        row = MDBoxLayout(adaptive_height=True, spacing=dp(8))
-        b = Factory.GhostButton(icon="delete-outline", text="Quitar foto", size_hint_x=.5)
-        b.bind(on_release=lambda *_: self._remove())
-        row.add_widget(b)
-        b = Factory.PrimaryButton(text="Siguiente" if self.index < len(photos) - 1 else "Listo", size_hint_x=.5)
+        b = Factory.PrimaryButton(text="Siguiente foto" if self.index < len(photos) - 1 else "Listo")
         b.bind(on_release=lambda *_: self.go(1) if self.index < len(photos) - 1 else app().back())
-        row.add_widget(b)
-        body.add_widget(row)
+        body.add_widget(b)
+        b = Factory.GhostButton(icon="delete-outline", text="Quitar esta foto")
+        b.bind(on_release=lambda *_: self._remove())
+        body.add_widget(b)
 
     def _changed(self, stage, n):
         d = db()

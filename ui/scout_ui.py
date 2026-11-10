@@ -247,14 +247,12 @@ class ScoutSection(ScoutScreenBase):
         body = self.clear()
         sec = self.section
         color = scout.SECTIONS[sec][3]
-        row = MDBoxLayout(adaptive_height=True, spacing=dp(8))
-        b1 = Factory.PrimaryButton(text="Nueva captura", size_hint_x=.6)
+        b1 = Factory.PrimaryButton(text="Nueva captura")
         b1.bind(on_release=lambda *_: open_capture(sec))
-        b2 = Factory.GhostButton(icon="image-multiple-outline", text="Galería", size_hint_x=.4)
+        b2 = Factory.GhostButton(icon="image-multiple-outline", text="Nueva captura desde la galería")
         b2.bind(on_release=lambda *_: open_capture(sec, source="gallery"))
-        row.add_widget(b1)
-        row.add_widget(b2)
-        body.add_widget(row)
+        body.add_widget(b1)
+        body.add_widget(b2)
         unknown = [s for s in db().species(sec, unidentified=True) if s["records"]]
         if unknown:
             body.add_widget(Factory.SectionLabel(text="POR IDENTIFICAR"))
@@ -474,14 +472,12 @@ class ScoutCapture(ScoutScreenBase):
             t.bind(on_release=lambda *_, i=i: self._photo_menu(i))
             grid.add_widget(t)
         card.add_widget(grid)
-        row = MDBoxLayout(adaptive_height=True, spacing=dp(8))
-        b = Factory.PrimaryButton(text="Sacar foto" if not st["photos"] else "Otra foto", size_hint_x=.55)
+        b = Factory.PrimaryButton(text="Sacar foto" if not st["photos"] else "Sacar otra foto")
         b.bind(on_release=lambda *_: self.add_photos("camera"))
-        row.add_widget(b)
-        b = Factory.GhostButton(icon="image-multiple-outline", text="Galería", size_hint_x=.45)
+        card.add_widget(b)
+        b = Factory.GhostButton(icon="image-multiple-outline", text="Agregar desde la galería")
         b.bind(on_release=lambda *_: self.add_photos("gallery"))
-        row.add_widget(b)
-        card.add_widget(row)
+        card.add_widget(b)
         views = scout.VIEWS.get(sec, [])
         if views:
             b = Factory.GhostButton(icon="camera-iris",
