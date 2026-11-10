@@ -434,9 +434,17 @@
             fit_mode: "contain"
             mipmap: True
             size_hint: None, None
-            size: (dp(150) * self.pulse * (.94 if self.state == "down" else 1),) * 2
+            size: (dp(150) * (.94 if self.state == "down" else 1),) * 2
             pos_hint: {"center_x": .5, "top": .975}
             on_release: root.toggle_ai()
+            canvas.before:
+                PushMatrix
+                Scale:
+                    origin: self.center
+                    x: self.pulse
+                    y: self.pulse
+            canvas.after:
+                PopMatrix
         FloatCrop:
             id: c_frambuesa
             crop_id: "frambuesa"
@@ -585,10 +593,20 @@
             source: root.bubble
             opacity: 1 if root.bubble else 0
             size_hint: None, None
-            size: ((root.diameter + dp(62)) * root.pulse,) * 2
+            size: ((root.diameter + dp(62)),) * 2
             pos_hint: {"center_x": .5, "center_y": .5}
             fit_mode: "contain"
             mipmap: True
+            # Latido: escala en el canvas (cambiar el tamaño reacomodaba toda la pantalla en
+            # cada cuadro y la animación iba a tirones).
+            canvas.before:
+                PushMatrix
+                Scale:
+                    origin: self.center
+                    x: root.pulse
+                    y: root.pulse
+            canvas.after:
+                PopMatrix
         Image:
             source: root.glow
             opacity: root.glow_level if root.glow else 0

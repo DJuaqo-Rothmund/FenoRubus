@@ -954,7 +954,8 @@ class CropScreen(MDScreen):
 
     def on_enter(self, *_):
         self._t0 = time.monotonic()
-        self._ev = Clock.schedule_interval(self._float, 1 / 20)   # suave y liviano
+        # Cada cuadro (sincronizado con la pantalla): solo mueve y escala en el canvas.
+        self._ev = Clock.schedule_interval(self._float, 0)
 
     def on_leave(self, *_):
         if getattr(self, "_ev", None):
@@ -1054,12 +1055,13 @@ class StartScreen(MDScreen):
             self._intro_ready = False
             self._play_intro()
         self._t0 = time.monotonic()
-        self._float_ev = Clock.schedule_interval(self._float, 1 / 20)
+        self._float_ev = Clock.schedule_interval(self._float, 0)
 
-    FLOAT = ((0.0, "ic_id"), (1.6, "ic_predio"), (4.8, "ic_nb"))   # desfase de cada ícono
+    FLOAT = ((0.0, "ic_id"), (1.6, "ic_predio"), (4.8, "ic_nb"), (3.2, "ic_yield"))   # desfase de cada ícono
 
     def _float(self, *_):
-        """Flotación suave y continua de los íconos (20 cuadros por segundo: liviano)."""
+        """Flotación suave y continua de los íconos: cada cuadro, solo mueve y escala en el
+        canvas (no cambia tamaños ni reacomoda la pantalla)."""
         t = time.monotonic() - self._t0
         for phase, key in self.FLOAT:
             w = self.ids[key]
@@ -1078,7 +1080,7 @@ class StartScreen(MDScreen):
 
     # ------------------------------------------------------------ animación
     def _prepare_intro(self):
-        for w in (self.ids.ic_id, self.ids.ic_predio, self.ids.ic_nb):
+        for w in (self.ids.ic_id, self.ids.ic_predio, self.ids.ic_nb, self.ids.ic_yield):
             w.reveal, w.lift = 0, dp(46)
         self.ids.logo.opacity = 0
         self._intro_ready = True
@@ -1090,7 +1092,7 @@ class StartScreen(MDScreen):
         logo.height = h * .7
         (Animation(opacity=1, height=h * 1.06, d=.32, t="out_cubic")
          + Animation(height=h, d=.16, t="in_out_sine")).start(logo)
-        for i, w in enumerate((self.ids.ic_id, self.ids.ic_predio, self.ids.ic_nb)):
+        for i, w in enumerate((self.ids.ic_id, self.ids.ic_predio, self.ids.ic_nb, self.ids.ic_yield)):
             anim = Animation(d=.12 + .11 * i) + Animation(reveal=1, lift=0, d=.38, t="out_back")
             anim.start(w)
 

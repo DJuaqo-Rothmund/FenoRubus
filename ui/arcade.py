@@ -257,7 +257,7 @@ class PixelArena(FloatLayout):
 
     def start(self):
         if self._ev is None:
-            self._ev = Clock.schedule_interval(self._step, 1 / 30)
+            self._ev = Clock.schedule_interval(self._step, 1 / 60)
 
     def stop(self):
         if self._ev is not None:
@@ -476,7 +476,7 @@ class MindSky(Widget):
 
     def start(self):
         if self._ev is None:
-            self._ev = Clock.schedule_interval(self._step, 1 / 30)
+            self._ev = Clock.schedule_interval(self._step, 1 / 60)
 
     def stop(self):
         if self._ev is not None:
@@ -631,8 +631,8 @@ def ki_texture():
 class KiButton(ButtonBehavior, Widget):
     """Botón IA+: el logo con un «ki» rojo que emana del dibujo y se evapora hacia arriba
     (volutas difusas que suben, crecen y se desvanecen, y un aura que respira). Las
-    instrucciones se crean una vez; cada cuadro solo las mueve (30 por segundo; mientras
-    no se ve, el cuadro no hace nada)."""
+    instrucciones se crean una vez; cada cuadro solo las mueve (60 por segundo; mientras
+    no se ve, ni la pantalla ni el botón, el cuadro no hace nada)."""
     source = StringProperty("")
     N = 7
 
@@ -667,15 +667,26 @@ class KiButton(ButtonBehavior, Widget):
 
     def on_parent(self, *_):
         if self.parent is not None and self._ev is None:
-            self._ev = Clock.schedule_interval(self._step, 1 / 30)
+            self._ev = Clock.schedule_interval(self._step, 1 / 60)
 
     def _step0(self, *_):
         self._img.pos, self._img.size = self.pos, self.size
         self._step(0)
 
+    def _hidden(self) -> bool:
+        """Pantalla oculta o IA+ oculto (opacidad 0 del botón o de quien lo contiene)."""
+        if self.get_root_window() is None:
+            return True
+        w = self
+        while w is not None:
+            if w.opacity <= 0.01:
+                return True
+            w = w.parent
+        return False
+
     def _step(self, dt):
-        if dt and self.get_root_window() is None:
-            return            # pantalla oculta: no se dibuja, pero sigue andando al volver
+        if dt and self._hidden():
+            return            # no se ve: no se dibuja, pero sigue andando al volver
         self._t += dt
         x, y, w, h = self.x, self.y, self.width, self.height
         beat = .5 + .5 * math.sin(self._t * 2.4)
