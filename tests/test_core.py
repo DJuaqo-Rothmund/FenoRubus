@@ -3343,3 +3343,40 @@ def test_yield_estimate_counts_boxes_and_drive_folder(tmp_path):
     assert len([x for x in fake.live() if x.endswith(".jpg")]) == 3
     csv = open(d.export_csv(), encoding="utf-8-sig").read()
     assert ";Regina;3;2;10;0;11;0;4;" in csv and csv.rstrip().endswith(";41,6;0,17;1664;")   # 1,66 t/ha
+
+
+def test_drive_token_shared_and_one_request_at_a_time(tmp_path):
+    """El permiso de Google se pide una sola vez aunque lo pidan varios respaldos y hilos a la
+    vez (antes cada uno pedía el suyo y, al coincidir, la app se podía cerrar en Android)."""
+    import threading
+    import time as _t
+    import drive_backup as dbk
+    from drive_backup import DriveBackup
+
+    calls, inside, overlap = [], [0], [False]
+
+    class SlowAuth:
+        def get_token(self, interactive):
+            inside[0] += 1
+            overlap[0] |= inside[0] > 1
+            _t.sleep(.05)
+            calls.append(1)
+            inside[0] -= 1
+            return "t"
+    dbk._SHARED_TOKEN.clear()
+    dbs = [Database(str(tmp_path / f"d{i}.sqlite3")) for i in range(3)]
+    for d in dbs:
+        d.set_setting("drive_enabled", True)
+    auth = SlowAuth()
+    backups = [DriveBackup(d, authorizer=auth, transport=FakeDrive(), metered=lambda: False) for d in dbs]
+    threads = [threading.Thread(target=b._get_token) for b in backups for _ in range(3)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+    assert len(calls) == 1 and not overlap[0]
+    backups[0]._drop_token()                              # rechazado (401): se pide de nuevo una vez
+    backups[1]._token = None
+    backups[1]._get_token()
+    assert len(calls) == 2
+    dbk._SHARED_TOKEN.clear()

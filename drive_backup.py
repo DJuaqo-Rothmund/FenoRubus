@@ -30,6 +30,13 @@ from platform_utils import IS_ANDROID
 SCOPE = "https://www.googleapis.com/auth/drive.file"
 ROOT_FOLDER = "PhenoRubus · Imágenes de Fenología"   # raíz antigua (hasta la 1.1.151)
 _FOLDER_LOCK = threading.RLock()     # buscar-o-crear carpetas: de a una (ver _folder)
+# Permiso de Google (token): un solo pedido a la vez en toda la app y el token compartido
+# entre todos los respaldos (ensayos, AeonScout, rendimiento, sincronización). Antes cada
+# uno pedía el suyo y, si coincidían varios hilos, los «oyentes» Java de un pedido se
+# borraban antes de que Google respondiera y la app se cerraba sin dejar error.
+_TOKEN_LOCK = threading.RLock()
+_SHARED_TOKEN: dict = {}             # cuenta -> (token, vence)
+_AUTHORIZER = None                   # un solo AndroidAuthorizer para toda la app
 FOLDER_MIME = "application/vnd.google-apps.folder"
 API = "https://www.googleapis.com/drive/v3/files"
 UPLOAD = "https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=id"
@@ -212,7 +219,10 @@ class AndroidAuthorizer:
             self.preload()
             client, req = self._request()
             ok, ko = Success(), Failure()
-            self._listeners = [ok, ko]
+            # Vivos hasta que Google responda (si se soltaban antes, Java llamaba a un objeto
+            # ya borrado y la app se cerraba).
+            self._listeners.append((ok, ko))
+            del self._listeners[:-8]
             task = client.authorize(req)
             task.addOnSuccessListener(ok)
             task.addOnFailureListener(ko)
@@ -380,8 +390,16 @@ class DriveBackup:
             # Se crea en el hilo principal: al registrarse para recibir el resultado de la
             # cuenta de Google, pyjnius crea un «listener» Java que solo encuentra las
             # clases de la app desde ese hilo (desde un hilo de fondo fallaba con
-            # ClassNotFoundException · «No se encontró un componente…»).
-            self._authorizer = AndroidAuthorizer._on_main(lambda: AndroidAuthorizer(log=self.log))
+            # ClassNotFoundException · «No se encontró un componente…»). Uno solo para toda
+            # la app (antes uno por respaldo, cada uno pidiendo su permiso).
+            # Sin candado: el hilo principal también pasa por aquí y no debe esperar a un
+            # hilo de fondo que a su vez espera al principal.
+            global _AUTHORIZER
+            if _AUTHORIZER is None:
+                made = AndroidAuthorizer._on_main(lambda: AndroidAuthorizer(log=self.log))
+                if _AUTHORIZER is None:
+                    _AUTHORIZER = made
+            self._authorizer = _AUTHORIZER
             self._authorizer.account = self.account
         elif self._authorizer is None:
             # PC (Windows): inicio de sesión en el navegador, si esta copia trae la credencial.
@@ -614,8 +632,9 @@ class DriveBackup:
                     name = auth.choose_account()
                     self.log(f"Cuenta elegida: {name}")
                     self.use_account(name)
-                token = auth.get_token(interactive=True)
-                self._token = (token, time.monotonic() + self.TOKEN_TTL)
+                with _TOKEN_LOCK:
+                    token = auth.get_token(interactive=True)
+                    self._token = _SHARED_TOKEN[self.account or ""] = (token, time.monotonic() + self.TOKEN_TTL)
                 self.db.set_setting("drive_enabled", True)
                 who = self.account
                 self.log(f"Cuenta conectada{': ' + who if who else ''}")
@@ -639,6 +658,7 @@ class DriveBackup:
             self.db.set_setting("drive_account", name or None)
             self.db.set_setting("drive_folders", {})
             self._token = None
+            _SHARED_TOKEN.clear()
         if self._authorizer is not None:
             self._authorizer.account = name or None
 
@@ -661,6 +681,7 @@ class DriveBackup:
         token = self._token[0] if self._token else None
         self.db.set_setting("drive_enabled", False)
         self._token = None
+        _SHARED_TOKEN.clear()
         if hasattr(self._authorizer, "forget"):
             self._authorizer.forget()          # PC: la próxima vez vuelve a pedir la cuenta
         if token:   # revocar en Google: la próxima conexión vuelve a pedir cuenta y permiso
@@ -677,11 +698,26 @@ class DriveBackup:
     def _get_token(self) -> str:
         if self._token and self._token[1] > time.monotonic():
             return self._token[0]
-        if not self.available:
-            raise NeedsConsent("Sin cuenta de Google conectada")
-        token = self.authorizer.get_token(interactive=False)
-        self._token = (token, time.monotonic() + self.TOKEN_TTL)
-        return token
+        with _TOKEN_LOCK:                    # un pedido a la vez; los demás reusan el token
+            key = self.account or ""
+            shared = _SHARED_TOKEN.get(key)
+            if shared and shared[1] > time.monotonic():
+                self._token = shared
+                return shared[0]
+            if not self.available:
+                raise NeedsConsent("Sin cuenta de Google conectada")
+            token = self.authorizer.get_token(interactive=False)
+            self._token = _SHARED_TOKEN[key] = (token, time.monotonic() + self.TOKEN_TTL)
+            return token
+
+    def _drop_token(self) -> None:
+        """Token rechazado (vencido): se olvida aquí y en el compartido."""
+        with _TOKEN_LOCK:
+            old = self._token
+            self._token = None
+            key = self.account or ""
+            if old and _SHARED_TOKEN.get(key) == old:
+                _SHARED_TOKEN.pop(key, None)
 
     # ------------------------------------------------------------ API REST
     def _call(self, method: str, url: str, body: bytes | None = None,
@@ -692,7 +728,7 @@ class DriveBackup:
                 headers["Content-Type"] = content_type
             status, data = self.transport(method, url, headers, body)
             if status == 401 and attempt == 0:
-                self._token = None  # token vencido: pedir otro una vez
+                self._drop_token()  # token vencido: pedir otro una vez
                 continue
             if status >= 400:
                 try:
@@ -711,7 +747,7 @@ class DriveBackup:
         for attempt in range(2):
             status, data = self.transport("GET", url, {"Authorization": f"Bearer {self._get_token()}"}, None)
             if status == 401 and attempt == 0:
-                self._token = None
+                self._drop_token()
                 continue
             if status >= 400:
                 raise DriveError(f"Drive {status}: {data[:200].decode('utf-8', 'replace')}", status)
