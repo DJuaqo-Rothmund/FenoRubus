@@ -3342,7 +3342,7 @@ def test_yield_estimate_counts_boxes_and_drive_folder(tmp_path):
     assert sum(x.startswith(folder.replace("Meeker", "Regina")) for x in fake.live()) == 3
     assert len([x for x in fake.live() if x.endswith(".jpg")]) == 3
     csv = open(d.export_csv(), encoding="utf-8-sig").read()
-    assert ";Regina;3;2;10;0;11;0;4;" in csv and csv.rstrip().endswith(";41,6;0,17;1664;")   # 1,66 t/ha
+    assert ";Regina;3;2;10;0;11;0;4;" in csv and csv.rstrip().endswith(";41,6;0,17;1664;Foto;;;;;;;")   # 1,66 t/ha
 
 
 def test_drive_token_shared_and_one_request_at_a_time(tmp_path):
@@ -3445,3 +3445,38 @@ def test_notebook_sheets_and_pasted_photos(db, tmp_path):
     assert [p["text"] for p in db.note_pages(e)] == ["hoja uno", "hoja tres"]
     assert [(p["id"], p["page"]) for p in e["photos"]] == [(p2, 1)]
     assert p1 not in [p["id"] for p in e["photos"]]
+
+
+def test_yield_map_layers_by_sector_and_real_count(tmp_path):
+    """Mapa de rendimiento: t/ha promedio por sector del plano (por GPS o por el nombre del
+    sector) y puntos foto / conteo real; el conteo real pesa por sobre la foto."""
+    import json
+    from pathlib import Path
+    import rendimiento as R
+    plan = json.loads((Path(__file__).resolve().parent.parent / "assets" / "maps" / "AM.json")
+                      .read_text(encoding="utf-8"))
+    g = plan["geo"]
+    sec = next(x for x in plan["sectors"] if x["id"] == "E1-S6")
+    ring = sec["parts"][0]
+    x, y = sum(ring[0::2]) / len(ring[0::2]), sum(ring[1::2]) / len(ring[1::2])
+    lat, lon = (y + g["y0"]) / g["ky"], (x + g["x0"]) / g["kx"]
+    d = R.YieldDB(str(tmp_path))
+    place = {"kind": "predio", "name": "El Amanecer", "code": "AM"}
+    a = d.new_set(place, "Equipo de riego 2 · sector 7 · Meeker", "2026-11-10", fruit_g=4, plants_ha=10000)
+    b = d.new_set(place, "", "2026-11-10", fruit_g=4, plants_ha=10000)
+    d.update_set(b, latitude=lat, longitude=lon, loc_source="gps", kind="real", real_per_plant=50)
+    for sid, n in ((a, 20), (b, 30)):
+        p = d.add_photo(sid, str(tmp_path / f"{sid}.jpg"), enqueue=False)
+        d.set_count(p, "fruto_verde", n)
+    sets = d.sets()
+    rb = next(s for s in sets if s["id"] == b)
+    assert rb["real_t_ha"] == pytest.approx(50 * 4 / 1000 * 10000 / 1000)
+    assert rb["photo_error"] == pytest.approx((30 - 50) / 50 * 100)
+    lay = R.map_layers(sets, plan)
+    assert set(lay["sectors"]) == {"E2-S7", "E1-S6"}
+    assert lay["sectors"]["E1-S6"]["t_ha"] == pytest.approx(2.0) and lay["sectors"]["E1-S6"]["real"] == 1
+    assert lay["sectors"]["E2-S7"]["t_ha"] == pytest.approx(20 * 4 / 1000 * 10)
+    assert {p["kind"] for p in lay["points"]} == {"foto", "real"}
+    assert lay["lo"] < lay["hi"]
+    lo_c, hi_c = R.yield_color(lay["lo"], lay["lo"], lay["hi"]), R.yield_color(lay["hi"], lay["lo"], lay["hi"])
+    assert lo_c[0] > lo_c[1] and hi_c[1] > hi_c[0]          # rojo (menos) y verde (más)

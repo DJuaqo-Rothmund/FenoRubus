@@ -75,6 +75,16 @@ CREATE INDEX IF NOT EXISTS idx_yield_photo_set ON yield_photos(set_id);
 """
 
 
+# Columnas agregadas después (estimación con conteo real y su ubicación en el plano).
+NEW_COLUMNS = [
+    ("kind", "TEXT NOT NULL DEFAULT 'foto'"),   # foto | real (foto + conteo y peso a mano)
+    ("real_per_plant", "REAL"),                 # frutos por planta contados a mano
+    ("real_kg_plant", "REAL"),                  # kg por planta pesados (opcional)
+    ("loc_source", "TEXT NOT NULL DEFAULT ''"),  # gps | foto
+]
+KINDS = {"foto": "Foto", "real": "Foto + conteo real"}
+
+
 def _now() -> str:
     return _dt.datetime.now().isoformat(timespec="seconds")
 
@@ -110,6 +120,89 @@ def estimate(totals: dict, fruit_g: float | None, fruit_set: float | None, cover
             "kg_plant": kg_plant, "kg_ha": kg_ha, "t_ha": kg_ha / 1000 if kg_ha is not None else None}
 
 
+def real_result(s: dict, photo: dict) -> dict:
+    """Conteo real (a mano) de una estimación «foto + conteo real»: kg/ha que salen de lo
+    contado y pesado, y cuánto se alejó la foto (%). Vacío si no es de ese tipo."""
+    if (s.get("kind") or "foto") != "real" or not s.get("real_per_plant"):
+        return {"real_kg_plant": None, "real_t_ha": None, "photo_error": None}
+    kg_plant = s.get("real_kg_plant")
+    if not kg_plant and s.get("fruit_g"):
+        kg_plant = s["real_per_plant"] * s["fruit_g"] / 1000
+    t_ha = kg_plant * s["plants_ha"] / 1000 if kg_plant and s.get("plants_ha") else None
+    err = None
+    if photo.get("per_plant") is not None and s["real_per_plant"]:
+        err = (photo["per_plant"] - s["real_per_plant"]) / s["real_per_plant"] * 100
+    return {"real_kg_plant": kg_plant, "real_t_ha": t_ha, "photo_error": err}
+
+
+def best_t_ha(s: dict) -> float | None:
+    """t/ha de una estimación para el mapa: la del conteo real si la hay; si no, la foto."""
+    return s.get("real_t_ha") if s.get("real_t_ha") is not None else s.get("t_ha")
+
+
+SECTOR_RE = re.compile(r"equipo(?:\s+de\s+riego)?\s*(\d+)\D+?sector\s*(\d+)", re.I)
+
+
+def plan_sector(s: dict, plan: dict | None) -> dict | None:
+    """Sector del plano del predio de una estimación: por su ubicación (GPS o foto) o, si no
+    tiene, por el nombre del sector elegido («Equipo de riego 2 · sector 7 · Meeker»)."""
+    if not plan:
+        return None
+    if s.get("latitude") is not None and s.get("longitude") is not None:
+        import geo
+        hit = geo.sector_at(plan, s["latitude"], s["longitude"])
+        if hit:
+            return hit
+    m = SECTOR_RE.search(s.get("sector") or "")
+    if m:
+        sid = f"E{int(m.group(1))}-S{int(m.group(2))}"
+        return next((x for x in plan["sectors"] if x["id"] == sid), None)
+    return None
+
+
+def map_layers(sets: list[dict], plan: dict) -> dict:
+    """Para el mapa de rendimiento del predio: t/ha promedio por sector y los puntos.
+    {"sectors": {id: {"t_ha", "n", "real"}}, "points": [{set, x, y, kind, t_ha, sector}],
+     "lo", "hi"} (x, y en metros del plano; sin ubicación, el centro del sector)."""
+    out, pts = {}, []
+    g = plan.get("geo")
+    for s in sets:
+        sec = plan_sector(s, plan)
+        t = best_t_ha(s)
+        if sec is not None and t is not None:
+            d = out.setdefault(sec["id"], {"sum": 0.0, "n": 0, "real": 0})
+            d["sum"] += t
+            d["n"] += 1
+            d["real"] += (s.get("kind") == "real")
+        x = y = None
+        if g and s.get("latitude") is not None and s.get("longitude") is not None:
+            x, y = s["longitude"] * g["kx"] - g["x0"], s["latitude"] * g["ky"] - g["y0"]
+        elif sec is not None:
+            ring = max(sec["parts"], key=len)
+            x, y = sum(ring[0::2]) / (len(ring) / 2), sum(ring[1::2]) / (len(ring) / 2)
+        if x is not None:
+            pts.append({"set": s["id"], "x": x, "y": y, "kind": s.get("kind") or "foto", "t_ha": t,
+                        "sector": sec["id"] if sec else ""})
+    sectors = {k: {"t_ha": v["sum"] / v["n"], "n": v["n"], "real": v["real"]} for k, v in out.items()}
+    vals = [v["t_ha"] for v in sectors.values()]
+    return {"sectors": sectors, "points": pts, "lo": min(vals) if vals else None,
+            "hi": max(vals) if vals else None}
+
+
+# Rampa del rendimiento: rojo (menos) → amarillo → verde (más).
+YIELD_RAMP = [(0.0, (198, 40, 40)), (0.5, (244, 180, 0)), (1.0, (46, 125, 50))]
+
+
+def yield_color(t: float, lo: float, hi: float) -> tuple[float, float, float]:
+    k = 0.5 if hi is None or lo is None or hi - lo < 1e-9 else (t - lo) / (hi - lo)
+    k = max(0.0, min(1.0, k))
+    for (t0, c0), (t1, c1) in zip(YIELD_RAMP, YIELD_RAMP[1:]):
+        if k <= t1:
+            f = (k - t0) / (t1 - t0)
+            return tuple((a + (b - a) * f) / 255 for a, b in zip(c0, c1))
+    return tuple(v / 255 for v in YIELD_RAMP[-1][1])
+
+
 def counts_from_boxes(rec: dict | None, keys) -> dict | None:
     """Conteo por estructura a partir de las cajas de IA+ de una foto (None si no está
     marcada; {} si se marcó «sin estructuras»)."""
@@ -136,6 +229,10 @@ class YieldDB(Database):
         super().__init__(os.path.join(self.base_dir, DB_FILE), seed=False)
         with self._lock:
             self.conn.executescript(SCHEMA)
+            have = {r[1] for r in self.conn.execute("PRAGMA table_info(yield_sets)")}
+            for name, typ in NEW_COLUMNS:
+                if name not in have:
+                    self.conn.execute(f"ALTER TABLE yield_sets ADD COLUMN {name} {typ}")
             self.conn.commit()
 
     @property
@@ -165,7 +262,8 @@ class YieldDB(Database):
 
     def update_set(self, set_id: int, **fields) -> None:
         allowed = {"place_kind", "place", "place_code", "sector", "taken_on", "fruit_g", "fruit_set",
-                   "coverage", "plants_ha", "notes", "latitude", "longitude"}
+                   "coverage", "plants_ha", "notes", "latitude", "longitude", "kind", "real_per_plant",
+                   "real_kg_plant", "loc_source"}
         sets = {k: v for k, v in fields.items() if k in allowed}
         if not sets:
             return
@@ -287,8 +385,10 @@ class YieldDB(Database):
         counted = self.query_one("SELECT COUNT(DISTINCT c.photo_id) AS n FROM yield_counts c JOIN yield_photos p "
                                  "ON p.id = c.photo_id WHERE p.set_id=?", (set_id,))["n"]
         n_photos = self.query_one("SELECT COUNT(*) AS n FROM yield_photos WHERE set_id=?", (set_id,))["n"]
-        return dict(estimate(tot, s["fruit_g"], s["fruit_set"], s["coverage"], s["plants_ha"]),
-                    totals=tot, photos=n_photos, counted=counted)
+        res = dict(estimate(tot, s["fruit_g"], s["fruit_set"], s["coverage"], s["plants_ha"]),
+                   totals=tot, photos=n_photos, counted=counted)
+        res.update(real_result(s, res))
+        return res
 
     # ------------------------------------------------------------- planilla
     def export_csv(self, path: str | None = None) -> str:
@@ -298,7 +398,9 @@ class YieldDB(Database):
         head = (["Fecha", "Lugar", "Código", "Sector / variedad", "Fotos", "Fotos contadas"]
                 + [n for _k, n, _c in keys]
                 + ["Cuaja (%)", "Parte fotografiada (%)", "Peso fruto (g)", "Plantas/ha",
-                   "Frutos por planta", "kg por planta", "kg/ha", "Notas"])
+                   "Frutos por planta", "kg por planta", "kg/ha", "Tipo", "Frutos por planta (conteo real)",
+                   "kg por planta (real)", "kg/ha (real)", "Diferencia foto vs real (%)", "Latitud", "Longitud",
+                   "Notas"])
         num = lambda v, d=1: "" if v is None else f"{v:.{d}f}".replace(".", ",")   # noqa: E731
         with open(path, "w", newline="", encoding="utf-8-sig") as f:
             w = csv.writer(f, delimiter=";")
@@ -308,7 +410,11 @@ class YieldDB(Database):
                            + [s["totals"].get(k, 0) for k, _n, _c in keys]
                            + [num(s["fruit_set"], 0), num(s["coverage"], 0), num(s["fruit_g"]),
                               num(s["plants_ha"], 0), num(s["per_plant"]), num(s["kg_plant"], 2),
-                              num(s["kg_ha"], 0), s["notes"]])
+                              num(s["kg_ha"], 0), KINDS.get(s.get("kind") or "foto", "Foto"),
+                              num(s.get("real_per_plant")), num(s.get("real_kg_plant"), 2),
+                              num(s["real_t_ha"] * 1000 if s.get("real_t_ha") is not None else None, 0),
+                              num(s.get("photo_error"), 0), num(s.get("latitude"), 6),
+                              num(s.get("longitude"), 6), s["notes"]])
         return path
 
 

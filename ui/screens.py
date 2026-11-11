@@ -1237,7 +1237,7 @@ class SectorRow(GlassButton):
     screen = ObjectProperty(None, allownone=True)
 
 
-def sector_map_block(box, plan, status, selected, on_select):
+def sector_map_block(box, plan, status, selected, on_select, satellite=None):
     """Plano del predio con los equipos de riego arriba, centrados: son la leyenda de
     colores y, al tocarlos, acercan el equipo entero en el mismo plano (ahí se toca el
     sector); tocar de nuevo el equipo elegido vuelve a la vista general. Devuelve el plano."""
@@ -1247,7 +1247,7 @@ def sector_map_block(box, plan, status, selected, on_select):
     from ui.mapview import default_layer, remember_layer
     mp = SectorMap(plan, on_select=on_select, size_hint_y=None, height=dp(200), zoomable=True)
     mp.status, mp.selected = status, selected
-    mp.satellite = bool(plan.get("geo")) and default_layer() == "sat"
+    mp.satellite = bool(plan.get("geo")) and (default_layer() == "sat" if satellite is None else satellite)
     mp.bind(width=lambda w, v: setattr(w, "height", max(dp(200), v * plan["h"] / plan["w"] * 1.1)))
 
     row = BoxLayout(size_hint=(None, None), height=dp(34), spacing=dp(6))

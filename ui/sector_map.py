@@ -22,7 +22,7 @@ from kivy.graphics import (Color, Ellipse, InstructionGroup, Line, Mesh, PopMatr
                            Rectangle, Translate)
 from kivy.graphics.tesselator import TYPE_POLYGONS, WINDING_ODD, Tesselator
 from kivy.metrics import dp, sp
-from kivy.properties import BooleanProperty, DictProperty, NumericProperty, StringProperty
+from kivy.properties import BooleanProperty, DictProperty, ListProperty, NumericProperty, StringProperty
 from kivy.uix.stencilview import StencilView
 
 from ui import theme
@@ -154,6 +154,10 @@ class SectorMap(StencilView):
     status = DictProperty()
     zoom = NumericProperty(1.0)
     satellite = BooleanProperty(False)   # imagen satelital debajo (si el plano trae «geo»)
+    # Mapa de rendimiento: color propio por sector ({id: (r, g, b)}; los demás, desvaídos) y
+    # puntos encima ([{x, y (metros del plano), kind: foto | real}]).
+    fill = DictProperty()
+    marks = ListProperty()
 
     MAX_ZOOM = 14.0
 
@@ -192,7 +196,7 @@ class SectorMap(StencilView):
         self.bind(size=lambda *_: self.focused and self.focus(self.focused, animate=False))
         self.bind(size=self._redraw, selected=self._redraw,
                   status=self._redraw, zoom=self._redraw, rotate=self._redraw,
-                  satellite=self._redraw)
+                  satellite=self._redraw, fill=self._redraw, marks=self._redraw)
 
     # ----------------------------------------------------------- coordenadas
     def _dims(self):
@@ -343,6 +347,10 @@ class SectorMap(StencilView):
         colors = {sid: sector_color(info[sid]["equipo"], info[sid]["sector"],
                                     faded=not sat and not (self.status.get(sid) or {}).get("data"))
                   for sid in info}
+        if self.fill:            # mapa de rendimiento: su color; sin dato, gris claro
+            for sid in info:
+                rgb = self.fill.get(sid)
+                colors[sid] = ([*rgb, 1.0], True) if rgb else (c("#E6E8E3"), False)
         ts = self._local
         w, h = self.size
         with self.canvas:
@@ -354,8 +362,11 @@ class SectorMap(StencilView):
                 self._satellite()
             for sid, ring, meshes, _a in self._parts:
                 rgba = colors[sid][0]
-                faded = not (self.status.get(sid) or {}).get("data")
-                Color(*rgba[:3], (.38 if faded else .62) if sat else (rgba[3] if len(rgba) > 3 else 1))
+                faded = (sid not in self.fill) if self.fill else not (self.status.get(sid) or {}).get("data")
+                if self.fill and sat:
+                    Color(*rgba[:3], .15 if faded else .7)
+                else:
+                    Color(*rgba[:3], (.38 if faded else .62) if sat else (rgba[3] if len(rgba) > 3 else 1))
                 for verts, idx in meshes:
                     v = list(verts)
                     for k in range(0, len(v), 4):
@@ -393,6 +404,24 @@ class SectorMap(StencilView):
                     Ellipse(pos=(ex - dp(1), ey - dp(1)), size=(r * 2 + dp(2), r * 2 + dp(2)))
                     Color(1, 1, 1, 1)
                     Ellipse(pos=(ex, ey), size=(r * 2, r * 2))
+            # Puntos de muestreo: círculo (foto) o rombo (foto + conteo real).
+            for m in self.marks:
+                x, y = ts(m["x"], m["y"])
+                r = dp(6)
+                if m.get("kind") == "real":
+                    Color(*c(theme.INK, .9))
+                    Mesh(vertices=[x, y + r + dp(2), 0, 0, x + r + dp(2), y, 0, 0, x, y - r - dp(2), 0, 0,
+                                   x - r - dp(2), y, 0, 0], indices=[0, 1, 2, 3], mode="triangle_fan")
+                    Color(1, 1, 1, 1)
+                    Mesh(vertices=[x, y + r, 0, 0, x + r, y, 0, 0, x, y - r, 0, 0, x - r, y, 0, 0],
+                         indices=[0, 1, 2, 3], mode="triangle_fan")
+                    Color(*c(theme.INK, .9))
+                    Ellipse(pos=(x - dp(2), y - dp(2)), size=(dp(4), dp(4)))
+                else:
+                    Color(*c(theme.INK, .9))
+                    Ellipse(pos=(x - r * .8 - dp(1.5), y - r * .8 - dp(1.5)), size=(r * 1.6 + dp(3), r * 1.6 + dp(3)))
+                    Color(1, 1, 1, 1)
+                    Ellipse(pos=(x - r * .8, y - r * .8), size=(r * 1.6, r * 1.6))
             # Sector elegido: contorno fino en el tono oscuro de su equipo y un brillo neón
             # que «respira» (sube y baja), ver _neon_tick.
             self._neon_layers = []

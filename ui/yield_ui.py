@@ -19,7 +19,7 @@ from kivy.clock import Clock
 from kivy.factory import Factory
 from kivy.lang import Builder
 from kivy.metrics import dp
-from kivy.properties import NumericProperty, StringProperty
+from kivy.properties import ListProperty, NumericProperty, StringProperty
 from kivy.uix.behaviors import ButtonBehavior
 from kivy.uix.gridlayout import GridLayout
 from kivy.uix.image import Image
@@ -100,6 +100,13 @@ KV = """
         size: dp(58), dp(58)
         pos_hint: {"center_y": .5}
         fit_mode: "cover" if root.thumb else "contain"
+        color: (1, 1, 1, 0) if root.dot[3] else (1, 1, 1, 1)
+        canvas.after:
+            Color:
+                rgba: root.dot
+            Ellipse:
+                pos: self.x + dp(10), self.y + dp(10)
+                size: dp(38), dp(38)
     MDBoxLayout:
         orientation: "vertical"
         pos_hint: {"center_y": .5}
@@ -195,6 +202,7 @@ class YieldRow(ButtonBehavior, MDBoxLayout):
     subtitle = StringProperty()
     value = StringProperty()
     thumb = StringProperty()
+    dot = ListProperty([0, 0, 0, 0])      # color del sector (mapa de rendimiento) en vez de foto
 
 
 class CountRow(MDBoxLayout):
@@ -272,6 +280,9 @@ class YieldHome(YieldScreenBase):
         b = Factory.PrimaryButton(text="Nueva estimación")
         b.bind(on_release=lambda *_: new_set())
         body.add_widget(b)
+        b = Factory.GhostButton(icon="map-legend", text="Mapa de rendimiento del predio")
+        b.bind(on_release=lambda *_: open_map())
+        body.add_widget(b)
         sets = db().sets()
         if sets:
             body.add_widget(Factory.SectionLabel(text="ESTIMACIONES"))
@@ -339,6 +350,15 @@ class YieldSet(YieldScreenBase):
         b = Factory.GhostButton(icon="calendar", text=f"Fecha: {_date(s['taken_on'])}")
         b.bind(on_release=lambda *_: self._pick_date())
         card.add_widget(b)
+        kind = s["kind"] or "foto"
+        b = Factory.GhostButton(icon="scale-balance" if kind == "real" else "camera-outline",
+                                text=f"Tipo: {R.KINDS[kind]}")
+        b.bind(on_release=lambda *_: self._pick_kind())
+        card.add_widget(b)
+        where = ("Ubicación: " + ("GPS del teléfono" if s["loc_source"] == "gps" else "de la foto")
+                 + f" ({s['latitude']:.5f}, {s['longitude']:.5f})") if s["latitude"] is not None else \
+            "Ubicación: se toma de la primera foto o del GPS (para el mapa de rendimiento)."
+        card.add_widget(Factory.Muted(text=where))
         body.add_widget(card)
         # Fotos
         photos = d.photos(self.set_id)
@@ -373,6 +393,25 @@ class YieldSet(YieldScreenBase):
                                     theme_text_color="Custom", text_color=c(theme.INK)))
             card.add_widget(line)
         body.add_widget(card)
+        if kind == "real":
+            card = _card("CONTEO REAL (A MANO, EN ESTE MISMO PUNTO)")
+            self._real = {}
+            for key, hint, val in (("real_per_plant", "Frutos por planta contados", s["real_per_plant"]),
+                                   ("real_kg_plant", "kg de fruta por planta (pesados, opcional)",
+                                    s["real_kg_plant"])):
+                f = Factory.Field(hint_text=hint, input_filter="float", text="" if val is None else f"{val:g}")
+                f.bind(text=lambda w, _t, k=key: self._queue_save(k, w),
+                       focus=lambda w, foc, k=key: (not foc) and self._save_field(k, w.text))
+                card.add_widget(f)
+            if res.get("photo_error") is not None:
+                card.add_widget(Factory.Body(
+                    text=f"Foto: {_num(res['per_plant'], 0)} frutos/planta · real: {_num(s['real_per_plant'], 0)} "
+                         f"· la foto {'sobrestimó' if res['photo_error'] > 0 else 'subestimó'} "
+                         f"{abs(res['photo_error']):.0f} %"))
+            card.add_widget(Factory.Muted(
+                text="Saque las fotos antes de tocar la planta; luego cuente (y si puede, pese) los frutos. "
+                     "Estos puntos enseñan a la app cuánto corregir lo que ve en las fotos."))
+            body.add_widget(card)
         card = _card("PARÁMETROS")
         self._fields = {}
         for key, hint, val in (("fruit_g", "Peso medio del fruto (g)", s["fruit_g"]),
@@ -441,6 +480,55 @@ class YieldSet(YieldScreenBase):
         if refresh and changed:
             Clock.schedule_once(lambda *_: self.refresh(), 0)
 
+    def _pick_kind(self):
+        from ui.screens import pick_dialog
+
+        def set_kind(k):
+            db().update_set(self.set_id, kind=k)
+            self.refresh()
+        pick_dialog("Tipo de estimación", [
+            ("Foto", "Se estima solo con las fotos", lambda: set_kind("foto")),
+            ("Foto + conteo real", "Además se cuentan (y pesan) los frutos a mano en ese punto",
+             lambda: set_kind("real"))])
+
+    def _locate(self, paths, from_camera: bool):
+        """Ubicación del punto (para el mapa): la de la foto o, si no trae, el GPS."""
+        s = db().get_set(self.set_id)
+        if not s or s["latitude"] is not None:
+            return
+        import geo
+        for p in paths:
+            g = geo.exif_gps(p)
+            if g:
+                db().update_set(self.set_id, latitude=g[0], longitude=g[1], loc_source="foto")
+                self.refresh()
+                return
+        if not from_camera or getattr(self, "_loc_gps", None) is not None:
+            return
+        sid = self.set_id
+
+        def done(lat, lon, acc=None):
+            self._loc_gps = None
+            db().update_set(sid, latitude=lat, longitude=lon, loc_source="gps")
+            if self.set_id == sid:
+                self.refresh()
+
+        def fail(_msg=""):
+            self._loc_gps = None
+
+        def granted(ok):
+            if not ok:
+                return fail()
+            try:
+                self._loc_gps = geo.LocationRequest(done, fail, target=25)
+                self._loc_gps.start()
+            except Exception:  # noqa: BLE001
+                fail()
+        try:
+            geo.request_location_permission(granted)
+        except Exception:  # noqa: BLE001
+            pass
+
     # ------------------------------------------------------------------ lugar y fecha
     def _pick_place(self):
         import scout
@@ -508,6 +596,8 @@ class YieldSet(YieldScreenBase):
 
         def done(lat, lon, acc=None):
             self._gps = None
+            if db().get_set(self.set_id)["latitude"] is None:
+                db().update_set(self.set_id, latitude=lat, longitude=lon, loc_source="gps")
             self._sector_from(lat, lon, "Según su GPS")
 
         def fail(msg=""):
@@ -621,7 +711,9 @@ class YieldSet(YieldScreenBase):
                 if err:
                     a.toast(f"No se pudo guardar alguna foto: {err}")
                 self.refresh()
-                self._sector_from_photos([p["path"] for p in db().photos(sid)][-len(paths):])
+                new = [p["path"] for p in db().photos(sid)][-len(paths):]
+                self._sector_from_photos(new)
+                self._locate(new, source == "camera")
                 a.yield_backup()
             a.workers.submit(work)
 
@@ -722,6 +814,179 @@ class YieldPhoto(YieldScreenBase):
         confirm("Quitar foto", "Se quita de la estimación y del teléfono (en Drive queda).", [("Quitar", go)])
 
 
+# ============================================================================ mapa de rendimiento
+class YieldMap(YieldScreenBase):
+    """Mapa de rendimiento del predio: cada sector pintado según el rendimiento estimado
+    (rojo menos → amarillo → verde más; promedio de sus estimaciones de la temporada) y los
+    puntos de muestreo encima: círculo = foto, rombo = foto + conteo real."""
+    code = StringProperty("")
+    whole = False                 # False: esta temporada; True: todas
+
+    def on_pre_enter(self, *_):
+        self.title = "Mapa de rendimiento"
+        self.refresh()
+
+    def _places(self):
+        import scout
+        from platform_utils import get_base_dir
+        from ui.sector_map import load_map
+        out = []
+        for p in scout.places(get_base_dir(), _crop_id()):
+            plan = load_map(p["code"]) if p["kind"] == "predio" else None
+            if plan:
+                out.append((p, plan))
+        return out
+
+    def _sets(self, code):
+        import phenology as ph
+        import datetime as dt
+        season = ph.season_of(dt.date.today())
+        out = []
+        for s in db().sets():
+            if s["place_code"] != code:
+                continue
+            if not self.whole and ph.season_of(dt.date.fromisoformat(s["taken_on"])) != season:
+                continue
+            out.append(s)
+        return out
+
+    def refresh(self):
+        from kivy.uix.anchorlayout import AnchorLayout
+        from ui.screens import PillButton, sector_map_block
+        body = self.clear()
+        places = self._places()
+        if not places:
+            body.add_widget(Factory.Muted(
+                text="Ningún predio de este cultivo tiene plano cargado todavía (hoy: El Amanecer)."))
+            return
+        if self.code not in [p["code"] for p, _ in places]:
+            last = (db().get_setting("yield_last_place") or {}).get("place") or {}
+            self.code = last.get("code") if last.get("code") in [p["code"] for p, _ in places] else places[0][0]["code"]
+        place, plan = next((p, pl) for p, pl in places if p["code"] == self.code)
+        # Predio (si hay más de uno) y temporada
+        row = MDBoxLayout(adaptive_height=True, spacing=dp(6))
+        for p, _pl in places if len(places) > 1 else []:
+            b = PillButton(text=p["name"], size_hint=(None, None), height=dp(34), width=dp(130))
+            b.selected = p["code"] == self.code
+            b.bind(on_release=lambda *_, c=p["code"]: (setattr(self, "code", c), self.refresh()))
+            row.add_widget(b)
+        for whole, label in ((False, "Esta temporada"), (True, "Todas")):
+            b = PillButton(text=label, size_hint=(None, None), height=dp(34), width=dp(128))
+            b.selected = self.whole == whole
+            b.bind(on_release=lambda *_, w=whole: (setattr(self, "whole", w), self.refresh()))
+            row.add_widget(b)
+        holder = AnchorLayout(anchor_x="center", size_hint_y=None, height=dp(38))
+        row.size_hint_x = None
+        row.width = sum(ch.width for ch in row.children) + row.spacing * max(0, len(row.children) - 1)
+        holder.add_widget(row)
+        body.add_widget(holder)
+        sets = self._sets(self.code)
+        layers = R.map_layers(sets, plan)
+        lo, hi = layers["lo"], layers["hi"]
+        card = _card(f"{place['name'].upper()} · RENDIMIENTO ESTIMADO")
+        if not layers["sectors"]:
+            card.add_widget(Factory.Muted(
+                text="Aún no hay estimaciones con sector o ubicación en este predio. Elija el sector (o use el "
+                     "GPS) al crear una estimación y aparecerá aquí."))
+        self._sel = MDBoxLayout(orientation="vertical", adaptive_height=True, spacing=dp(6))
+        # Parte en el plano solo (los colores se leen mejor); «Satélite» pone la imagen debajo.
+        mp = sector_map_block(card, plan, {}, "", lambda sid: self._show_sector(sid, sets, plan, layers),
+                              satellite=False)
+        mp.fill = {sid: R.yield_color(v["t_ha"], lo, hi) for sid, v in layers["sectors"].items()}
+        mp.marks = [{"x": p["x"], "y": p["y"], "kind": p["kind"]} for p in layers["points"]]
+        self._map = mp
+        card.add_widget(_legend(lo, hi))
+        card.add_widget(self._sel)
+        body.add_widget(card)
+        # Resumen por sector, de más a menos
+        if layers["sectors"]:
+            card = _card("SECTORES, DE MÁS A MENOS")
+            names = {x["id"]: x["nombre"] for x in plan["sectors"]}
+            for sid, v in sorted(layers["sectors"].items(), key=lambda kv: -kv[1]["t_ha"]):
+                rgb = R.yield_color(v["t_ha"], lo, hi)
+                sub = f"{v['n']} estimación(es)" + (f", {v['real']} con conteo real" if v["real"] else "")
+                r = YieldRow(title=names.get(sid, sid), subtitle=sub, value=f"{_num(v['t_ha'], 1)} t/ha")
+                r.dot = [*rgb, 1]
+                r.bind(on_release=lambda *_, sid=sid: (self._map.focus(sid), self._show_sector(sid, sets, plan, layers)))
+                card.add_widget(r)
+            body.add_widget(card)
+
+    def _show_sector(self, sid, sets, plan, layers):
+        box = self._sel
+        box.clear_widgets()
+        sec = next((x for x in plan["sectors"] if x["id"] == sid), None)
+        if sec is None:
+            return
+        self._map.selected = sid
+        v = layers["sectors"].get(sid)
+        box.add_widget(Factory.SectionLabel(
+            text=f"{sec['nombre'].upper()}" + (f" · {', '.join(sec.get('variedades') or [])}" if sec.get("variedades") else "")))
+        if not v:
+            box.add_widget(Factory.Muted(text="Sin estimaciones en este sector."))
+            return
+        box.add_widget(Factory.Body(text=f"Promedio: [b]{_num(v['t_ha'], 1)} t/ha[/b]", markup=True))
+        ids = {p["set"] for p in layers["points"] if p["sector"] == sid}
+        for s in sets:
+            if s["id"] not in ids:
+                continue
+            t = R.best_t_ha(s)
+            kind = "foto + conteo real" if s.get("kind") == "real" else "foto"
+            r = YieldRow(title=f"{_date(s['taken_on'])} · {kind}",
+                         subtitle=f"{s['photos']} foto(s) · {_num(s['per_plant'], 0)} frutos/planta",
+                         value=f"{_num(t, 1)} t/ha" if t is not None else "—")
+            r.bind(on_release=lambda *_, i=s["id"]: open_set(i))
+            box.add_widget(r)
+
+
+def _legend(lo, hi):
+    """Barra de colores (menos → más) con los t/ha de los extremos y los símbolos."""
+    from kivy.graphics import Color, Ellipse, Mesh, Rectangle
+    box = MDBoxLayout(orientation="vertical", adaptive_height=True, spacing=dp(4), padding=(0, dp(6), 0, 0))
+    bar = Widget(size_hint_y=None, height=dp(14))
+
+    def draw(*_):
+        bar.canvas.clear()
+        n = 40
+        with bar.canvas:
+            for i in range(n):
+                Color(*R.yield_color(i / (n - 1), 0, 1))
+                Rectangle(pos=(bar.x + bar.width * i / n, bar.y), size=(bar.width / n + 1, bar.height))
+    bar.bind(pos=draw, size=draw)
+    box.add_widget(bar)
+    row = MDBoxLayout(adaptive_height=True)
+    row.add_widget(MDLabel(text=f"Menos{'' if lo is None else f' · {_num(lo, 1)} t/ha'}", font_style="Caption",
+                           adaptive_height=True))
+    row.add_widget(MDLabel(text=f"{'' if hi is None else f'{_num(hi, 1)} t/ha · '}Más", font_style="Caption",
+                           halign="right", adaptive_height=True))
+    box.add_widget(row)
+    sym = Widget(size_hint_y=None, height=dp(22))
+
+    def draw_sym(*_):
+        sym.canvas.clear()
+        x, y = sym.x + dp(8), sym.center_y
+        with sym.canvas:
+            Color(*c(theme.INK, .9))
+            Ellipse(pos=(x - dp(6.3), y - dp(6.3)), size=(dp(12.6), dp(12.6)))
+            Color(1, 1, 1, 1)
+            Ellipse(pos=(x - dp(4.8), y - dp(4.8)), size=(dp(9.6), dp(9.6)))
+            x2 = sym.center_x + dp(8)
+            Color(*c(theme.INK, .9))
+            Mesh(vertices=[x2, y + dp(8), 0, 0, x2 + dp(8), y, 0, 0, x2, y - dp(8), 0, 0, x2 - dp(8), y, 0, 0],
+                 indices=[0, 1, 2, 3], mode="triangle_fan")
+            Color(1, 1, 1, 1)
+            Mesh(vertices=[x2, y + dp(6), 0, 0, x2 + dp(6), y, 0, 0, x2, y - dp(6), 0, 0, x2 - dp(6), y, 0, 0],
+                 indices=[0, 1, 2, 3], mode="triangle_fan")
+    sym.bind(pos=draw_sym, size=draw_sym)
+    lab = MDBoxLayout(adaptive_height=True)
+    lab.add_widget(MDLabel(text="       Foto", font_style="Caption", adaptive_height=True))
+    lab.add_widget(MDLabel(text="       Foto + conteo real", font_style="Caption", adaptive_height=True))
+    box.add_widget(sym)
+    box.add_widget(lab)
+    box.add_widget(Factory.Muted(text="Toque un sector para ver sus estimaciones. Color: promedio de t/ha del "
+                                      "sector (el conteo real, si lo hay, pesa por sobre la foto)."))
+    return box
+
+
 class _Big(ButtonBehavior, Image):
     pass
 
@@ -732,6 +997,11 @@ def _screen(cls, name):
     if not a.sm.has_screen(name):
         a.sm.add_widget(cls(name=name))
     return a.sm.get_screen(name)
+
+
+def open_map():
+    _screen(YieldMap, "yield_map")
+    app().go("yield_map")
 
 
 def open_home():
