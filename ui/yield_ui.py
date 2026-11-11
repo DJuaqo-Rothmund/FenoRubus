@@ -894,6 +894,7 @@ class YieldMap(YieldScreenBase):
                               satellite=False)
         mp.fill = {sid: R.yield_color(v["t_ha"], lo, hi) for sid, v in layers["sectors"].items()}
         mp.marks = [{"x": p["x"], "y": p["y"], "kind": p["kind"]} for p in layers["points"]]
+        mp.fill_text = {sid: f"{_num(v['t_ha'], 1)} t/ha" for sid, v in layers["sectors"].items()}
         self._map = mp
         card.add_widget(_legend(lo, hi))
         card.add_widget(self._sel)
@@ -982,8 +983,10 @@ def _legend(lo, hi):
     lab.add_widget(MDLabel(text="       Foto + conteo real", font_style="Caption", adaptive_height=True))
     box.add_widget(sym)
     box.add_widget(lab)
-    box.add_widget(Factory.Muted(text="Toque un sector para ver sus estimaciones. Color: promedio de t/ha del "
-                                      "sector (el conteo real, si lo hay, pesa por sobre la foto)."))
+    box.add_widget(Factory.Muted(text="Relleno: rendimiento (promedio de t/ha del sector; el conteo real pesa "
+                                      "por sobre la foto). Borde: color de su equipo de riego. Rótulo «2-7»: "
+                                      "equipo 2, sector 7; al acercar (o tocar un equipo arriba) aparecen sus "
+                                      "t/ha. Toque un sector para ver sus estimaciones."))
     return box
 
 

@@ -158,6 +158,7 @@ class SectorMap(StencilView):
     # puntos encima ([{x, y (metros del plano), kind: foto | real}]).
     fill = DictProperty()
     marks = ListProperty()
+    fill_text = DictProperty()          # {id: "1,9 t/ha"}: se agrega al rótulo al acercar
 
     MAX_ZOOM = 14.0
 
@@ -171,6 +172,7 @@ class SectorMap(StencilView):
         self._multi: set = set()   # dedos que hicieron zoom (no cuentan como toque)
         self._parts = []         # (id, anillo, [(vértices, índices)], área)
         self._labels = {}        # id -> (x, y) en metros
+        self._bbox = {}          # id -> (ancho, alto) en metros de su parte más grande
         self._textures = {}
         for s in plan["sectors"]:
             best = None
@@ -185,6 +187,8 @@ class SectorMap(StencilView):
                 if best is None or area > best[0]:
                     best = (area, ring)
             self._labels[s["id"]] = _label_point(best[1])
+            r = best[1]
+            self._bbox[s["id"]] = (max(r[0::2]) - min(r[0::2]), max(r[1::2]) - min(r[1::2]))
         self._shift = None
         self._redraw = Clock.create_trigger(self._draw, -1)
         self._tiles = None
@@ -196,7 +200,8 @@ class SectorMap(StencilView):
         self.bind(size=lambda *_: self.focused and self.focus(self.focused, animate=False))
         self.bind(size=self._redraw, selected=self._redraw,
                   status=self._redraw, zoom=self._redraw, rotate=self._redraw,
-                  satellite=self._redraw, fill=self._redraw, marks=self._redraw)
+                  satellite=self._redraw, fill=self._redraw, marks=self._redraw,
+                  fill_text=self._redraw, focused=self._redraw)
 
     # ----------------------------------------------------------- coordenadas
     def _dims(self):
@@ -327,13 +332,24 @@ class SectorMap(StencilView):
                 Mesh(vertices=verts, indices=[0, 1, 2, 3], mode="triangle_fan", texture=tex)
 
     # ---------------------------------------------------------------- dibujo
-    def _texture(self, sid):
-        if sid not in self._textures:
-            se = sid.split("-S")[-1]       # el equipo ya se reconoce por el color
-            lb = CoreLabel(text=se, font_size=sp(11), bold=True)
+    def _texture(self, sid, text: str | None = None):
+        key = (sid, text)
+        if key not in self._textures:
+            se = text or sid.split("-S")[-1]       # el equipo ya se reconoce por el color
+            lb = CoreLabel(text=se, font_size=sp(11), bold=True, halign="center")
             lb.refresh()
-            self._textures[sid] = lb.texture
-        return self._textures[sid]
+            self._textures[key] = lb.texture
+        return self._textures[key]
+
+    def _fill_label(self, sid, s):
+        """Mapa de rendimiento: «2-7» (equipo-sector, el color ya es el rendimiento) y, si se
+        acercó lo bastante, también sus t/ha debajo."""
+        eq, se = sid[1:].split("-S")
+        txt = f"{eq}-{se}"
+        extra = self.fill_text.get(sid)
+        if extra and (self.zoom >= 2.2 or (self.focused and "-" not in self.focused)):
+            txt += "\n" + extra
+        return self._texture(sid, txt)
 
     def _draw(self, *_):
         self.canvas.clear()
@@ -363,8 +379,10 @@ class SectorMap(StencilView):
             for sid, ring, meshes, _a in self._parts:
                 rgba = colors[sid][0]
                 faded = (sid not in self.fill) if self.fill else not (self.status.get(sid) or {}).get("data")
-                if self.fill and sat:
-                    Color(*rgba[:3], .15 if faded else .7)
+                other = bool(self.fill and self.focused and "-" not in self.focused
+                             and not sid.startswith(self.focused + "-"))
+                if self.fill and (sat or other):
+                    Color(*rgba[:3], (.15 if faded else .7) * (.35 if other else 1))
                 else:
                     Color(*rgba[:3], (.38 if faded else .62) if sat else (rgba[3] if len(rgba) > 3 else 1))
                 for verts, idx in meshes:
@@ -381,20 +399,39 @@ class SectorMap(StencilView):
                 for k in range(0, len(ring), 2):
                     pts += ts(ring[k], ring[k + 1])
                 outlines.setdefault(sid, []).append(pts)
-                Line(points=pts, close=True, width=dp(.9))
+                if self.fill:        # rendimiento en el relleno; el equipo, en el borde
+                    eq = info[sid]["equipo"]
+                    Color(*_hex(EQUIPO_RAMP.get(eq, ("#999999", "#333333"))[1]), 1)
+                    Line(points=pts, close=True, width=dp(1.7))
+                    Color(1, 1, 1, 1)
+                    Line(points=pts, close=True, width=dp(.5))
+                else:
+                    Line(points=pts, close=True, width=dp(.9))
             # Rótulos «equipo-sector» donde caben; un punto si tiene mediciones.
             s = self._base() * self.zoom
             for sid, (lx, ly) in self._labels.items():
-                tex = self._texture(sid)
                 x, y = ts(lx, ly)
-                area = max(a for i, _r, _m, a in self._parts if i == sid)
-                if math.sqrt(area) * s < tex.width * .9:
-                    continue
+                if self.fill:
+                    # Mapa de rendimiento: «2-7» (y sus t/ha) solo donde cabe a lo ancho y
+                    # a lo alto del sector; si no caben los t/ha, solo «2-7»; si ni eso, nada.
+                    bw, bh = self._bbox[sid]
+                    fits = lambda t: bw * s >= t.width + dp(3) and bh * s >= t.height  # noqa: E731
+                    tex = self._fill_label(sid, s)
+                    if not fits(tex):
+                        eq_, se_ = sid[1:].split("-S")
+                        tex = self._texture(sid, f"{eq_}-{se_}")
+                        if not fits(tex):
+                            continue
+                else:
+                    tex = self._texture(sid)
+                    area = max(a for i, _r, _m, a in self._parts if i == sid)
+                    if math.sqrt(area) * s < tex.width * .9:
+                        continue
                 st = self.status.get(sid) or {}
-                if sat:              # sobre la imagen: número blanco con sombra
+                if sat or sid in self.fill:     # sobre la imagen o el rendimiento: blanco con sombra
                     Color(0, 0, 0, .6)
                     Rectangle(texture=tex, size=tex.size, pos=(x - tex.width / 2 + dp(1), y - tex.height / 2 - dp(1)))
-                Color(*(c("#FFFFFF") if colors[sid][1] or sat else
+                Color(*(c("#FFFFFF") if colors[sid][1] or sat or (self.fill and sid in self.fill) else
                         c(theme.INK, .9) if st.get("data") else c(theme.MUTED, .75)))
                 Rectangle(texture=tex, size=tex.size, pos=(x - tex.width / 2, y - tex.height / 2))
                 if st.get("dot"):        # mediciones: punto blanco con borde oscuro
