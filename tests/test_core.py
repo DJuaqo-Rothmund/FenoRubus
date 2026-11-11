@@ -3380,3 +3380,20 @@ def test_drive_token_shared_and_one_request_at_a_time(tmp_path):
     backups[1]._get_token()
     assert len(calls) == 2
     dbk._SHARED_TOKEN.clear()
+
+
+def test_hidden_by_opacity_stops_at_the_window():
+    """La ventana de Kivy es su propio «parent»: revisar si IA+ se ve no debe colgarse."""
+    from ui.visibility import hidden_by_opacity
+
+    class W:
+        def __init__(self, parent=None, opacity=1.0):
+            self.parent, self.opacity = parent, opacity
+
+    win = W()
+    win.parent = win
+    screen = W(win)
+    btn = W(W(screen))
+    assert hidden_by_opacity(btn) is False
+    screen.opacity = 0
+    assert hidden_by_opacity(btn) is True

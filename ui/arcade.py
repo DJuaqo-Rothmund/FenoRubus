@@ -29,6 +29,7 @@ from kivy.uix.floatlayout import FloatLayout
 from kivy.uix.widget import Widget
 
 from ui import theme
+from ui.visibility import hidden_by_opacity
 from ui.theme import c
 
 NEON = ["#4FC3F7", "#F472B6", "#FDE047", "#34D399", "#A78BFA"]
@@ -677,12 +678,7 @@ class KiButton(ButtonBehavior, Widget):
         """Pantalla oculta o IA+ oculto (opacidad 0 del botón o de quien lo contiene)."""
         if self.get_root_window() is None:
             return True
-        w = self
-        while w is not None:
-            if w.opacity <= 0.01:
-                return True
-            w = w.parent
-        return False
+        return hidden_by_opacity(self)
 
     def _step(self, dt):
         if dt and self._hidden():
