@@ -281,7 +281,8 @@ class Panel:
             threading.Thread(target=work, daemon=True).start()
 
         if source == "camera":
-            a.media.take_photo(done, "extra")
+            from ui import camera_burst          # varias seguidas, hasta «Listo»
+            camera_burst.burst(done, "extra")
         else:
             a.media.pick_images(done)
 

@@ -612,7 +612,8 @@ class YieldSet(YieldScreenBase):
             a.workers.submit(work)
 
         if source == "camera":
-            a.media.take_photo(done, "Estimación")
+            from ui import camera_burst          # varias seguidas, hasta «Listo»
+            camera_burst.burst(done, "Estimación")
         else:
             a.media.pick_images(done)
 

@@ -3476,13 +3476,15 @@ class ObservationScreen(MDScreen):
                 if error:
                     a.toast(f"No se pudo guardar la foto: {error}")
                 elif len(ids) == 1:
-                    self.caption_dialog(a.db.query_one(
-                        "SELECT * FROM variety_attachments WHERE id=?", (ids[0],)))
+                    from ui import camera_burst
+                    row = a.db.query_one("SELECT * FROM variety_attachments WHERE id=?", (ids[0],))
+                    camera_burst.defer(lambda: self.caption_dialog(row))
 
             a.workers.submit(work)
 
         if source == "camera":
-            a.media.take_photo(done, base, exact=True)
+            from ui import camera_burst          # varias seguidas, hasta «Listo»
+            camera_burst.burst(done, base, exact=True)
         else:
             a.media.pick_images(done)
 
@@ -3555,8 +3557,6 @@ class ObservationScreen(MDScreen):
                 if error:
                     a.toast(f"No se pudo guardar la foto: {error}")
                     return
-                if origin == "camera":
-                    a.toast("Foto agregada · toque la cámara otra vez para sumar más")
                 if kind == "detail":
                     self.analyze()
 
@@ -3564,9 +3564,14 @@ class ObservationScreen(MDScreen):
 
         if source == "camera":
             # Mismo nombre que en la app y en Drive: 20260928-C11G, 20260928-C11G-2…
-            seq = len(a.db.list_photos(self.obs["id"], kind)) + 1
-            hint = ph.photo_basename(self.variety, self.week["start_date"], kind, seq, trial=a.db.code)
-            a.media.take_photo(done, hint, exact=True)
+            # Varias seguidas (hasta «Listo»): cada una con el número que le toca.
+            from ui import camera_burst
+            obs_id, variety, start = self.obs["id"], self.variety, self.week["start_date"]
+
+            def hint():
+                seq = len(a.db.list_photos(obs_id, kind)) + 1
+                return ph.photo_basename(variety, start, kind, seq, trial=a.db.code)
+            camera_burst.burst(done, hint, exact=True)
         else:
             a.media.pick_images(done)
 
@@ -5989,12 +5994,14 @@ class MeasureScreen(MDScreen):
                     e = next((x for x in a.db.list_entries(measure["id"], week_id=week["id"])
                               if x["id"] == ids[0]), None)
                     if e:
-                        self.entry_dialog(e)
+                        from ui import camera_burst
+                        camera_burst.defer(lambda: self.entry_dialog(e))
 
             a.workers.submit(work)
 
         if source == "camera":
-            a.media.take_photo(done, base, exact=True)
+            from ui import camera_burst          # varias seguidas, hasta «Listo»
+            camera_burst.burst(done, base, exact=True)
         else:
             a.media.pick_images(done)
 

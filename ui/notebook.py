@@ -767,7 +767,8 @@ class NoteScreen(MDScreen):
             a.workers.submit(work)
 
         if source == "camera":
-            a.media.take_photo(done, base, exact=True)
+            from ui import camera_burst          # varias seguidas, hasta «Listo»
+            camera_burst.burst(done, base, exact=True)
         else:
             a.media.pick_images(done)
 
