@@ -79,8 +79,10 @@ def suggest_code(name: str, taken=()) -> str:
 
 
 class Workspaces:
-    def __init__(self, data_dir: str):
+    def __init__(self, data_dir: str, crop_id: str | None = None):
+        import crops
         self.data_dir = data_dir
+        self.crop_id = crop_id or crops.current().id      # cultivo de ESTE registro
         self.shared = Database(os.path.join(data_dir, COMMON_DB), seed=False)
         # En la base común, photo_id de la IA apunta a fotos de OTRA base (la del ensayo):
         # sin claves foráneas aquí.
@@ -105,7 +107,7 @@ class Workspaces:
         import crops
         legacy = os.path.join(self.data_dir, LEGACY_DB)
         had_data = os.path.exists(legacy)
-        initial = INITIAL if crops.current().id == "frambuesa" else INITIAL_OTHER
+        initial = INITIAL if self.crop_id == "frambuesa" else INITIAL_OTHER
         for i, (profile, kind, name, code, file) in enumerate(initial):
             self.shared.execute(
                 "INSERT INTO workspaces(profile, kind, name, code, file, sort_order, created_at) "
@@ -179,9 +181,18 @@ class Workspaces:
         # Solo NV conserva las variedades de ejemplo de una instalación nueva; los ensayos
         # y predios nuevos parten vacíos.
         db = Database(self.path(ws), seed=(ws["code"] == "NV"), shared=self.shared,
-                      code=ws["code"], workspace=dict(ws))
+                      code=ws["code"], workspace=dict(ws), seed_crop=self.crop_id)
         if ws["profile"] == "predio":
             db.migrate_predio_units()   # nombres «Equipo de riego n, sector m»
+        if not self.shared.get_setting(f"foreign_varieties_v1:{ws['code']}"):
+            # Una vez por ensayo: variedades de otro cultivo que quedaron por error (sin datos).
+            try:
+                gone = db.drop_foreign_defaults(self.crop_id)
+                if gone:
+                    print("variedades de otro cultivo quitadas:", gone)
+            except Exception as exc:  # noqa: BLE001 - nunca impedir abrir el ensayo
+                print("drop_foreign_defaults:", exc)
+            self.shared.set_setting(f"foreign_varieties_v1:{ws['code']}", True)
         return db
 
     def last(self) -> dict:

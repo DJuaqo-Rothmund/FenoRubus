@@ -1090,7 +1090,7 @@ class FenoRubusApp(MDApp):
         def work():
             import crops
             from drive_backup import DriveBackup, explain
-            from platform_utils import get_data_dir
+            from platform_utils import crop_data_dir
             from sync_drive import DriveSync, summary
             msgs, did, failed = [], False, False
             all_crops = list(crops.CROPS.values())
@@ -1102,11 +1102,11 @@ class FenoRubusApp(MDApp):
                         if crop.id == loaded:
                             res = self.sync.run(manual=True, progress=prog)
                         else:
-                            crops.activate(crop.id)
-                            data_dir = get_data_dir()
-                            wss = Workspaces(data_dir)
+                            # Sin cambiar el cultivo activo: antes se cambiaba un momento (y la
+                            # base de otro cultivo podía recibir las variedades del abierto).
+                            data_dir = crop_data_dir(crop.subdir)
+                            wss = Workspaces(data_dir, crop_id=crop.id)
                             db = wss.open(wss.last())
-                            crops.activate(loaded)       # el resto de la app sigue en su cultivo
                             res = DriveSync(DriveBackup(db, crop=crop), wss, wss.open, data_dir).run(
                                 manual=True, progress=prog)
                         msgs.append(f"{crop.app}: {summary(res)}")
@@ -1115,8 +1115,6 @@ class FenoRubusApp(MDApp):
                     except Exception as exc:  # noqa: BLE001
                         failed = True
                         msgs.append(f"{crop.app}: {explain(str(exc))}")
-                    finally:
-                        crops.activate(loaded)
             finally:
                 self._syncing = False
             text = " · ".join(msgs)

@@ -71,6 +71,16 @@ def get_data_dir() -> str:
     return path
 
 
+def crop_data_dir(subdir: str | None) -> str:
+    """Carpeta de datos de un cultivo cualquiera, SIN cambiar el cultivo activo de la app
+    (sincronizar los otros cultivos en segundo plano no debe tocar el abierto)."""
+    path = get_base_dir()
+    if subdir:
+        path = os.path.join(path, subdir)
+        os.makedirs(path, exist_ok=True)
+    return path
+
+
 def get_base_dir() -> str:
     """
     Directorio persistente y privado de la app (raíz común a todos los cultivos).

@@ -3480,3 +3480,33 @@ def test_yield_map_layers_by_sector_and_real_count(tmp_path):
     assert lay["lo"] < lay["hi"]
     lo_c, hi_c = R.yield_color(lay["lo"], lay["lo"], lay["hi"]), R.yield_color(lay["hi"], lay["lo"], lay["hi"])
     assert lo_c[0] > lo_c[1] and hi_c[1] > hi_c[0]          # rojo (menos) y verde (más)
+
+
+def test_other_crop_workspaces_seed_their_own_varieties(tmp_path):
+    """Sincronizar los otros cultivos (botón de la pantalla principal) abre sus bases sin
+    cambiar el cultivo activo: cada base recibe las variedades de SU cultivo."""
+    import crops
+    from workspaces import Workspaces
+    assert crops.current().id == "frambuesa"
+    wss = Workspaces(str(tmp_path / "arandano"), crop_id="arandano")
+    db = wss.open(wss.by_code("NV") or wss.last())
+    names = {v["name"] for v in db.list_varieties()} if hasattr(db, "list_varieties") else \
+        {r["name"] for r in db.query("SELECT name FROM varieties")}
+    blue = {n for n, _c in crops.get("arandano").varieties}
+    rasp = {n for n, _c in crops.get("frambuesa").varieties}
+    assert not (names & (rasp - blue))
+    assert crops.current().id == "frambuesa"
+
+
+def test_drop_blueberry_defaults_from_raspberry_db(db):
+    """Duke/Legacy (variedades iniciales de arándano) que quedaron en una base de frambuesa
+    se quitan si no tienen registros; las que tienen datos se conservan."""
+    a = db.add_variety("Duke", code="DUK")
+    b = db.add_variety("Legacy", code="LEG")
+    keep = db.add_variety("Glen Ample", code="GLA")
+    w = db.current_week()
+    o = db.get_or_create_observation(b, w["id"])
+    db.update_observation(o["id"] if isinstance(o, dict) else o, bbch_code=61)
+    assert db.drop_foreign_defaults("frambuesa") == ["Duke"]
+    ids = {v["id"] for v in db.query("SELECT id FROM varieties")}
+    assert a not in ids and b in ids and keep in ids

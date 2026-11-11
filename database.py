@@ -281,10 +281,11 @@ class Database:
                                "public_names", "last_workspace", "workspaces_", "user_name")
 
     def __init__(self, path: str, seed: bool = True, shared: "Database | None" = None,
-                 code: str = "", workspace: dict | None = None):
+                 code: str = "", workspace: dict | None = None, seed_crop: str | None = None):
         """shared: base común del teléfono (registro de ensayos, memoria de la IA, escala
         BBCH, documentos y ajustes globales). code / workspace: ensayo o predio de esta base."""
         self.path = path
+        self.seed_crop = seed_crop        # cultivo de las variedades iniciales (None: el activo)
         self.shared = shared
         self.code = code
         self.workspace = workspace or {}
@@ -500,7 +501,10 @@ class Database:
         if seeded:
             return
         import crops
-        for i, (name, code) in enumerate(crops.current().varieties):
+        # Las del cultivo de ESTA base (no el abierto en pantalla: al sincronizar los otros
+        # cultivos se abren sus bases en segundo plano).
+        crop = crops.get(self.seed_crop) if self.seed_crop else crops.current()
+        for i, (name, code) in enumerate(crop.varieties):
             self.add_variety(name, code=code, sort_order=i, log=False)
         for code, label, desc, kw in ph.BBCH_SCALE:
             self.upsert_bbch(code, label, desc, kw, source="base")
@@ -958,6 +962,31 @@ class Database:
         if cultivar is not None:   # "" = usa la variedad del ensayo
             self.execute("UPDATE treatments SET cultivar=? WHERE num=?", ((cultivar or "").strip(), num))
         self.log("update", "treatment", num, (name or "").strip())
+
+    def drop_foreign_defaults(self, crop_id: str) -> list[str]:
+        """Quita las variedades iniciales de OTRO cultivo (p. ej. Duke o Legacy en una base
+        de frambuesa) que quedaron por error al sincronizar los cultivos desde la pantalla
+        principal. Solo las que no tienen ningún registro, foto ni medición. Devuelve sus
+        nombres."""
+        import crops
+        mine = {n.lower() for n, _c in crops.get(crop_id).varieties}
+        foreign = {(n.lower(), (c or "").lower()) for cr in crops.CROPS.values() if cr.id != crop_id
+                   for n, c in cr.varieties if n.lower() not in mine}
+        if not foreign:
+            return []
+        tables = [t for t in ("observations", "variety_attachments", "measure_entries", "variety_metrics",
+                              "custom_fields")
+                  if self.query_one("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?", (t,))]
+        out = []
+        for v in self.query("SELECT id, name, code FROM varieties"):
+            if ((v["name"] or "").lower(), (v["code"] or "").lower()) not in foreign:
+                continue
+            if any(self.query_one(f"SELECT 1 FROM {t} WHERE variety_id=? LIMIT 1", (v["id"],)) for t in tables):
+                continue
+            self.execute("DELETE FROM varieties WHERE id=?", (v["id"],))
+            self.log("delete", "variety", v["id"], f"{v['name']} (de otro cultivo, sin registros)")
+            out.append(v["name"])
+        return out
 
     def delete_variety(self, variety_id: int, purge: bool = False) -> None:
         """
