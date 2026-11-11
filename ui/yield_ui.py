@@ -381,7 +381,10 @@ class YieldSet(YieldScreenBase):
                                ("plants_ha", "Plantas por hectárea", s["plants_ha"])):
             f = Factory.Field(hint_text=hint, input_filter="float",
                               text="" if val is None else f"{val:g}")
-            f.bind(focus=lambda w, foc, k=key: (not foc) and self._save_field(k, w.text))
+            # Se guarda al escribir (en el teléfono el número llega desde el cuadro nativo de
+            # Android y el campo nunca «pierde el foco»: antes no se guardaba) y al salir.
+            f.bind(text=lambda w, _t, k=key: self._queue_save(k, w),
+                   focus=lambda w, foc, k=key: (not foc) and self._save_field(k, w.text))
             self._fields[key] = f
             card.add_widget(f)
         card.add_widget(Factory.Muted(
@@ -407,11 +410,21 @@ class YieldSet(YieldScreenBase):
         body.add_widget(card)
         card = _card("NOTAS")
         f = Factory.Field(hint_text="Notas (opcional)", multiline=True, text=s["notes"] or "")
-        f.bind(focus=lambda w, foc: (not foc) and d.update_set(self.set_id, notes=w.text.strip()))
+        f.bind(text=lambda w, t: d.update_set(self.set_id, notes=t.strip()),
+               focus=lambda w, foc: (not foc) and d.update_set(self.set_id, notes=w.text.strip()))
         card.add_widget(f)
         body.add_widget(card)
 
-    def _save_field(self, key, text):
+    def _queue_save(self, key, field):
+        ev = getattr(self, "_save_ev", None)
+        if ev is not None:
+            ev.cancel()
+        # Mientras se escribe con el teclado de la app no se rehace la pantalla (se perdería
+        # el campo); con el cuadro nativo (sin foco), sí: así el resultado se actualiza.
+        self._save_ev = Clock.schedule_once(
+            lambda *_: self._save_field(key, field.text, refresh=not field.focus), .7)
+
+    def _save_field(self, key, text, refresh=True):
         try:
             val = float(text.replace(",", ".")) if text.strip() else None
         except ValueError:
@@ -419,8 +432,14 @@ class YieldSet(YieldScreenBase):
         if key in ("fruit_set", "coverage") and val is not None and not 0 < val <= 100:
             app().toast("Debe ser un porcentaje entre 1 y 100.")
             return
-        db().update_set(self.set_id, **{key: val})
-        Clock.schedule_once(lambda *_: self.refresh(), 0)
+        s = db().get_set(self.set_id)
+        if s is None:
+            return
+        changed = s[key] != val
+        if changed:
+            db().update_set(self.set_id, **{key: val})      # (y la próxima estimación parte igual)
+        if refresh and changed:
+            Clock.schedule_once(lambda *_: self.refresh(), 0)
 
     # ------------------------------------------------------------------ lugar y fecha
     def _pick_place(self):
