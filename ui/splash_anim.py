@@ -37,16 +37,24 @@ class LogoAnim(Widget):
             self._tex[ic["file"]] = tex(ic["file"])
         self._t = 0.0
         self._ev = None
-        self.bind(pos=self._draw, size=self._draw)
+        self.speed = 1.0          # >1: más rápida (al entrar a un módulo)
+        self._clock = None        # (inicio monotónico, t inicial) en modo de tiempo real
+        self._g = None            # instrucciones del canvas (se crean una vez por tamaño)
+        self.bind(pos=self._rebuild, size=self._rebuild)
 
     # ---------------------------------------------------------------- control
     @property
     def t(self) -> float:
         return self._t
 
-    def start(self, t: float = 0.0):
-        """Empieza (o sigue) a andar desde t segundos."""
-        self._t = t
+    def start(self, t: float = 0.0, speed: float = 1.0, realtime: bool = False):
+        """Empieza (o sigue) a andar desde t segundos.
+
+        realtime: la animación sigue el reloj (si un cuadro se atrasa porque la app está
+        cargando, salta a donde debe ir en vez de ir en cámara lenta)."""
+        import time
+        self._t, self.speed = t, speed
+        self._clock = (time.monotonic(), t) if realtime else None
         if self._ev is None:
             self._ev = Clock.schedule_interval(self._tick, 0)
         self._draw()
@@ -57,7 +65,12 @@ class LogoAnim(Widget):
         self._draw()
 
     def _tick(self, dt):
-        self._t += min(dt, MAX_DT)
+        if self._clock is not None:
+            import time
+            t0, base = self._clock
+            self._t = base + (time.monotonic() - t0) * self.speed
+        else:
+            self._t += min(dt, MAX_DT) * self.speed
         self._draw()
 
     def stop(self):
@@ -66,47 +79,70 @@ class LogoAnim(Widget):
             self._ev = None
 
     # ---------------------------------------------------------------- dibujo
+    def _rebuild(self, *_):
+        """Crea las instrucciones (una vez por tamaño); cada cuadro solo las mueve."""
+        self._g = None
+        self._draw()
+
+    def _build(self):
+        L = self.L
+        self.canvas.clear()
+        g = {}
+        with self.canvas:
+            PushMatrix()
+            g["ring_rot"] = Rotate(angle=0, origin=(0, 0))
+            g["ring_col"] = Color(1, 1, 1, 0)
+            g["ring"] = Rectangle(texture=self._tex["ring"])
+            PopMatrix()
+            g["icons"] = []
+            for ic in L["icons"]:
+                col = Color(1, 1, 1, 0)
+                g["icons"].append((col, Rectangle(texture=self._tex[ic["file"]], size=(0, 0))))
+            Color(1, 1, 1, 1)
+            g["berry"] = Rectangle(texture=self._tex["berry"])
+            Color(*L["hand_rgb"], 1)
+            g["hands"] = [Line(points=[0, 0, 0, 0], cap="round"), Line(points=[0, 0, 0, 0], cap="round")]
+            g["dot"] = Ellipse()
+        self._g = g
+
     def _draw(self, *_):
         side = min(self.width, self.height)
         if side <= 0:
             return
+        if self._g is None:
+            self._build()
+        g = self._g
         ox, oy = self.center_x - side / 2, self.center_y - side / 2
         t = self._t
         L = self.L
-        self.canvas.clear()
-        with self.canvas:
-            # Círculo punteado: aparece y gira hasta quedar en su lugar.
-            ang, alpha = tl.ring(t)
-            rc = L["ring"]
-            cx, cy = ox + rc["u"] * side, oy + rc["v"] * side
-            PushMatrix()
-            Rotate(angle=ang, origin=(cx, cy))
-            Color(1, 1, 1, alpha)
-            Rectangle(texture=self._tex["ring"], pos=(ox, oy), size=(side, side))
-            PopMatrix()
-            # Dibujos chicos: recorren el círculo (sentido horario) hasta su sitio.
-            for ic, st in zip(L["icons"], tl.icons(L, t)):
-                if st is None:
-                    continue
-                u, v, sc, a = st
-                w, h = ic["w"] * side * sc, ic["h"] * side * sc
-                Color(1, 1, 1, a)
-                Rectangle(texture=self._tex[ic["file"]],
-                          pos=(ox + u * side - w / 2, oy + v * side - h / 2), size=(w, h))
-            # La frambuesa-reloj.
-            Color(1, 1, 1, 1)
-            Rectangle(texture=self._tex["berry"], pos=(ox, oy), size=(side, side))
-            # Manijas.
-            minute, hour = tl.hands(L, t)
-            fx, fy = ox + L["face"]["u"] * side, oy + L["face"]["v"] * side
-            Color(*L["hand_rgb"], 1)
-            for deg, ln in ((hour, L["hour"]["len"]), (minute, L["minute"]["len"])):
-                r = math.radians(deg)
-                # Line.width de Kivy es la mitad del grosor.
-                Line(points=[fx, fy, fx + math.cos(r) * ln * side, fy + math.sin(r) * ln * side],
-                     width=max(1.0, L["hand_w"] * side * tl.HAND_THICK / 2), cap="round")
-            d = L["dot_r"] * side
-            Ellipse(pos=(fx - d, fy - d), size=(2 * d, 2 * d))
+        # Círculo punteado: aparece y gira hasta quedar en su lugar.
+        ang, alpha = tl.ring(t)
+        rc = L["ring"]
+        g["ring_rot"].angle, g["ring_rot"].origin = ang, (ox + rc["u"] * side, oy + rc["v"] * side)
+        g["ring_col"].a = alpha
+        g["ring"].pos, g["ring"].size = (ox, oy), (side, side)
+        # Dibujos chicos: recorren el círculo (sentido horario) hasta su sitio.
+        for ic, st, (col, rect) in zip(L["icons"], tl.icons(L, t), g["icons"]):
+            if st is None:
+                col.a = 0
+                continue
+            u, v, sc, a = st
+            w, h = ic["w"] * side * sc, ic["h"] * side * sc
+            col.a = a
+            rect.pos, rect.size = (ox + u * side - w / 2, oy + v * side - h / 2), (w, h)
+        # La frambuesa-reloj.
+        g["berry"].pos, g["berry"].size = (ox, oy), (side, side)
+        # Manijas.
+        minute, hour = tl.hands(L, t)
+        fx, fy = ox + L["face"]["u"] * side, oy + L["face"]["v"] * side
+        # Line.width de Kivy es la mitad del grosor.
+        width = max(1.0, L["hand_w"] * side * tl.HAND_THICK / 2)
+        for line, (deg, ln) in zip(g["hands"], ((hour, L["hour"]["len"]), (minute, L["minute"]["len"]))):
+            r = math.radians(deg)
+            line.points = [fx, fy, fx + math.cos(r) * ln * side, fy + math.sin(r) * ln * side]
+            line.width = width
+        d = L["dot_r"] * side
+        g["dot"].pos, g["dot"].size = (fx - d, fy - d), (2 * d, 2 * d)
 
 
 class CropLogoAnim(Widget):
@@ -125,7 +161,7 @@ class CropLogoAnim(Widget):
     def t(self) -> float:
         return self._t
 
-    def start(self, t: float = 0.0):
+    def start(self, t: float = 0.0, speed: float = 1.0, realtime: bool = False):
         self._t = t
         if self._ev is None:
             self._ev = Clock.schedule_interval(self._tick, 0)

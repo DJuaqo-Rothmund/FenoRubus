@@ -205,22 +205,27 @@ class FenoRubusApp(MDApp):
         splash = SplashScreen(name="splash")
         self.sm.add_widget(splash)
         self.sm.current = "splash"
-        splash.ids.logo.start(0.0)
+        # Más rápida y siguiendo el reloj (una traba de la carga no la pone en cámara lenta).
+        splash.ids.logo.start(0.0, speed=self.MODULE_SPEED, realtime=True)
         self._t_enter = time.monotonic()
         self.title = crops.current().app
         Clock.schedule_once(self._enter_next, 0)
 
     def _enter_next(self, *_):
         """Un paso de precarga por cuadro mientras se ve el logo; luego, el inicio."""
-        if self._preload and time.monotonic() - self._t_enter < self.SPLASH_MAX_S:
-            self._run_preload_step()
+        elapsed = time.monotonic() - self._t_enter
+        if self._preload and elapsed < self.SPLASH_MAX_S:
+            # Mientras los dibujos giran (≈0,8 s) no se carga nada: el giro va fluido. La
+            # carga va después, con el logo ya armado (ahí una traba no se nota).
+            if elapsed >= self.MODULE_ANIM_S:
+                self._run_preload_step()
             Clock.schedule_once(self._enter_next, 0)
             return
         if self.home is None:          # se agotó el tiempo: lo mínimo para entrar
             self.home = HomeScreen(name="home")
             self.sm.add_widget(self.home)
             self.home.refresh_current()
-        wait = self.SPLASH_MIN_S - (time.monotonic() - self._t_enter)
+        wait = self.MODULE_MIN_S - (time.monotonic() - self._t_enter)
         Clock.schedule_once(self._enter_module, max(0, wait))
 
     def _enter_module(self, *_):
@@ -708,8 +713,10 @@ class FenoRubusApp(MDApp):
         return self._screen(SettingsScreen, "settings")
 
     # --------------------------------------------- apertura y precarga
-    SPLASH_MIN_S = 1.8    # el logo completa su entrada aunque la carga sea instantánea
     SPLASH_MAX_S = 12.0   # pase lo que pase, a los 12 s se entra a la app
+    MODULE_SPEED = 1.5    # al entrar a un módulo: el logo gira 1,5× más rápido
+    MODULE_ANIM_S = 0.85  # …y sus dibujos llegan a su sitio en ≈0,8 s (sin cargar nada)
+    MODULE_MIN_S = 1.25   # se ve al menos esto (el logo completo un instante)
 
     def on_start(self):
         """La pantalla de carga de Android (los tres frutos) se quita apenas está lista la
