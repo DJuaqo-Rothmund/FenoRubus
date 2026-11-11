@@ -208,3 +208,29 @@ def test_aeoncrop_web_t0_units_and_week_move_apply_in_app(tmp_path):
     assert o["bbch_code"] == 65 and "semana equivocada" in o["notes"] and "BBCH 61" in o["notes"]
     p = db.query_one("SELECT * FROM photos")
     assert p["observation_id"] == o["id"] and os.path.basename(p["path"]) == "20261019-AUF-MEEG.jpg"
+
+
+def test_web_notebook_sheets_and_pasted_photos_roundtrip(tmp_path):
+    """Cuaderno en la web: lee las hojas y el lugar de las fotos de la app; lo que cambia
+    (otra hoja, hoja nueva, foto movida a otra hoja, foto nueva pegada) llega a la app."""
+    data = tmp_path / "app"
+    db = Database(str(data / "AM.sqlite3"), code="AM", workspace={"profile": "predio", "name": "El Amanecer",
+                                                                 "code": "AM"}, seed=False)
+    e = db.note_for_day("2026-11-20", create=True)
+    db.save_note_page(e["id"], 0, "hoja uno", "")
+    db.add_note_page(e["id"])
+    db.save_note_page(e["id"], 1, "hoja dos", "")
+    photo = data / "photos" / "cuaderno" / "20261120-AM-cuaderno.jpg"
+    photo.parent.mkdir(parents=True, exist_ok=True)
+    photo.write_bytes(b"jpg")
+    pid = db.add_note_photo(e["id"], str(photo), page=1, place={"x": 7, "y": 8, "w": 9, "r": 12})
+    res = _node("notebook", sync.export_changes(db, str(data)), tmp_path)
+    assert res["pages"] == ["hoja uno", "hoja dos"]
+    assert res["place"] == {"x": 7, "y": 8, "w": 9, "r": 12}
+    sync.apply_changes(db, res["bundle"], str(data), week_for_date=db.week_for_date)
+    e = db.note_for_day("2026-11-20")
+    assert [p["text"] for p in db.note_pages(e)] == ["hoja uno", "hoja dos desde la web", "hoja tres nueva"]
+    ph = {p["id"]: p for p in e["photos"]}
+    assert ph[pid]["page"] == 2 and json.loads(ph[pid]["place"]) == {"x": 3, "y": 4, "w": 5, "r": 350}
+    new = [p for p in e["photos"] if p["id"] != pid]
+    assert len(new) == 1 and new[0]["page"] == 0 and json.loads(new[0]["place"])["w"] == 6

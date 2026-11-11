@@ -26,6 +26,22 @@ if (mode === "stats") {
 } else if (mode === "exif") {
   const out = data.files.map((f) => { const b = readFileSync(f); return C.exifGps(b.buffer.slice(b.byteOffset, b.byteOffset + b.byteLength)); });
   writeFileSync(output, JSON.stringify(out));
+} else if (mode === "notebook") {
+  // Cuaderno: hojas del día y fotos pegadas (lo que hace la web), de vuelta a la app.
+  const st = C.emptyState();
+  C.applyBundle(st, "p1.json", data);
+  const day = C.noteFor(st, "2026-11-20");
+  const pages = C.notePages(day);
+  const place = C.notePlace(day.photos[0]);
+  const c1 = C.noteChange(st, "2026-11-20", C.notePageFields(day, 1, "hoja dos desde la web", "")).change;
+  C.applyBundle(st, "l1", { changes: [c1] });
+  const c2 = C.noteChange(st, "2026-11-20", C.notePageFields(C.noteFor(st, "2026-11-20"), 2, "hoja tres nueva", "")).change;
+  C.applyBundle(st, "l2", { changes: [c2] });
+  const ph0 = C.noteFor(st, "2026-11-20").photos[0];
+  const c3 = C.notePhotoUpdate(ph0, { page: 2, place: JSON.stringify({ x: 3, y: 4, w: 5, r: 350 }) });
+  const c4 = C.notePhotoChange(day.uid, "photos/cuaderno/20261120-AM-cuaderno-w1.jpg", 0, { x: 1, y: 2, w: 6, r: 4 });
+  const all = [c1, c2, c3, c4];
+  writeFileSync(output, JSON.stringify({ bundle: C.bundle("webtest", "AM", all), pages: pages.map((p) => p.text), place }));
 } else if (mode === "lab") {
   // AeonCrop Web: ensayo con T0, fenología unificada por tratamiento y mover una semana.
   const st = C.emptyState();

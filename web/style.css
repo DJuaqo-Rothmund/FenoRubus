@@ -472,3 +472,31 @@ dialog.tpage[open] { display: flex; }
 .tprogress b { color: #fff; }
 @media (max-width: 700px) { .tarrow { width: 44px; height: 44px; font-size: 28px; } .tprogress { font-size: 12px; } }
 .tbarx .ghost:disabled { opacity: .35; cursor: default; }
+
+/* Cuaderno: hojas del día y fotos pegadas en la hoja (= ui.notebook.Sticker) */
+.nbnav { display: flex; align-items: center; gap: 6px; margin-right: 8px; color: #6B4423; }
+.nbnav b { min-width: 34px; text-align: center; font-size: 14px; }
+.nbnav .round { width: 34px; height: 34px; font-size: 18px; color: #6B4423; }
+.nbnav .round:disabled { opacity: .3; cursor: default; }
+.nbwrap { overflow: hidden; overflow: clip; border-radius: 16px; transition: opacity .12s, transform .12s; }
+.nbwrap.out-l { opacity: 0; transform: translateX(-24px); }
+.nbwrap.out-r { opacity: 0; transform: translateX(24px); }
+.nbstickers { position: absolute; inset: 0; pointer-events: none; }
+.nbst { position: absolute; background: #fff center/cover no-repeat; border: 6px solid #fff; box-sizing: border-box;
+  box-shadow: 2px 4px 10px rgba(0, 0, 0, .22); pointer-events: auto; cursor: grab; touch-action: none; user-select: none; }
+.nbst::before { content: ""; position: absolute; left: 50%; top: -12px; width: 56px; height: 18px; margin-left: -28px;
+  background: rgba(255, 255, 255, .6); box-shadow: 0 1px 2px rgba(0, 0, 0, .08); }
+.nbst.pending { background: #EEDAB8; }
+.nbst .hz { position: absolute; width: 18px; height: 18px; border-radius: 50%; background: #6B4423; border: 2px solid #fff;
+  display: none; }
+.nbst:hover .hz, .nbst.act .hz, .nbst.sel .hz { display: block; }
+.nbst .hz.sz { right: -14px; bottom: -14px; cursor: nwse-resize; }
+.nbst .hz.rot { left: 50%; top: -34px; margin-left: -9px; cursor: grab; background: #C8963E; }
+.nbsheet.pen .nbst { pointer-events: none; }
+.nbstmenu { position: absolute; z-index: 5; display: grid; background: #fff; border-radius: 12px; padding: 4px;
+  box-shadow: 0 6px 20px rgba(0, 0, 0, .2); }
+.nbstmenu button { border: 0; background: none; text-align: left; padding: 9px 14px; border-radius: 8px; cursor: pointer;
+  color: #3B2A16; font: inherit; }
+.nbstmenu button:hover { background: #F6EBD6; }
+.nbstmenu button.danger { color: #B3261E; }
+.nbsthelp { margin: 6px 0 0; }

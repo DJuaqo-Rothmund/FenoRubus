@@ -725,6 +725,43 @@ export function noteChange(state, day, fields = {}) {
   const uid = cur ? cur.uid : newUid();
   return { uid, change: { entity: "notebook_entries", uid, ts, deleted: 0, data: { ...data, ...fields, updated_at: ts } } };
 }
+// Hojas del día (= Database.note_pages): la 1 en text/ink; las demás, JSON en «pages».
+export function notePages(entry) {
+  let extra = [];
+  try { extra = JSON.parse(entry?.pages || "[]"); } catch { extra = []; }
+  if (!Array.isArray(extra)) extra = [];
+  return [{ text: entry?.text || "", ink: entry?.ink || "" },
+    ...extra.filter((p) => p && typeof p === "object").map((p) => ({ text: p.text || "", ink: p.ink || "" }))];
+}
+// Campos a guardar para la hoja `index` (= Database.save_note_page).
+export function notePageFields(entry, index, text, ink) {
+  if (index === 0) return { text, ink };
+  const pages = notePages(entry).slice(1);
+  while (pages.length < index) pages.push({ text: "", ink: "" });
+  pages[index - 1] = { text, ink };
+  return { pages: JSON.stringify(pages) };
+}
+// Quitar la hoja `index` (= Database.delete_note_page): campos de la página y cambios de fotos.
+export function noteDeletePage(entry, index) {
+  const pages = notePages(entry);
+  pages.splice(index, 1);
+  const [first, ...rest] = pages;
+  const ts = nowTs();
+  const photos = [];
+  for (const p of entry.photos || []) {
+    const pg = Number(p.page || 0);
+    if (pg === index) photos.push({ entity: "notebook_photos", uid: p.uid, ts, deleted: 1 });
+    else if (pg > index) photos.push(notePhotoUpdate(p, { page: pg - 1 }));
+  }
+  return { fields: { text: first.text, ink: first.ink, pages: rest.length ? JSON.stringify(rest) : "" }, photos };
+}
+// Lugar de una foto pegada en la hoja: {x, y, w, r} en renglones (o null).
+export function notePlace(photo) {
+  try {
+    const pl = JSON.parse(photo?.place || "");
+    return pl && typeof pl === "object" && ["x", "y", "w"].every((k) => typeof pl[k] === "number") ? pl : null;
+  } catch { return null; }
+}
 export function noteDeleteChanges(state, day) {
   const cur = noteFor(state, day);
   if (!cur) return [];
@@ -732,10 +769,10 @@ export function noteDeleteChanges(state, day) {
   return [...cur.photos.map((p) => ({ entity: "notebook_photos", uid: p.uid, ts, deleted: 1 })),
     ...cur.uids.map((uid) => ({ entity: "notebook_entries", uid, ts, deleted: 1 }))];
 }
-export function notePhotoChange(entryUid, relPath) {
+export function notePhotoChange(entryUid, relPath, page = 0, place = null) {
   const ts = nowTs();
   return { entity: "notebook_photos", uid: newUid(), ts, deleted: 0,
-    data: { entry_id: entryUid, path: relPath, caption: "", annotated: 0, created_at: ts } };
+    data: { entry_id: entryUid, path: relPath, caption: "", annotated: 0, created_at: ts, page, place: place ? JSON.stringify(place) : "" } };
 }
 export function notePhotoUpdate(photo, fields) {
   const { uid, ...data } = photo;

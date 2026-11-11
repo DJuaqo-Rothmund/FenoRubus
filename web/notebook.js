@@ -1,6 +1,7 @@
-// PhenoRubus Web · Cuaderno de campo (= ui/notebook.py): línea de tiempo por día, página con
-// texto que se guarda solo, fotos (arrastrar o elegir) y lápiz sobre la foto (mouse, dedo o
-// lápiz con presión). Usa las mismas tablas que la app (notebook_entries / notebook_photos).
+// PhenoRubus Web · Cuaderno de campo (= ui/notebook.py): línea de tiempo por día; cada día con
+// una o más hojas (‹ › o deslizando hacia el lado) de texto que se guarda solo y escritura a
+// mano; fotos pegadas sobre la hoja (se mueven, agrandan y giran) y lápiz sobre la foto (mouse,
+// dedo o lápiz con presión). Usa las mismas tablas que la app (notebook_entries / notebook_photos).
 import * as C from "./core.js";
 
 const $ = (id) => document.getElementById(id);
@@ -9,6 +10,7 @@ const PEN_COLORS = ["#E53935", "#FFD54F", "#FFFFFF", "#212121", "#43A047"];
 const PEN_WIDTHS = [["Fino", 2.5], ["Medio", 5], ["Grueso", 10]];
 let X = null;                     // {S, send, photoUrl, uploadPhoto, resize, render}
 let page = null;                  // día abierto
+let sheet = 0;                    // hoja del día que se ve (0 = la primera)
 let saveTimer = null;
 
 const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (ch) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[ch]);
@@ -34,13 +36,36 @@ export function init(ctx) {
   $("nbpage").addEventListener("close", () => { saveText(); renderNotebook(); });
   $("nbdate").onchange = (e) => moveTo(e.target.value);
   $("nbdel").onclick = deletePage;
+  $("nbprev").onclick = () => flip(-1);
+  $("nbnext").onclick = () => flip(1);
+  $("nbaddpage").onclick = addSheet;
   const zone = $("nbdrop"), input = zone.querySelector("input");
-  zone.onclick = (e) => { if (!e.target.closest(".ph")) input.click(); };
+  zone.onclick = () => input.click();
   input.onclick = (e) => e.stopPropagation();
   input.onchange = () => { const l = [...input.files]; input.value = ""; addPhotos(l); };
   zone.ondragover = (e) => { e.preventDefault(); e.dataTransfer.dropEffect = "copy"; zone.classList.add("over"); };
   zone.ondragleave = (e) => { if (!zone.contains(e.relatedTarget)) zone.classList.remove("over"); };
   zone.ondrop = (e) => { e.preventDefault(); zone.classList.remove("over"); addPhotos([...e.dataTransfer.files]); };
+  const wrap = document.querySelector(".nbwrap");          // también se sueltan sobre la hoja
+  wrap.addEventListener("dragover", (e) => { if (e.dataTransfer.types.includes("Files")) e.preventDefault(); });
+  wrap.addEventListener("drop", (e) => {
+    if (!e.dataTransfer.files.length) return;
+    e.preventDefault();
+    addPhotos([...e.dataTransfer.files], Sticker.placeAt(e));
+  });
+  // Deslizar la hoja hacia el lado (pantalla táctil, fuera del modo lápiz): otra hoja.
+  let sw = null;
+  wrap.addEventListener("touchstart", (e) => {
+    sw = e.touches.length === 1 && !Ink.penOn() && !e.target.closest(".nbst")
+      ? { x: e.touches[0].clientX, y: e.touches[0].clientY, t: Date.now() } : null;
+  }, { passive: true });
+  wrap.addEventListener("touchend", (e) => {
+    if (!sw || !e.changedTouches.length) return;
+    const dx = e.changedTouches[0].clientX - sw.x, dy = e.changedTouches[0].clientY - sw.y;
+    if (Math.abs(dx) > Math.max(80, wrap.clientWidth * .28) && Math.abs(dy) < Math.abs(dx) * .45 && Date.now() - sw.t < 800) flip(dx > 0 ? -1 : 1);
+    sw = null;
+  }, { passive: true });
+  Sticker.init();
   Draw.init();
 }
 
@@ -88,19 +113,52 @@ export function renderNotebook() {
 // ------------------------------------------------------------------ página
 function current() { return page ? C.noteFor(X.S.state, page) : null; }
 
-export function openPage(day) {
+export function openPage(day, index = 0) {
   page = day;
   const cur = current();
   $("nbtitle").textContent = niceDay(day);
   $("nbdate").value = day;
-  $("nbtext").value = cur?.text || "";
-  Ink.load(cur?.ink || "");
+  showSheet(Math.min(index, C.notePages(cur).length - 1));
   setPen(false);
   $("nbsaved").textContent = cur ? "Guardado" : "";
   $("nbmsg").textContent = "";
-  renderPhotos();
   if (!$("nbpage").open) $("nbpage").showModal();
   if (!Ink.strokes.length) $("nbtext").focus();
+}
+
+function showSheet(index) {
+  const pages = C.notePages(current());
+  sheet = Math.max(0, Math.min(index, pages.length - 1));
+  $("nbtext").value = pages[sheet].text;
+  $("nbtext").scrollTop = 0;
+  Ink.load(pages[sheet].ink);
+  $("nbpagenum").textContent = `${sheet + 1}/${pages.length}`;
+  $("nbprev").disabled = sheet === 0;
+  $("nbnext").disabled = sheet >= pages.length - 1;
+  renderPhotos();
+}
+
+// Otra hoja del día (+1 siguiente, -1 anterior), con un pequeño deslizamiento.
+async function flip(step) {
+  const j = sheet + step, n = C.notePages(current()).length;
+  if (j < 0 || j >= n) return;
+  await saveText();
+  const wrap = document.querySelector(".nbwrap");
+  wrap.classList.add(step > 0 ? "out-l" : "out-r");
+  setTimeout(() => {
+    showSheet(j);
+    wrap.classList.remove("out-l", "out-r");
+  }, 120);
+}
+
+async function addSheet() {
+  await saveText();
+  const cur = current();
+  const pages = C.notePages(cur);
+  const fields = C.notePageFields(cur || {}, pages.length, "", "");
+  await ensureEntry(fields);
+  $("nbmsg").textContent = `Hoja ${pages.length + 1} agregada · se pasa de una a otra con ‹ › o deslizando la hoja.`;
+  showSheet(pages.length);
 }
 
 async function ensureEntry(fields = {}) {      // la página se crea al escribir o subir la primera foto
@@ -114,8 +172,9 @@ async function saveText() {
   if (!page) return;
   const text = $("nbtext").value, ink = Ink.dumps();
   const cur = current();
-  if ((cur?.text || "") === text && (cur?.ink || "") === ink) { if (cur) $("nbsaved").textContent = "Guardado"; return; }
-  try { await ensureEntry({ text, ink }); $("nbsaved").textContent = "Guardado"; }
+  const was = C.notePages(cur)[sheet] || { text: "", ink: "" };
+  if (was.text === text && was.ink === ink) { if (cur) $("nbsaved").textContent = "Guardado"; return; }
+  try { await ensureEntry(C.notePageFields(cur || {}, sheet, text, ink)); $("nbsaved").textContent = "Guardado"; }
   catch (e) { $("nbsaved").textContent = `No se guardó: ${e.message}`; }
 }
 
@@ -136,6 +195,15 @@ async function moveTo(day) {
 async function deletePage() {
   const cur = current();
   if (!cur) { $("nbpage").close(); return; }
+  const n = C.notePages(cur).length;
+  if (n > 1 && confirm(`Este día tiene ${n} hojas.\n\nAceptar: borrar solo la hoja ${sheet + 1} (con sus fotos pegadas).\nCancelar: elegir si borrar el día completo.`)) {
+    await saveText();
+    const r = C.noteDeletePage(current(), sheet);
+    await X.send([C.noteChange(X.S.state, page, r.fields).change, ...r.photos]);
+    showSheet(Math.max(0, sheet - 1));
+    $("nbmsg").textContent = "Hoja borrada.";
+    return;
+  }
   if (!confirm(`¿Borrar la página del ${niceDay(page, false)} con su texto y fotos?\n(Los archivos de fotos quedan en Drive.)`)) return;
   clearTimeout(saveTimer);
   await X.send(C.noteDeleteChanges(X.S.state, page));
@@ -143,35 +211,9 @@ async function deletePage() {
   $("nbpage").close();
 }
 
-function renderPhotos() {
-  const grid = $("nbphotos");
-  grid.innerHTML = "";
-  const photos = current()?.photos || [];
-  $("nbdrop").classList.toggle("has", photos.length > 0);
-  for (const p of photos) {
-    const d = document.createElement("div");
-    d.className = "ph pending";
-    d.title = "Dibujar sobre la foto";
-    d.innerHTML = `<em>Buscando…</em><b class="nbpen ${p.annotated ? "on" : ""}">✎</b><button type="button" class="pdel" title="Quitar de la página">✕</button>`;
-    d.querySelector(".pdel").onclick = async (e) => {
-      e.stopPropagation();
-      if (!confirm("¿Quitar esta foto de la página?")) return;
-      await X.send([{ entity: "notebook_photos", uid: p.uid, ts: C.nowTs(), deleted: 1 }]);
-      renderPhotos();
-    };
-    grid.appendChild(d);
-    X.photoUrl(p.path).then((u) => {
-      const em = d.querySelector("em");
-      if (!u) { em.textContent = "Aún no está en Drive"; return; }
-      em.remove();
-      d.classList.remove("pending");
-      d.style.backgroundImage = `url(${u})`;
-      d.onclick = (e) => { e.stopPropagation(); Draw.open(p, u); };
-    });
-  }
-}
+function renderPhotos() { Sticker.render(); }
 
-async function addPhotos(files) {
+async function addPhotos(files, at = null) {
   files = files.filter((f) => f.type.startsWith("image/") || /\.(jpe?g|png|heic|webp)$/i.test(f.name));
   if (!files.length) { $("nbmsg").textContent = "Solo se pueden subir imágenes."; return; }
   const zone = $("nbdrop");
@@ -182,17 +224,17 @@ async function addPhotos(files) {
     const taken = new Set(C.rows(X.S.state, "notebook_photos").map((p) => base(p.path)));
     const stem = `${page.replaceAll("-", "")}-${X.S.ws.code}-cuaderno`;
     const changes = [];
-    let n = 1;
+    let n = 1, k = Sticker.count();
     for (const f of files) {
       let name;
       do { name = `${stem}-w${n++}.jpg`; } while (taken.has(name));
       taken.add(name);
       $("nbmsg").textContent = `Subiendo ${name}…`;
       await X.uploadPhoto(page, name, await X.resize(f));
-      changes.push(C.notePhotoChange(uid, `photos/cuaderno/${name}`));
+      changes.push(C.notePhotoChange(uid, `photos/cuaderno/${name}`, sheet, Sticker.defaultPlace(k++, at)));
     }
     await X.send(changes);
-    $("nbmsg").textContent = `${files.length} foto(s) subida(s). Haga clic en una para dibujar sobre ella.`;
+    $("nbmsg").textContent = `${files.length} foto(s) pegada(s) en la hoja: arrástrelas, agrándelas o gírelas; un clic, para dibujar encima.`;
   } catch (e) { $("nbmsg").textContent = `No se pudieron subir: ${e.message}`; }
   finally { zone.classList.remove("busy"); renderPhotos(); }
 }
@@ -399,8 +441,8 @@ const Ink = {
     this.cv = $("nbink");
     this.g = this.cv.getContext("2d");
     this.ta = $("nbtext");
-    this.ta.addEventListener("scroll", () => this.draw());
-    new ResizeObserver(() => this.fit()).observe(this.ta);
+    this.ta.addEventListener("scroll", () => { this.draw(); Sticker.position(); });
+    new ResizeObserver(() => { this.fit(); Sticker.position(); }).observe(this.ta);
     document.querySelectorAll(".nbtools .tool[data-mode]").forEach((b) => (b.onclick = () => this.setMode(b.dataset.mode)));
     document.querySelectorAll("#nbinkw .wd").forEach((b) => (b.onclick = () => this.setWidth(+b.dataset.w)));
     $("nbinkundo").onclick = () => { if (this.strokes.pop()) { this.sel = []; this.draw(); dirty(); } };
@@ -595,5 +637,164 @@ const Ink = {
       return !s.p.some((v, i) => i % 2 === 0 && Math.abs(v - x) < r && Math.abs(s.p[i + 1] - y) < r);
     });
     if (keep.length !== this.strokes.length) { this.strokes = keep; this.sel = []; this.draw(); dirty(); }
+  },
+};
+
+// ------------------------------------------------------------------ fotos pegadas en la hoja
+// (= ui.notebook.Sticker) Lugar en renglones {x, y (centro), w (ancho), r (giro, grados
+// antihorario como en la app)}: siguen al texto al desplazar la hoja.
+const Sticker = {
+  els: [],                 // [{el, p, pl, ratio}]
+  init() {
+    this.box = $("nbstickers");
+    this.menu = $("nbstmenu");
+    this.menu.onclick = (e) => {
+      const b = e.target.closest("button");
+      if (b && this.menuFor) this.action(b.dataset.a, this.menuFor);
+      this.hideMenu();
+    };
+    document.addEventListener("pointerdown", (e) => { if (!e.target.closest(".nbstmenu")) this.hideMenu(); }, true);
+  },
+  ta() { return $("nbtext"); },
+  count() { return this.els.length; },
+  // En medio de lo que se ve, media hoja de ancho (las siguientes, un poco corridas).
+  defaultPlace(i = 0, at = null) {
+    const ta = this.ta();
+    const cx = at ? at[0] : ta.clientWidth / 2, cy = at ? at[1] : ta.clientHeight / 2;
+    const r3 = (v) => Math.round(v * 1000) / 1000;
+    return { x: r3((cx + i * 18 - PAD_X) / LINE), y: r3((ta.scrollTop + cy + i * 18) / LINE),
+      w: r3(ta.clientWidth * .45 / LINE), r: [-4, 3, -2, 5][i % 4] };
+  },
+  placeAt(e) {                  // punto donde se soltó una foto sobre la hoja (px de la hoja)
+    const r = this.ta().getBoundingClientRect();
+    return [e.clientX - r.left, e.clientY - r.top];
+  },
+  render() {
+    this.hideMenu();
+    this.box.innerHTML = "";
+    this.els = [];
+    const photos = (current()?.photos || []).filter((p) => Number(p.page || 0) === sheet);
+    let free = 0;
+    for (const p of photos) {
+      const el = document.createElement("div");
+      el.className = "nbst pending";
+      el.title = "Arrastre para mover · esquina: tamaño · círculo: girar · clic: opciones";
+      el.innerHTML = `<i class="hz rot"></i><i class="hz sz"></i>`;
+      const it = { el, p, pl: C.notePlace(p) || this.defaultPlace(free++), ratio: .75 };
+      this.els.push(it);
+      this.box.appendChild(el);
+      el.addEventListener("pointerdown", (e) => this.down(e, it));
+      X.photoUrl(p.path).then((u) => {
+        if (!u) { el.title = "La foto aún no está en Drive"; return; }
+        const img = new Image();
+        img.onload = () => { it.ratio = img.naturalHeight / img.naturalWidth || .75; it.url = u; this.position(); };
+        img.src = u;
+        el.classList.remove("pending");
+        el.style.backgroundImage = `url(${u})`;
+      });
+    }
+    this.position();
+  },
+  position() {
+    const top = this.ta().scrollTop;
+    for (const it of this.els) {
+      const { x, y, w, r = 0 } = it.pl;
+      const wp = w * LINE, hp = wp * it.ratio;
+      Object.assign(it.el.style, { width: `${wp}px`, height: `${hp}px`, left: `${PAD_X + x * LINE - wp / 2}px`,
+        top: `${y * LINE - top - hp / 2}px`, transform: `rotate(${-r}deg)` });
+    }
+  },
+  // Arrastrar: mover; esquina: tamaño; círculo: giro; dos dedos: tamaño y giro; clic: menú.
+  down(e, it) {
+    if (Ink.penOn()) return;
+    e.preventDefault(); e.stopPropagation();
+    const el = it.el;
+    const pts = it.pts ||= new Map();
+    if (!it.active) {                               // nuevo gesto: al frente, sin dedos viejos
+      pts.clear();
+      if (this.box.lastElementChild !== el) this.box.appendChild(el);
+    }
+    el.classList.add("act");
+    const r = el.getBoundingClientRect(), c = [r.left + r.width / 2, r.top + r.height / 2];
+    const mode = e.target.classList.contains("sz") ? "size" : e.target.classList.contains("rot") ? "rot" : "move";
+    pts.set(e.pointerId, [e.clientX, e.clientY]);
+    const start = { mode: pts.size > 1 ? "pinch" : mode, c, pl: { ...it.pl }, p0: [e.clientX, e.clientY], t: Date.now(),
+      d0: Math.hypot(e.clientX - c[0], e.clientY - c[1]) || 1, moved: false, pair: pts.size > 1 ? [...pts.values()] : null };
+    it.start = start;
+    const move = (ev) => {
+      if (!pts.has(ev.pointerId)) return;
+      pts.set(ev.pointerId, [ev.clientX, ev.clientY]);
+      const s = it.start, r3 = (v) => Math.round(v * 1000) / 1000;
+      if (Math.hypot(ev.clientX - s.p0[0], ev.clientY - s.p0[1]) > 4) s.moved = true;
+      if (s.mode === "pinch" && pts.size > 1) {
+        const [a, b] = [...pts.values()], [a0, b0] = s.pair;
+        const k = Math.hypot(b[0] - a[0], b[1] - a[1]) / (Math.hypot(b0[0] - a0[0], b0[1] - a0[1]) || 1);
+        const ang = Math.atan2(b[1] - a[1], b[0] - a[0]) - Math.atan2(b0[1] - a0[1], b0[0] - a0[0]);
+        it.pl.w = r3(Math.max(1.5, Math.min(40, s.pl.w * k)));
+        it.pl.r = Math.round((s.pl.r || 0) - ang * 180 / Math.PI);
+      } else if (s.mode === "move") {
+        it.pl.x = r3(s.pl.x + (ev.clientX - s.p0[0]) / LINE);
+        it.pl.y = r3(s.pl.y + (ev.clientY - s.p0[1]) / LINE);
+      } else if (s.mode === "size") {
+        const k = Math.hypot(ev.clientX - s.c[0], ev.clientY - s.c[1]) / s.d0;
+        it.pl.w = r3(Math.max(1.5, Math.min(40, s.pl.w * k)));
+      } else if (s.mode === "rot") {
+        const css = Math.atan2(ev.clientY - s.c[1], ev.clientX - s.c[0]) * 180 / Math.PI + 90;
+        it.pl.r = Math.round(-css);
+      }
+      this.position();
+    };
+    const up = (ev) => {
+      if (!pts.has(ev.pointerId)) return;
+      pts.delete(ev.pointerId);
+      if (pts.size) return;
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", up);
+      window.removeEventListener("pointercancel", up);
+      it.active = false;
+      el.classList.remove("act");
+      const s = it.start;
+      if (!s.moved && Date.now() - s.t < 450) this.showMenu(it, ev);
+      else this.save(it);
+    };
+    if (!it.active) {                               // en la ventana: no se pierde el final
+      it.active = true;
+      window.addEventListener("pointermove", move);
+      window.addEventListener("pointerup", up);
+      window.addEventListener("pointercancel", up);
+    }
+  },
+  async save(it) {
+    it.pl.r = ((Math.round((it.pl.r || 0) * 10) / 10) % 360 + 360) % 360;
+    try {
+      await X.send([C.notePhotoUpdate(it.p, { page: sheet, place: JSON.stringify(it.pl) })]);
+      it.p = { ...it.p, page: sheet, place: JSON.stringify(it.pl) };
+      $("nbsaved").textContent = "Guardado";
+    } catch (e) { $("nbmsg").textContent = `No se guardó la foto: ${e.message}`; }
+  },
+  showMenu(it, ev) {
+    const wrap = document.querySelector(".nbwrap").getBoundingClientRect();
+    this.menuFor = it;
+    this.menu.querySelector('[data-a="page"]').hidden = C.notePages(current()).length < 2;
+    this.menu.hidden = false;
+    this.menu.style.left = `${Math.min(ev.clientX - wrap.left, wrap.width - 230)}px`;
+    this.menu.style.top = `${Math.min(ev.clientY - wrap.top, wrap.height - 130)}px`;
+  },
+  hideMenu() { if (this.menu) { this.menu.hidden = true; this.menuFor = null; } },
+  async action(a, it) {
+    if (a === "draw") {
+      if (it.url) Draw.open(it.p, it.url); else $("nbmsg").textContent = "La foto aún no está en Drive.";
+    } else if (a === "del") {
+      if (!confirm("¿Quitar esta foto de la hoja?")) return;
+      await X.send([{ entity: "notebook_photos", uid: it.p.uid, ts: C.nowTs(), deleted: 1 }]);
+      renderPhotos();
+    } else if (a === "page") {
+      const n = C.notePages(current()).length;
+      const k = Number(prompt(`¿A qué hoja (1 a ${n})?`, String(sheet === n - 1 ? 1 : sheet + 2)));
+      if (!(k >= 1 && k <= n) || k - 1 === sheet) return;
+      await X.send([C.notePhotoUpdate(it.p, { page: k - 1, place: JSON.stringify(this.defaultPlace()) })]);
+      renderPhotos();
+      $("nbmsg").textContent = `Foto pasada a la hoja ${k}.`;
+    }
   },
 };

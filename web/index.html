@@ -355,13 +355,25 @@
       <div class="dhead">
         <div class="grow"><h2 id="nbtitle"></h2>
           <div class="muted small">Fecha <input type="date" id="nbdate" class="pill"> <span id="nbsaved"></span></div></div>
+        <div class="nbnav" title="Hojas del día (también se pasan deslizando la hoja hacia el lado)">
+          <button type="button" id="nbprev" class="round" aria-label="Hoja anterior">‹</button>
+          <b id="nbpagenum">1/1</b>
+          <button type="button" id="nbnext" class="round" aria-label="Hoja siguiente">›</button>
+          <button type="button" id="nbaddpage" class="round" title="Agregar una hoja" aria-label="Agregar hoja">＋</button>
+        </div>
         <button value="cancel" class="round" aria-label="Cerrar">✕</button>
       </div>
       <div class="nbbody">
         <div class="nbsheet">
           <div class="nbwrap">
             <textarea id="nbtext" class="nbpaper" placeholder="¿Qué se vio hoy en terreno? Clima, labores, plagas, ideas…"></textarea>
+            <div id="nbstickers" class="nbstickers"></div>
             <canvas id="nbink" class="nbink"></canvas>
+            <div id="nbstmenu" class="nbstmenu" hidden>
+              <button type="button" data-a="draw">✎ Dibujar sobre la foto</button>
+              <button type="button" data-a="page">⇄ Pasar a otra hoja</button>
+              <button type="button" data-a="del" class="danger">✕ Quitar de la hoja</button>
+            </div>
             <button type="button" id="nbseldel" class="nbseldel" title="Borrar lo elegido" hidden>🗑</button>
           </div>
           <div class="nbtools">
@@ -385,15 +397,16 @@
           </div>
         </div>
         <div id="nbdrop" class="drop nbdrop">
-          <div class="drophead"><b>Fotos</b><span class="muted small">clic en una foto para dibujar</span></div>
-          <div id="nbphotos" class="photos"></div>
-          <div class="drophint">＋ Arrastre fotos aquí o haga clic</div>
+          <div class="drophead"><b>Fotos</b><span class="muted small">se pegan en la hoja que se ve</span></div>
+          <div class="drophint">＋ Arrastre fotos aquí (o sobre la hoja) o haga clic</div>
+          <p class="muted small nbsthelp">En la hoja: arrastre una foto para moverla; la esquina la agranda y el círculo de arriba
+            la gira (con dos dedos en pantalla táctil). Un clic abre sus opciones.</p>
           <input type="file" accept="image/*" multiple hidden>
         </div>
       </div>
       <p id="nbmsg" class="muted small"></p>
       <div class="actions">
-        <button type="button" id="nbdel" class="ghost danger-ghost">Borrar página</button>
+        <button type="button" id="nbdel" class="ghost danger-ghost">Borrar…</button>
         <span class="spacer"></span>
         <button value="cancel" class="primary">Listo</button>
       </div>
