@@ -33,6 +33,7 @@ RC_CAMERA = 0x4631
 RC_GALLERY = 0x4632
 RC_DOCUMENT = 0x4633
 RC_GALLERY_MULTI = 0x4634
+RC_INCAM = 0x4635          # cámara propia de la app (AeonCamera.java)
 MAX_MULTI = 10
 
 PhotoCallback = Callable[[str | None, str], None]   # (ruta_temporal | None, origen)
@@ -370,6 +371,47 @@ class AndroidMedia:
         self._pending[RC_CAMERA] = (callback, uri)
         self.activity.startActivityForResult(intent, RC_CAMERA)
 
+    def camera_burst(self, callback: Callable[[list, str], None], title: str = "") -> bool:
+        """Cámara propia de la app (zoom 1×/2×/4×, enfoque, varias fotos hasta «Listo»).
+        callback(lista_de_rutas, "camera"). False si esta copia de la app no la trae."""
+        try:
+            from jnius import autoclass  # type: ignore
+            cls = autoclass("org.rubus.fenorubus.AeonCamera")
+            intent = self.Intent(self.activity, cls)
+            if title:
+                intent.putExtra("title", autoclass("java.lang.String")(title))
+            self._pending[RC_INCAM] = (callback, None)
+            self.activity.startActivityForResult(intent, RC_INCAM)
+            return True
+        except Exception as exc:  # noqa: BLE001 (sin la cámara propia: la del teléfono)
+            print("camera_burst:", exc)
+            self._pending.pop(RC_INCAM, None)
+            return False
+
+    def save_to_gallery(self, path: str, name: str) -> None:
+        """Copia la foto original a «Imágenes de Fenología» (como la cámara del teléfono)."""
+        from jnius import autoclass  # type: ignore
+        if not name.lower().endswith(".jpg"):
+            name += ".jpg"
+        if self.api < 29:
+            folder = os.path.join(autoclass("android.os.Environment").getExternalStoragePublicDirectory(
+                autoclass("android.os.Environment").DIRECTORY_PICTURES).getAbsolutePath(), PUBLIC_PHOTO_DIR)
+            os.makedirs(folder, exist_ok=True)
+            shutil.copyfile(path, os.path.join(folder, name))
+            return
+        values = self.ContentValues()
+        values.put(self.MediaColumns.DISPLAY_NAME, name)
+        values.put(self.MediaColumns.MIME_TYPE, "image/jpeg")
+        values.put(self.MediaColumns.RELATIVE_PATH, f"Pictures/{PUBLIC_PHOTO_DIR}")
+        uri = self.resolver.insert(self.ImagesMedia.EXTERNAL_CONTENT_URI, values)
+        out = self.resolver.openOutputStream(uri)
+        ins = autoclass("java.io.FileInputStream")(path)
+        try:
+            autoclass("android.os.FileUtils").copy(ins, out)
+        finally:
+            ins.close()
+            out.close()
+
     # ---------------------------------------------------------- galería
     def pick_image(self, callback: PhotoCallback) -> None:
         try:
@@ -435,6 +477,12 @@ class AndroidMedia:
                 stamp = _dt.datetime.now().strftime("%H%M%S%f")
                 dest = os.path.join(self.tmp_dir, f"camera_{stamp}.jpg")
                 return self._dispatch(callback, self._copy_uri_to_file(uri, dest), "camera")
+            if request_code == RC_INCAM:
+                paths = []
+                if intent is not None:
+                    arr = intent.getStringArrayExtra("paths")
+                    paths = [str(p) for p in (arr or []) if p and os.path.exists(str(p))]
+                return self._dispatch(callback, paths, "camera")
             if request_code == RC_GALLERY_MULTI:
                 uris = []
                 if ok and intent is not None:

@@ -248,12 +248,9 @@ class ScoutSection(ScoutScreenBase):
         body = self.clear()
         sec = self.section
         color = scout.SECTIONS[sec][3]
-        b1 = Factory.PrimaryButton(text="Nueva captura")
-        b1.bind(on_release=lambda *_: open_capture(sec))
-        b2 = Factory.GhostButton(icon="image-multiple-outline", text="Nueva captura desde la galería")
-        b2.bind(on_release=lambda *_: open_capture(sec, source="gallery"))
-        body.add_widget(b1)
-        body.add_widget(b2)
+        from ui.photo_buttons import photo_buttons      # nueva captura: cámara o galería
+        body.add_widget(photo_buttons(lambda: open_capture(sec), lambda: open_capture(sec, source="gallery"),
+                                      "Nueva captura", "Desde la galería"))
         unknown = [s for s in db().species(sec, unidentified=True) if s["records"]]
         if unknown:
             body.add_widget(Factory.SectionLabel(text="POR IDENTIFICAR"))
@@ -473,12 +470,9 @@ class ScoutCapture(ScoutScreenBase):
             t.bind(on_release=lambda *_, i=i: self._photo_menu(i))
             grid.add_widget(t)
         card.add_widget(grid)
-        b = Factory.PrimaryButton(text="Sacar foto" if not st["photos"] else "Sacar otra foto")
-        b.bind(on_release=lambda *_: self.add_photos("camera"))
-        card.add_widget(b)
-        b = Factory.GhostButton(icon="image-multiple-outline", text="Agregar desde la galería")
-        b.bind(on_release=lambda *_: self.add_photos("gallery"))
-        card.add_widget(b)
+        from ui.photo_buttons import photo_buttons      # dos botones redondos
+        card.add_widget(photo_buttons(lambda: self.add_photos("camera"), lambda: self.add_photos("gallery"),
+                                      "Sacar fotos" if not st["photos"] else "Sacar más", "Galería"))
         views = scout.VIEWS.get(sec, [])
         if views:
             b = Factory.GhostButton(icon="camera-iris",

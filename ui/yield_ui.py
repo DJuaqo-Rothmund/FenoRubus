@@ -343,7 +343,7 @@ class YieldSet(YieldScreenBase):
         # Fotos
         photos = d.photos(self.set_id)
         card = _card(f"SET DE FOTOS · {len(photos)}")
-        grid = GridLayout(cols=3, spacing=dp(6), size_hint_y=None)
+        grid = GridLayout(cols=3, spacing=dp(6), size_hint_y=None, height=0)
         grid.bind(minimum_height=grid.setter("height"))
         # Cada miniatura, un tercio del ancho (con una sola foto se estiraba a todo el ancho).
         grid.bind(width=lambda g, w: [setattr(ch, "width", (w - 2 * dp(6)) / 3) for ch in g.children])
@@ -355,14 +355,9 @@ class YieldSet(YieldScreenBase):
             t.bind(on_release=lambda *_, i=i: open_photo(self.set_id, i))
             grid.add_widget(t)
         card.add_widget(grid)
-        # Uno bajo el otro y a todo el ancho (lado a lado, KivyMD los dibujaba angostos y con
-        # una sombra negra).
-        b = Factory.PrimaryButton(text="Sacar foto" if not photos else "Sacar otra foto")
-        b.bind(on_release=lambda *_: self.add_photos("camera"))
-        card.add_widget(b)
-        b = Factory.GhostButton(icon="image-multiple-outline", text="Agregar desde la galería")
-        b.bind(on_release=lambda *_: self.add_photos("gallery"))
-        card.add_widget(b)
+        from ui.photo_buttons import photo_buttons      # dos botones redondos
+        card.add_widget(photo_buttons(lambda: self.add_photos("camera"), lambda: self.add_photos("gallery"),
+                                      "Sacar fotos" if not photos else "Sacar más", "Galería"))
         card.add_widget(Factory.Muted(
             text="Fotos de detalle sin repetir zonas (que entre todas cubran la planta o el tramo). Toque "
                  "una foto para contar."))

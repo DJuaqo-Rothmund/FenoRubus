@@ -108,7 +108,11 @@ android.add_src = android/src
 android.apptheme = @style/PhenoTheme
 
 # (list) Dependencias Gradle: Google Identity Services (autorización de Google Drive).
-android.gradle_dependencies = com.google.android.gms:play-services-auth:21.2.0
+android.gradle_dependencies = com.google.android.gms:play-services-auth:21.2.0, androidx.camera:camera-core:1.3.4, androidx.camera:camera-camera2:1.3.4, androidx.camera:camera-lifecycle:1.3.4, androidx.camera:camera-view:1.3.4, androidx.activity:activity:1.8.2
+
+# (list) Actividades propias: la cámara de la app (CameraX: zoom, enfoque, varias fotos
+# seguidas y botones de un estabilizador Bluetooth). Ver android/src/…/AeonCamera.java.
+android.add_activities = org.rubus.fenorubus.AeonCamera
 
 # (bool) Enable AndroidX support
 android.enable_androidx = True

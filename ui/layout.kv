@@ -291,6 +291,10 @@
 <PrimaryButton@MDRaisedButton>:
     md_bg_color: c(theme.BERRY)
     elevation: 0
+    # Sin sombra (KivyMD la dibujaba como un rectángulo negro detrás del botón redondo)
+    shadow_color: 0, 0, 0, 0
+    shadow_softness: 0
+    shadow_offset: 0, 0
     rounded_button: True
     size_hint_x: 1
     height: dp(46)

@@ -1,7 +1,11 @@
 """
 ui/camera_burst.py
 ==================
-Varias fotos seguidas sin volver a tocar «Sacar foto» (cámara en cadena).
+Varias fotos seguidas sin volver a tocar «Sacar foto».
+
+En el teléfono se usa la cámara propia de la app (AeonCamera.java: zoom 1×/2×/4×, enfoque al
+tocar, botones de un estabilizador y «Listo»). Si esta copia de la app no la trae, la de
+siempre en cadena:
 
 La cámara del teléfono entrega una foto por vez y se cierra. Aquí, después de cada foto la
 app la guarda y vuelve a abrir la cámara sola en un instante. Mientras tanto, abajo se ve
@@ -54,7 +58,50 @@ def burst(done, hint=None, exact: bool = False, title: str = "") -> None:
         return
     _state = {"done": done, "hint": hint, "exact": exact, "n": 0, "deferred": None,
               "bar": None, "ev": None, "title": title}
+    media = MDApp.get_running_app().media
+    if hasattr(media, "camera_burst") and media.camera_burst(_got_many, title or "Cámara"):
+        return
     _shoot()
+
+
+def _got_many(paths, origin):
+    """Fotos de la cámara propia: copia de cada original a la galería del teléfono
+    («Imágenes de Fenología», como hacía la cámara del teléfono) y luego, una por una, a quien
+    las pidió."""
+    st = _state
+    if st is None:
+        return
+    if not paths:
+        finish()
+        return
+    import threading
+    a = MDApp.get_running_app()
+    names = []
+    for _p in paths:
+        names.append(st["hint"]() if callable(st["hint"]) else (st["hint"] or "AeonCrop"))
+
+    def gallery():
+        import datetime as _dt
+        try:
+            for i, (p, n) in enumerate(zip(paths, names)):
+                stamp = f"{_dt.datetime.now():%Y-%m-%d_%H%M%S}"
+                a.media.save_to_gallery(p, n if st["exact"] else f"{n}_{stamp}_{i + 1}")
+        except Exception as exc:  # noqa: BLE001 (la copia en la galería es un extra)
+            print("save_to_gallery:", exc)
+        finally:
+            try:
+                from jnius import detach  # type: ignore
+                detach()
+            except Exception:  # noqa: BLE001
+                pass
+    threading.Thread(target=gallery, daemon=True).start()
+    for p in paths:
+        st["n"] += 1
+        try:
+            st["done"](p, origin)
+        except Exception as exc:  # noqa: BLE001
+            a.toast(f"No se pudo guardar la foto: {exc}")
+    finish()
 
 
 def _shoot(*_):
