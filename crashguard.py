@@ -67,6 +67,37 @@ def entries(limit: int = 20) -> list[str]:
     return out
 
 
+def full_text() -> str:
+    """Todo el registro (sin abreviar) + el rastro de la última apertura, para copiar o enviar."""
+    import platform
+    parts = [f"Registro de errores · v{app_version()} · {_dt.datetime.now():%Y-%m-%d %H:%M:%S}"]
+    try:
+        from android_bridge import android_api_level
+        parts.append(f"Android API {android_api_level()} · {platform.machine()}")
+    except Exception:  # noqa: BLE001
+        pass
+    for path in (log_path() + ".1", log_path()):
+        try:
+            with open(path, encoding="utf-8", errors="replace") as f:
+                parts.append(f.read().strip())
+        except OSError:
+            pass
+    try:
+        with open(_trail_path(), encoding="utf-8", errors="replace") as f:
+            parts.append("=== Pasos de esta apertura\n" + f.read().strip())
+    except OSError:
+        pass
+    return "\n\n".join(p for p in parts if p)
+
+
+def export_file() -> str:
+    """Guarda full_text() en «logs/registro-errores-<fecha>.txt» y devuelve la ruta."""
+    path = os.path.join(data_subdir("logs"), f"registro-errores-{_dt.datetime.now():%Y%m%d-%H%M}.txt")
+    with open(path, "w", encoding="utf-8") as f:
+        f.write(full_text())
+    return path
+
+
 def clear() -> None:
     for p in (log_path(), log_path() + ".1"):
         try:

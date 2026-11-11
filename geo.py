@@ -125,6 +125,42 @@ def fetch_tile(z: int, x: int, y: int, layer: str = "osm") -> str | None:
 
 
 # ---------------------------------------------------- ubicación del teléfono
+# ------------------------------------------------------------- sector del plano
+def _inside(ring, x, y) -> bool:
+    inside, n = False, len(ring) // 2
+    j = n - 1
+    for i in range(n):
+        xi, yi, xj, yj = ring[2 * i], ring[2 * i + 1], ring[2 * j], ring[2 * j + 1]
+        if (yi > y) != (yj > y) and x < (xj - xi) * (y - yi) / (yj - yi) + xi:
+            inside = not inside
+        j = i
+    return inside
+
+
+def sector_at(plan: dict | None, lat: float, lon: float, near_m: float = 40.0) -> dict | None:
+    """Sector del plano del predio (assets/maps/<código>.json) donde cae (lat, lon).
+
+    Si el punto queda fuera de todos (GPS impreciso, en un camino entre sectores), el más
+    cercano a menos de `near_m` metros. None si el plano no tiene coordenadas o se está
+    lejos del predio."""
+    if not plan or not plan.get("geo"):
+        return None
+    g = plan["geo"]
+    x, y = lon * g["kx"] - g["x0"], lat * g["ky"] - g["y0"]
+    best, best_d = None, None
+    for s in plan.get("sectors", []):
+        for ring in s.get("parts", []):
+            if _inside(ring, x, y):
+                return s
+            for i in range(0, len(ring), 2):
+                d = math.hypot(ring[i] - x, ring[i + 1] - y)
+                if best_d is None or d < best_d:
+                    best, best_d = s, d
+    # unidades del plano ≈ metros (kx y ky son metros por grado a esa latitud)
+    m_per_unit = 111320.0 / g["ky"]
+    return best if best_d is not None and best_d * m_per_unit <= near_m else None
+
+
 LOCATION_PERMISSIONS = ["android.permission.ACCESS_FINE_LOCATION",
                         "android.permission.ACCESS_COARSE_LOCATION"]
 

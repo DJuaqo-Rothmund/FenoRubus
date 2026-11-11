@@ -225,12 +225,13 @@ class ScoutHome(ScoutScreenBase):
                   "especie y estadio) y la planilla «registro.csv». " if on else
                   "Sin cuenta de Google: todo queda guardado en el teléfono hasta conectarla "
                   "(pantalla principal). ")
-            + (f"{st} archivo(s) por subir." if st else "Todo respaldado." if on else ""), markup=True))
-        if on:
-            b = Factory.GhostButton(icon="cloud-upload-outline", text="Respaldar ahora")
-            b.bind(on_release=lambda *_: (app().scout_backup(manual=True)))
-            card.add_widget(b)
+            + (f"{st} archivo(s) por subir (nube de arriba a la izquierda: respaldar ahora)." if st
+               else "Todo respaldado." if on else ""), markup=True))
         body.add_widget(card)
+        # Respaldo: botoncito arriba a la izquierda (como en los demás módulos)
+        self.ids.bar.left_action_items = [["arrow-left", lambda x: app().back()],
+                                          [theme.DRIVE_UP, lambda x: app().scout_backup(manual=True),
+                                           "Respaldar en Google Drive"]]
 
 
 # ============================================================================ sección

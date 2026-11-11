@@ -3397,3 +3397,21 @@ def test_hidden_by_opacity_stops_at_the_window():
     assert hidden_by_opacity(btn) is False
     screen.opacity = 0
     assert hidden_by_opacity(btn) is True
+
+
+def test_sector_at_gps_point_on_the_predio_map():
+    """Rendimiento: el GPS (o el EXIF de la foto) cae en un sector del plano de El Amanecer."""
+    import json
+    from pathlib import Path
+    import geo
+    plan = json.loads((Path(__file__).resolve().parent.parent / "assets" / "maps" / "AM.json")
+                      .read_text(encoding="utf-8"))
+    g = plan["geo"]
+    s = next(x for x in plan["sectors"] if x["id"] == "E2-S7")
+    ring = s["parts"][0]
+    x, y = sum(ring[0::2]) / len(ring[0::2]), sum(ring[1::2]) / len(ring[1::2])
+    lat, lon = (y + g["y0"]) / g["ky"], (x + g["x0"]) / g["kx"]
+    hit = geo.sector_at(plan, lat, lon)
+    assert hit and hit["equipo"] == 2
+    assert geo.sector_at(plan, lat + 0.05, lon) is None        # a 5 km: fuera del predio
+    assert geo.sector_at({"sectors": []}, lat, lon) is None    # plano sin coordenadas

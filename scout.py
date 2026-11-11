@@ -466,6 +466,28 @@ def sectors(place: dict) -> list[str]:
     return out
 
 
+def sector_for(place: dict, equipo, sector) -> str | None:
+    """Nombre (como en `sectors`) de la unidad del predio en ese equipo de riego y sector,
+    o None si el predio no tiene unidades ahí."""
+    path = place.get("file") or ""
+    if not os.path.exists(path):
+        return None
+    try:
+        con = sqlite3.connect(f"file:{path}?mode=ro", uri=True)
+        con.row_factory = sqlite3.Row
+        rows = [dict(r) for r in con.execute("SELECT * FROM varieties WHERE active=1 ORDER BY sort_order, name")]
+        con.close()
+    except sqlite3.Error:
+        return None
+    import phenology as ph
+    for v in rows:
+        if str(v.get("irrigation") or "") == str(equipo) and str(v.get("sector") or "") == str(sector):
+            label = ph.unit_place(v) or v["name"]
+            label = f"{label} · {ph.unit_main(v)}" if ph.is_unit(v) else label
+            return label[:1].upper() + label[1:]
+    return None
+
+
 # ----------------------------------------------------------------- Drive
 class ScoutDrive:
     """Respaldo en Drive de AeonScout: la cola de fotos (DriveBackup con la carpeta

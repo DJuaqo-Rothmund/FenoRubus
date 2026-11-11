@@ -251,6 +251,10 @@ def _crop_id() -> str:
 class YieldHome(YieldScreenBase):
     def on_pre_enter(self, *_):
         self.title = "Estimaciones de rendimiento"
+        # Respaldo: botoncito arriba a la izquierda (como en los demás módulos)
+        self.ids.bar.left_action_items = [["arrow-left", lambda x: app().back()],
+                                          [theme.DRIVE_UP, lambda x: app().yield_backup(manual=True),
+                                           "Respaldar en Google Drive"]]
         db().apply_boxes(_labels())          # lo marcado en IA+ cuenta solo
         self.refresh()
 
@@ -293,14 +297,11 @@ class YieldHome(YieldScreenBase):
             text=(f"Carpeta [b]AeonCrop/{crops.current().app}/{R.DRIVE_DIR}[/b] (aparte de I+D y Predio): "
                   "una carpeta por estimación y la planilla «estimaciones.csv». " if on else
                   "Sin cuenta de Google: todo queda guardado en el teléfono hasta conectarla. ")
-            + (f"{st} archivo(s) por subir." if st else "Todo respaldado." if on else ""), markup=True))
+            + (f"{st} archivo(s) por subir (nube de arriba a la izquierda: respaldar ahora)." if st
+               else "Todo respaldado." if on else ""), markup=True))
         card.add_widget(Factory.Muted(
             text="Las fotos también aparecen en IA+ (app y web) para marcarlas con cajas: lo marcado se "
                  "cuenta solo aquí y sirve para entrenar el detector que contará automáticamente."))
-        if on:
-            b = Factory.GhostButton(icon="cloud-upload-outline", text="Respaldar ahora")
-            b.bind(on_release=lambda *_: app().yield_backup(manual=True))
-            card.add_widget(b)
         body.add_widget(card)
 
 
@@ -331,6 +332,10 @@ class YieldSet(YieldScreenBase):
             b = Factory.GhostButton(icon="vector-square", text=f"{what}: {s['sector'] or '(elegir)'}")
             b.bind(on_release=lambda *_: self._pick_sector())
             card.add_widget(b)
+            if self._plan(s):
+                b = Factory.GhostButton(icon="crosshairs-gps", text="Detectar el sector con mi GPS")
+                b.bind(on_release=lambda *_: self._gps_sector())
+                card.add_widget(b)
         b = Factory.GhostButton(icon="calendar", text=f"Fecha: {_date(s['taken_on'])}")
         b.bind(on_release=lambda *_: self._pick_date())
         card.add_widget(b)
@@ -438,6 +443,87 @@ class YieldSet(YieldScreenBase):
                      place_code=p.get("code", ""), sector="")
         d.set_setting("yield_last_place", {"place": {k: p.get(k, "") for k in ("kind", "name", "code")}, "sector": ""})
         self.refresh()
+        if p.get("kind") in ("predio", "ensayo"):        # el sector se pide de inmediato
+            Clock.schedule_once(lambda *_: self._pick_sector(), .25)
+
+    # ------------------------------------------------------------ sector por GPS
+    @staticmethod
+    def _plan(s):
+        """Plano del predio (con coordenadas) o None: solo los predios con plano cargado."""
+        if not s or s["place_kind"] != "predio":
+            return None
+        from ui.sector_map import load_map
+        plan = load_map(s["place_code"])
+        return plan if plan and plan.get("geo") else None
+
+    def _place(self, s):
+        import scout
+        from platform_utils import get_base_dir
+        return next((p for p in scout.places(get_base_dir(), _crop_id()) if p["code"] == s["place_code"]), None)
+
+    def _sector_from(self, lat, lon, source: str, ask: bool = True) -> bool:
+        """Busca el sector del plano en (lat, lon) y lo propone. True si cayó en uno."""
+        import geo
+        import scout
+        s = db().get_set(self.set_id)
+        plan = self._plan(s)
+        hit = geo.sector_at(plan, lat, lon)
+        if not hit:
+            if ask:
+                app().toast(f"{source}: fuera de los sectores de {s['place']}. Elíjalo de la lista.")
+            return False
+        place = self._place(s)
+        name = (scout.sector_for(place, hit["equipo"], hit["sector"]) if place else None) or hit["nombre"]
+        vars_ = ", ".join(hit.get("variedades") or [])
+        if not ask:
+            self._set_sector(name)
+            app().toast(f"Sector según {source.lower()}: {hit['nombre']}")
+            return True
+        from ui.screens import confirm
+        confirm("¿Usar este sector?",
+                f"{source}: está en {hit['nombre']}" + (f" ({vars_})" if vars_ else "") + ".",
+                [("Usar", lambda: self._set_sector(name)), ("Elegir otro", self._pick_sector)])
+        return True
+
+    def _gps_sector(self):
+        import geo
+        a = app()
+        if getattr(self, "_gps", None) is not None:
+            return
+        a.toast("Buscando su ubicación (GPS)…")
+
+        def done(lat, lon, acc=None):
+            self._gps = None
+            self._sector_from(lat, lon, "Según su GPS")
+
+        def fail(msg=""):
+            self._gps = None
+            a.toast(f"No se pudo leer el GPS{': ' + msg if msg else ''}. Elija el sector de la lista.")
+
+        def granted(ok):
+            if not ok:
+                return fail("sin permiso de ubicación")
+            try:
+                self._gps = geo.LocationRequest(done, fail, target=20)
+                self._gps.start()
+            except Exception as exc:  # noqa: BLE001
+                fail(str(exc))
+        try:
+            geo.request_location_permission(granted)
+        except Exception as exc:  # noqa: BLE001
+            fail(str(exc))
+
+    def _sector_from_photos(self, paths):
+        """Fotos nuevas con GPS (EXIF) y sin sector elegido: se elige solo."""
+        s = db().get_set(self.set_id)
+        if not s or s["sector"] or not self._plan(s):
+            return
+        import geo
+        for p in paths:
+            gps = geo.exif_gps(p)
+            if gps:
+                self._sector_from(gps[0], gps[1], "Ubicación de la foto", ask=False)
+                return
 
     def _set_sector(self, name):
         d = db()
@@ -465,6 +551,8 @@ class YieldSet(YieldScreenBase):
         place = next((p for p in scout.places(get_base_dir(), _crop_id()) if p["code"] == s["place_code"]), None)
         names = scout.sectors(place) if place else []
         items = [(n, "", lambda n=n: self._set_sector(n)) for n in names]
+        if self._plan(s):
+            items.insert(0, ("Detectar con mi GPS", "Según el plano del predio", self._gps_sector))
         items.append(("Otro…", "Escribir", self._other_sector))
         pick_dialog("Sector" if s["place_kind"] == "predio" else "Parcela / variedad", items)
 
@@ -519,6 +607,7 @@ class YieldSet(YieldScreenBase):
                 if err:
                     a.toast(f"No se pudo guardar alguna foto: {err}")
                 self.refresh()
+                self._sector_from_photos([p["path"] for p in db().photos(sid)][-len(paths):])
                 a.yield_backup()
             a.workers.submit(work)
 

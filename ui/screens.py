@@ -629,6 +629,39 @@ def text_dialog(title: str, lines: list[str], highlight: str = "", actions=(), s
     return dialog
 
 
+def show_error_log():
+    """Ajustes › Registro de errores: lo último de cada error, con «Copiar todo» (el texto
+    completo, para pegarlo en un chat) y «Enviar archivo» (.txt por WhatsApp, correo…)."""
+    import crashguard
+    from platform_utils import app_version
+    lines = crashguard.entries()
+
+    def copy_all():
+        from kivy.core.clipboard import Clipboard
+        try:
+            Clipboard.copy(crashguard.full_text())
+            app().toast("Registro copiado: péguelo en el chat")
+        except Exception as exc:  # noqa: BLE001
+            app().toast(f"No se pudo copiar: {exc}")
+
+    def send_file():
+        try:
+            path = crashguard.export_file()
+            app().media.share(path, "text/plain", title="Enviar registro de errores",
+                              subject=os.path.basename(path))
+        except Exception as exc:  # noqa: BLE001
+            app().toast(f"No se pudo enviar: {exc}")
+
+    actions = [("Copiar todo", copy_all), ("Enviar", send_file)]
+    if lines:
+        actions.append(("Borrar", lambda: confirm(
+            "Borrar registro", "Se borran los errores guardados en el teléfono.",
+            [("Borrar", lambda: (crashguard.clear(), app().toast("Registro borrado")))])))
+    text_dialog("Registro de errores",
+                [f"{app().title or 'AeonCrop'} {app_version()}"] + (lines or ["Sin errores registrados."]),
+                highlight="Error", actions=actions, small=True)
+
+
 def confirm(title: str, text: str, actions: list[tuple[str, callable]]):
     dialog = None
 
@@ -4542,14 +4575,7 @@ class SettingsTab(MDScreen):
                     highlight="✗")
 
     def show_errors(self):
-        import crashguard
-        from platform_utils import app_version
-        lines = crashguard.entries()
-        extra = [("Borrar registro", lambda: (crashguard.clear(), app().toast("Registro borrado")))] \
-            if lines else []
-        text_dialog("Registro de errores",
-                    [f"PhenoRubus {app_version()}"] + (lines or ["Sin errores registrados."]),
-                    highlight="Error", actions=extra, small=True)
+        show_error_log()
 
     def drive_disconnect(self):
         confirm("Desconectar Google Drive",

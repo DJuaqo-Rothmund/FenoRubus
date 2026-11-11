@@ -2047,6 +2047,15 @@
                     text: "Módulo de calibración (PIN)"
                     on_release: app.open_ai_lab()
             PaperCard:
+                SectionLabel:
+                    text: "SI ALGO FALLA"
+                Muted:
+                    text: "Errores y cierres de la app. «Copiar todo» copia el registro completo para pegarlo en un chat; «Enviar» lo manda como archivo."
+                GhostButton:
+                    icon: "bug-outline"
+                    text: "Registro de errores"
+                    on_release: root.show_errors()
+            PaperCard:
                 id: card_data
                 SectionLabel:
                     text: "TRAZABILIDAD Y DATOS"
@@ -2056,10 +2065,6 @@
                     icon: "history"
                     text: "Ver bitácora de cambios"
                     on_release: root.show_audit()
-                GhostButton:
-                    icon: "bug-outline"
-                    text: "Registro de errores"
-                    on_release: root.show_errors()
                 GhostButton:
                     icon: "archive-arrow-down-outline"
                     text: "Copia de seguridad completa (con fotos)"
