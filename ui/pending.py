@@ -7,9 +7,8 @@ Tareas pendientes de hoy en la pantalla de inicio.
   subir lo pendiente a Drive y completar el muestreo de la semana.
 * `PostIt`: post-it amarillo, escrito a mano, pegado arriba a la derecha junto al logo;
   solo aparece si queda algo por hacer.
-* `TasksSheet`: al tocar el post-it, una hoja de cuaderno blanca (renglones, margen y
-  espiral) con la lista a mano y un botón para resolver cada tarea; al pie, dibujos de
-  frambueso estilo cuaderno de Da Vinci. Se cierra tocando fuera.
+* `TasksSheet`: al tocar el post-it, el mismo post-it en grande (amarillo, con su cinta)
+  con la lista a mano y un botón para resolver cada tarea. Se cierra tocando fuera.
 """
 from __future__ import annotations
 
@@ -17,13 +16,12 @@ import datetime as _dt
 
 from kivy.clock import Clock
 from kivy.core.text import LabelBase
-from kivy.graphics import (Color, Line, PopMatrix, PushMatrix, Rectangle, Rotate, RoundedRectangle)
+from kivy.graphics import Color, Line, PopMatrix, PushMatrix, Rectangle, Rotate, RoundedRectangle
 from kivy.metrics import dp, sp
 from kivy.properties import ListProperty, NumericProperty, StringProperty
 from kivy.uix.behaviors import ButtonBehavior
 from kivy.uix.boxlayout import BoxLayout
 from kivy.uix.floatlayout import FloatLayout
-from kivy.uix.image import Image
 from kivy.uix.label import Label
 from kivy.uix.modalview import ModalView
 from kivy.uix.widget import Widget
@@ -180,10 +178,8 @@ class _Action(ButtonBehavior, Label):
             RoundedRectangle(pos=self.pos, size=self.size, radius=[dp(14)])
 
 
-class NotePaper(FloatLayout):
-    """Hoja de cuaderno blanca: renglones celestes, margen rojo y espiral a la izquierda."""
-    STEP = 44           # alto de renglón (dp)
-    TOP = 92            # primer renglón bajo el título (dp)
+class StickyPaper(FloatLayout):
+    """El post-it en grande: papel amarillo con sombra, borde superior más oscuro y cinta."""
 
     def __init__(self, **kw):
         super().__init__(**kw)
@@ -193,26 +189,19 @@ class NotePaper(FloatLayout):
         self.canvas.before.clear()
         x, y, w, h = self.x, self.y, self.width, self.height
         with self.canvas.before:
-            Color(0, 0, 0, .18)
-            RoundedRectangle(pos=(x + dp(2), y - dp(5)), size=(w, h), radius=[dp(8), dp(22), dp(22), dp(8)])
-            Color(1, 1, 1, 1)
-            RoundedRectangle(pos=(x, y), size=(w, h), radius=[dp(8), dp(22), dp(22), dp(8)])
-            Color(*c(RULE, .9))
-            yy = self.top - dp(self.TOP)
-            while yy > y + dp(12):
-                Rectangle(pos=(x + dp(6), yy), size=(w - dp(12), dp(1.2)))
-                yy -= dp(self.STEP)
-            Color(*c(MARGIN, .8))
-            Rectangle(pos=(x + dp(46), y), size=(dp(1.4), h))
-            n = int((h - dp(40)) // dp(46))
-            for i in range(n):                                   # espiral
-                cy = self.top - dp(30) - i * dp(46)
-                Color(1, 1, 1, 1)
-                Line(circle=(x + dp(16), cy, dp(5.5)), width=dp(1))
-                Color(*c("#9AA3AD"))
-                Line(circle=(x + dp(16), cy, dp(5.5)), width=dp(1.1))
-                Color(*c("#7E8791"))
-                Line(points=[x - dp(4), cy + dp(3), x + dp(15), cy + dp(1)], width=dp(2.2), cap="round")
+            PushMatrix()
+            Rotate(angle=-1.2, origin=self.center)          # apenas ladeado, como el chico
+            Color(0, 0, 0, .16)
+            RoundedRectangle(pos=(x + dp(4), y - dp(7)), size=(w, h), radius=[dp(4)])
+            Color(*c("#F6E3A6"))
+            RoundedRectangle(pos=(x, y), size=(w, h), radius=[dp(3)])
+            Color(*c("#EBD38A"))
+            Rectangle(pos=(x, y + h - dp(10)), size=(w, dp(10)))
+            Color(*c("#EFD993"))                            # esquina levemente levantada
+            RoundedRectangle(pos=(x + w - dp(34), y), size=(dp(34), dp(26)), radius=[0, 0, dp(3), dp(14)])
+            Color(1, 1, 1, .62)                             # cinta adhesiva
+            Rectangle(pos=(x + w / 2 - dp(48), y + h - dp(18)), size=(dp(96), dp(30)))
+            PopMatrix()
 
 
 class TasksSheet(ModalView):
@@ -222,38 +211,28 @@ class TasksSheet(ModalView):
         super().__init__(size_hint=(.92, None), auto_dismiss=True, background_color=(0, 0, 0, 0),
                          overlay_color=(.08, .12, .1, .45), **kw)
         from kivy.core.window import Window
-        self.height = min(Window.height * .8, dp(640))
+        step, head = dp(44), dp(96)
+        self.height = min(Window.height * .8, head + step * (max(1, len(tasks)) + 1) + dp(24))
         self.on_close = on_close
-        paper = NotePaper()
+        paper = StickyPaper()
         self.add_widget(paper)
         top = lambda off: {"x": 0, "top": 1 - off / (self.height or 1)}   # noqa: E731
-        # Dibujos (atrás de la escritura): rama colgando arriba a la derecha y al pie
-        # la caña, el racimo y la flor.
-        for src, w, hint in ((theme.DV_BRANCH, 96, {"right": .99, "top": .995}),
-                             (theme.DV_CANE, 128, {"x": .07, "y": .0}),
-                             (theme.DV_CLUSTER, 170, {"center_x": .55, "y": .0}),
-                             (theme.DV_FLOWER, 104, {"right": .99, "y": .03})):
-            img = Image(source=src, fit_mode="contain", size_hint=(None, None), pos_hint=hint, opacity=.95)
-            img.width = dp(w)
-            img.height = dp(w) * img.texture_size[1] / max(1, img.texture_size[0]) if img.texture else dp(w)
-            paper.add_widget(img)
         d = _dt.date.today()
-        title = Label(text=f"Pendiente · {WEEKDAYS[d.weekday()]} {d.day}", font_name="Hand", font_size=sp(32),
-                      color=c(BROWN), halign="left", valign="bottom", size_hint=(1, None), height=dp(62),
-                      shorten=True,
-                      pos_hint=top(dp(NotePaper.TOP - 62 - 2)), padding=(dp(62), 0))
+        ink = c("#5A3D1C")                                   # la tinta del post-it chico
+        title = Label(text=f"Hoy falta · {WEEKDAYS[d.weekday()]} {d.day}", font_name="Hand", font_size=sp(30),
+                      color=ink, halign="left", valign="bottom", size_hint=(1, None), height=dp(58),
+                      shorten=True, pos_hint=top(head - dp(62)), padding=(dp(22), 0))
         title.bind(size=lambda w, s: setattr(w, "text_size", s))
         paper.add_widget(title)
-        rows = BoxLayout(orientation="vertical", size_hint=(1, None), pos_hint=top(dp(NotePaper.TOP)),
-                         padding=(dp(58), 0, dp(14), 0))
+        rows = BoxLayout(orientation="vertical", size_hint=(1, None), pos_hint=top(head),
+                         padding=(dp(20), 0, dp(14), 0))
         for t in tasks:
-            row = BoxLayout(size_hint_y=None, height=dp(NotePaper.STEP), spacing=dp(10))
-            box = AnchorPad(_Check(t["done"]))
-            row.add_widget(box)
+            row = BoxLayout(size_hint_y=None, height=step, spacing=dp(10))
+            row.add_widget(AnchorPad(_Check(t["done"])))
             txt = f"[s]{t['title']}[/s]" if t["done"] else t["title"]
-            lbl = Label(text=txt, markup=True, font_name="Hand", font_size=sp(25),
-                        color=c("#9C8B74") if t["done"] else c(INK), halign="left", valign="bottom",
-                        shorten=True, shorten_from="right", padding=(0, dp(2)))
+            lbl = Label(text=txt, markup=True, font_name="Hand", font_size=sp(24),
+                        color=c("#A08A5E") if t["done"] else ink, halign="left", valign="middle",
+                        shorten=True, shorten_from="right")
             lbl.bind(size=lambda w, s: setattr(w, "text_size", s))
             row.add_widget(lbl)
             if not t["done"]:
@@ -261,16 +240,14 @@ class TasksSheet(ModalView):
                 act.bind(on_release=lambda _w, t=t: self._run(t))
                 row.add_widget(AnchorPad(act))
             rows.add_widget(row)
-        rows.height = dp(NotePaper.STEP) * len(tasks)
+        rows.height = step * max(1, len(tasks))
         paper.add_widget(rows)
         if not tasks:
-            rows.height = dp(NotePaper.STEP)
-            rows.add_widget(Label(text="¡Todo al día por hoy!", font_name="Hand", font_size=sp(26), color=c(INK),
-                                  halign="left", valign="bottom", text_size=(dp(240), dp(40))))
-        hint = Label(text="toca fuera para cerrar", font_name="Hand", font_size=sp(18), color=c("#9C8B74"),
-                     size_hint=(1, None), height=dp(30), halign="left", valign="bottom",
-                     pos_hint=top(dp(NotePaper.TOP + NotePaper.STEP * (max(1, len(tasks)) + 1) - 30)))
-        hint.padding = (dp(58), 0)
+            rows.add_widget(Label(text="¡Todo al día por hoy!", font_name="Hand", font_size=sp(26), color=ink,
+                                  halign="left", valign="middle", text_size=(dp(240), dp(40))))
+        hint = Label(text="toca fuera para cerrar", font_name="Hand", font_size=sp(17), color=c("#A08A5E"),
+                     size_hint=(1, None), height=dp(30), halign="right", valign="bottom",
+                     pos_hint={"x": 0, "y": 0}, padding=(dp(18), dp(10)))
         hint.bind(size=lambda w, s: setattr(w, "text_size", s))
         paper.add_widget(hint)
         self.bind(on_dismiss=lambda *_: on_close and on_close())
