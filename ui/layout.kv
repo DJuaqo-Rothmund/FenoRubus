@@ -3953,18 +3953,47 @@
                         text: "   " + root.title
                         bold: True
                         font_size: "17sp"
+                        shorten: True
+                        shorten_from: "right"
                         theme_text_color: "Custom"
                         text_color: c(NB_BROWN)
                         on_touch_down: root.pick_date() if self.collide_point(*args[1].pos) else None
+                    # Hojas del día: ‹ 2/3 › y «+» (también se pasan deslizando la hoja)
+                    MDIconButton:
+                        icon: "chevron-left"
+                        size_hint: None, None
+                        size: dp(34), dp(38)
+                        padding: dp(4)
+                        theme_icon_color: "Custom"
+                        icon_color: c(NB_BROWN, 1 if root.page > 0 else .25)
+                        on_release: root.flip(-1)
                     MDLabel:
-                        text: root.saved_text
-                        font_style: "Caption"
-                        halign: "right"
+                        text: f"{root.page + 1}/{root.n_pages}"
+                        halign: "center"
                         size_hint_x: None
-                        width: dp(90)
+                        width: dp(36)
+                        font_style: "Caption"
+                        bold: True
                         theme_text_color: "Custom"
-                        text_color: c(theme.MUTED)
-                FloatLayout:
+                        text_color: c(NB_BROWN)
+                    MDIconButton:
+                        icon: "chevron-right"
+                        size_hint: None, None
+                        size: dp(34), dp(38)
+                        padding: dp(4)
+                        theme_icon_color: "Custom"
+                        icon_color: c(NB_BROWN, 1 if root.page < root.n_pages - 1 else .25)
+                        on_release: root.flip(1)
+                    MDIconButton:
+                        icon: "file-plus-outline"
+                        size_hint: None, None
+                        size: dp(38), dp(38)
+                        padding: dp(6)
+                        theme_icon_color: "Custom"
+                        icon_color: c(NB_BROWN)
+                        on_release: root.add_page()
+                NotePage:
+                    id: sheet
                     TextInput:
                         pos_hint: {"x": 0, "y": 0}
                         size_hint: 1, 1
@@ -3985,6 +4014,11 @@
                         selection_color: c(NB_OCHRE, .35)
                         padding: dp(4), dp(8)
                         on_text: root.on_text()
+                    # Fotos pegadas en la hoja (sobre el papel, bajo la escritura a mano)
+                    StickerLayer:
+                        id: stickers
+                        pos_hint: {"x": 0, "y": 0}
+                        size_hint: 1, 1
                     InkLayer:
                         id: ink
                         pos_hint: {"x": 0, "y": 0}
@@ -4105,67 +4139,16 @@
                             thick: 2.5
                             selected: ink.width_i == 2 and ink.mode in ("pen", "hl") and root.pen
                             on_release: root.set_width(2)
-            # ---- fotos
-            BoxLayout:
-                orientation: "vertical"
-                size_hint: (.42, 1) if root.wide else (1, None)
-                height: 0 if (root.kb_pad and not root.wide) else dp(250)
-                opacity: 0 if (root.kb_pad and not root.wide) else 1
-                disabled: bool(root.kb_pad and not root.wide)
-                padding: dp(12), dp(10)
-                spacing: dp(8)
-                canvas.before:
-                    Color:
-                        rgba: c(NB_PAPER, .9)
-                    RoundedRectangle:
-                        pos: self.pos
-                        size: self.size
-                        radius: [dp(20)]
-                    Color:
-                        rgba: c(NB_OCHRE, .5)
-                    Line:
-                        rounded_rectangle: (self.x, self.y, self.width, self.height, dp(20))
-                        width: dp(1.1)
-                BoxLayout:
-                    size_hint_y: None
-                    height: dp(40)
-                    spacing: dp(8)
-                    MDLabel:
-                        text: "Fotos"
-                        bold: True
-                        theme_text_color: "Custom"
-                        text_color: c(NB_BROWN)
-                    PillButton:
-                        text: "Cámara"
+                    # Fotos: se pegan sobre la hoja (cámara en cadena o galería)
+                    BoxLayout:
                         size_hint: None, None
-                        size: dp(92), dp(38)
-                        bg_off: c(NB_BROWN)
-                        fg_off: 1, 1, 1, 1
-                        on_release: root.add_photos("camera")
-                    PillButton:
-                        text: "Galería"
-                        size_hint: None, None
-                        size: dp(92), dp(38)
-                        bg_off: c(NB_SOFT)
-                        fg_off: c(NB_BROWN)
-                        on_release: root.add_photos("gallery")
-                FloatLayout:
-                    ScrollView:
-                        do_scroll_x: False
-                        pos_hint: {"x": 0, "y": 0}
-                        GridLayout:
-                            id: photos
-                            cols: 2 if root.wide else 3
-                            spacing: dp(8)
-                            size_hint_y: None
-                            height: self.minimum_height
-                            row_force_default: True
-                            row_default_height: (self.width - dp(8) * (self.cols - 1)) / self.cols * .82
-                    MDLabel:
-                        id: no_photos
-                        text: "Sin fotos. Toque una foto para dibujar sobre ella con el dedo o el lápiz."
-                        halign: "center"
-                        font_style: "Caption"
-                        pos_hint: {"center_x": .5, "center_y": .5}
-                        theme_text_color: "Custom"
-                        text_color: c(theme.MUTED)
+                        size: self.minimum_width, dp(36)
+                        spacing: dp(5)
+                        NbTool:
+                            icon: "camera-plus-outline"
+                            size: dp(42), dp(36)
+                            on_release: root.add_photos("camera")
+                        NbTool:
+                            icon: "image-plus"
+                            size: dp(42), dp(36)
+                            on_release: root.add_photos("gallery")

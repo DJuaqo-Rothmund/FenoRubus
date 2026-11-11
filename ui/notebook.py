@@ -5,8 +5,10 @@ Cuaderno de campo (bitácora diaria) de cada ensayo o predio.
 
 * `NotebookScreen`: línea de tiempo (lo más reciente arriba) con una tarjeta por día:
   fecha, extracto del texto y miniaturas de las fotos. Tocar una abre la página.
-* `NoteScreen`: la página del día: texto largo (se guarda solo), fotos desde la cámara o
-  la galería y cambio de fecha. En pantallas anchas (tablet) texto y fotos van lado a lado.
+* `NoteScreen`: el día en el cuaderno: una o más hojas (se pasan deslizando hacia el lado
+  o con ‹ ›; «+» agrega otra), texto largo y escritura a mano (se guardan solos), fotos
+  pegadas sobre la hoja (`Sticker`: se mueven, agrandan y giran con los dedos) y cambio
+  de fecha.
 * `AnnotateView`: dibujar a mano alzada (dedo o S-Pen, con presión si el lápiz la entrega)
   sobre una foto, con zoom de dos dedos, colores, grosores y deshacer. Al guardar se crea
   una imagen nueva con los trazos (Pillow) y la original queda en el teléfono.
@@ -28,6 +30,7 @@ from kivy.uix.behaviors import ButtonBehavior
 from kivy.uix.boxlayout import BoxLayout
 from kivy.uix.floatlayout import FloatLayout
 from kivy.uix.modalview import ModalView
+from kivy.uix.scatter import Scatter
 from kivy.uix.stencilview import StencilView
 from kivy.uix.widget import Widget
 from kivymd.app import MDApp
@@ -520,6 +523,197 @@ class InkLayer(StencilView):
             self._changed()
 
 # --------------------------------------------------------------------------- página
+# --------------------------------------------------------------------------- fotos pegadas
+class Sticker(Scatter):
+    """Foto pegada en la hoja, como un recorte con marco blanco y cinta: un dedo la mueve,
+    dos la agrandan, achican y giran; un toque abre su menú (dibujar encima, al frente,
+    quitar). Su lugar se guarda en renglones (igual que la escritura a mano), así sigue
+    al texto al desplazar la hoja."""
+    BASE = 150          # ancho base (dp); el tamaño real lo da la escala
+
+    def __init__(self, photo: dict, layer, **kw):
+        super().__init__(do_rotation=True, do_scale=True, do_translation=True,
+                         scale_min=.3, scale_max=6, auto_bring_to_front=True,
+                         size_hint=(None, None), **kw)
+        self.photo, self.layer = photo, layer
+        self._tap = None
+        w = dp(self.BASE)
+        self.size = (w, w * .75)
+        from kivy.uix.image import Image
+        b = dp(5)
+        with self.canvas.before:
+            Color(0, 0, 0, .18)
+            self._shadow = Rectangle(pos=(dp(2), -dp(3)), size=self.size)
+            Color(1, 1, 1, 1)
+            self._frame = Rectangle(pos=(0, 0), size=self.size)
+        self.img = Image(fit_mode="cover", size=(self.width - 2 * b, self.height - 2 * b), pos=(b, b),
+                         mipmap=True)
+        self.add_widget(self.img)
+        with self.canvas.after:
+            Color(1, 1, 1, .55)                                  # cinta adhesiva
+            self._tape = Rectangle(size=(dp(46), dp(14)))
+        self._fit_tape()
+
+    def set_aspect(self, ratio: float):
+        """Alto según la foto (ancho/alto)."""
+        b = dp(5)
+        w = dp(self.BASE)
+        h = max(dp(40), min(w * 1.6, (w - 2 * b) / max(.2, ratio) + 2 * b))
+        self.size = (w, h)
+        self._shadow.size = self._frame.size = self.size
+        self.img.size = (w - 2 * b, h - 2 * b)
+        self._fit_tape()
+
+    def _fit_tape(self):
+        self._tape.pos = (self.width / 2 - dp(23), self.height - dp(8))
+
+    # toques: tocar (sin mover) abre el menú; al soltar se guarda dónde quedó
+    def on_touch_down(self, touch):
+        if not self.collide_point(*touch.pos) or not self.layer.enabled():
+            return False
+        if super().on_touch_down(touch):
+            touch.ud["sticker"] = True
+            if len(self._touches) == 1:
+                self._tap = (touch.pos, touch.time_start)
+            else:
+                self._tap = None
+            return True
+        return False
+
+    def on_touch_move(self, touch):
+        if self._tap and math.dist(touch.pos, self._tap[0]) > dp(8):
+            self._tap = None
+        return super().on_touch_move(touch)
+
+    def on_touch_up(self, touch):
+        mine = touch.grab_current is self
+        res = super().on_touch_up(touch)
+        if mine and not self._touches:
+            if self._tap and touch.time_end - self._tap[1] < .45:
+                self.layer.on_tap(self)
+            else:
+                self.layer.save(self)
+            self._tap = None
+        return res
+
+
+class StickerLayer(StencilView):
+    """Las fotos pegadas en la hoja que se ve (recortadas al borde de la hoja)."""
+    screen = ObjectProperty(None, allownone=True)
+
+    def enabled(self) -> bool:
+        sc = self.screen
+        return bool(sc) and not sc.pen
+
+    def on_touch_down(self, touch):
+        if not self.collide_point(*touch.pos):
+            return False
+        for ch in self.children[:]:
+            if ch.dispatch("on_touch_down", touch):
+                return True
+        return False
+
+    def on_touch_move(self, touch):
+        return any(ch.dispatch("on_touch_move", touch) for ch in self.children[:])
+
+    def on_touch_up(self, touch):
+        return any(ch.dispatch("on_touch_up", touch) for ch in self.children[:])
+
+    # ------------------------------------------------------------------ lugar
+    def _ink(self):
+        return self.screen.ids.ink
+
+    def default_place(self, i: int = 0) -> dict:
+        """En medio de lo que se ve, media hoja de ancho (las siguientes, un poco corridas)."""
+        ink = self._ink()
+        st = ink._step()
+        lx, ly = ink.to_lines(self.center_x + i * dp(18), self.center_y - i * dp(18))
+        return {"x": lx, "y": ly, "w": round(self.width * .5 / st, 3), "r": (-4, 3, -2, 5)[i % 4]}
+
+    def show(self, photos: list[dict]):
+        """Pega las fotos de la hoja (las que no tienen lugar, en una columna al medio)."""
+        import json
+        self.clear_widgets()
+        a = app()
+        free = 0
+        for p in photos:
+            try:
+                pl = json.loads(p.get("place") or "")
+            except (TypeError, ValueError):
+                pl = None
+            if not isinstance(pl, dict) or not {"x", "y", "w"} <= set(pl):
+                pl = self.default_place(free)
+                free += 1
+            st = Sticker(dict(p, _place=pl), self)
+            self.add_widget(st)
+            if os.path.exists(p["path"]):
+                def got(src, st=st):
+                    st.img.source = src
+                    tex = st.img.texture
+                    if tex is not None and tex.height:
+                        st.set_aspect(tex.width / tex.height)
+                        self.place(st)
+                a.thumb_async(p["path"], 640, got)
+        self.place_all()
+
+    def place(self, st: Sticker):
+        if st._touches:
+            return                      # la está moviendo el dedo
+        ink = self._ink()
+        pl = st.photo["_place"]
+        step = ink._step()
+        cx, cy = ink.to_screen(pl["x"], pl["y"])
+        st.rotation = float(pl.get("r", 0))
+        st.scale = max(st.scale_min, min(st.scale_max, pl["w"] * step / st.width))
+        st.center = (cx, cy)
+
+    def place_all(self, *_):
+        if self.screen is None:
+            return
+        for st in self.children:
+            self.place(st)
+
+    def save(self, st: Sticker):
+        ink = self._ink()
+        lx, ly = ink.to_lines(*st.center)
+        pl = {"x": lx, "y": ly, "w": round(st.width * st.scale / ink._step(), 3), "r": round(st.rotation % 360, 1)}
+        st.photo["_place"] = pl
+        notebook_db().place_note_photo(st.photo["id"], self.screen.page, pl)
+        self.screen.saved_text = "Guardado"
+
+    def on_tap(self, st: Sticker):
+        from ui.screens import pick_dialog
+        sc = self.screen
+        items = [("Dibujar sobre la foto", "Con el dedo o el lápiz", lambda: sc.annotate(st.photo))]
+        if sc.n_pages > 1:
+            items.append(("Pasar a otra hoja", "", lambda: sc.move_photo_page(st)))
+        items.append(("Quitar de la hoja", "El archivo queda en el teléfono", lambda: sc._delete_photo(st.photo)))
+        pick_dialog("Foto", items)
+
+
+class NotePage(FloatLayout):
+    """La hoja: deslizar el dedo hacia el lado pasa a la hoja siguiente o a la anterior
+    (fuera del modo lápiz y sin estar moviendo una foto)."""
+    screen = ObjectProperty(None, allownone=True)
+
+    def on_touch_down(self, touch):
+        if self.collide_point(*touch.pos):
+            touch.ud["page_swipe"] = touch.pos
+        return super().on_touch_down(touch)
+
+    def on_touch_up(self, touch):
+        res = super().on_touch_up(touch)
+        start = touch.ud.get("page_swipe")
+        sc = self.screen
+        if start and sc is not None and not sc.pen and not touch.ud.get("sticker"):
+            dx, dy = touch.pos[0] - start[0], touch.pos[1] - start[1]
+            if (abs(dx) > max(dp(80), self.width * .28) and abs(dy) < abs(dx) * .45
+                    and touch.time_end - touch.time_start < .8):
+                touch.ud["page_swipe"] = None
+                sc.flip(-1 if dx > 0 else 1)
+        return res
+
+
 class NoteScreen(MDScreen):
     pen = BooleanProperty(False)           # modo lápiz (escritura a mano)
     pen_palette = ListProperty(INK_COLORS)  # colores de la pluma elegida
@@ -527,6 +721,8 @@ class NoteScreen(MDScreen):
     title = StringProperty("")
     wide = BooleanProperty(False)
     saved_text = StringProperty("")
+    page = NumericProperty(0)              # hoja que se ve (0 = la primera del día)
+    n_pages = NumericProperty(1)
 
     def on_kv_post(self, *_):
         # Se escribe directo en la hoja, sin el cuadro de texto nativo de Android (native_input).
@@ -537,6 +733,10 @@ class NoteScreen(MDScreen):
         ink = self.ids.ink
         ink.attach(ti)
         ink.on_change = self._ink_changed
+        self.ids.stickers.screen = self.ids.sheet.screen = self
+        # Las fotos pegadas siguen al texto al desplazar la hoja (igual que la tinta).
+        self._stick_ev = Clock.create_trigger(self.ids.stickers.place_all, -1)
+        ti.bind(scroll_y=self._stick_ev, pos=self._stick_ev, size=self._stick_ev)
         # Los renglones se dibujan una vez por cuadro, ya acomodada la hoja: al abrir o cerrar
         # el teclado la hoja cambia de alto y de posición en pasos, y con los valores de un
         # paso intermedio quedaban corridos (o encima del título).
@@ -595,17 +795,59 @@ class NoteScreen(MDScreen):
                 group.add(Rectangle(pos=(ti.x, y - dp(2)), size=(ti.width, dp(1))))
             y -= step
 
-    def load(self, day: str):
+    def load(self, day: str, page: int = 0):
         self.day = day[:10]
-        self.entry = notebook_db().note_for_day(self.day, create=True)
+        db = notebook_db()
+        self.entry = db.note_for_day(self.day, create=True)
         self.title = nice_day(self.day)
-        self._loading = True
-        self.ids.text.text = self.entry["text"]
-        self._loading = False
-        self.ids.ink.load(self.entry.get("ink") or "")
-        self.saved_text = "Guardado"
+        self._pages = db.note_pages(self.entry)
+        self.n_pages = len(self._pages)
         self._layout()
+        self._show(min(page, self.n_pages - 1))
+
+    def _show(self, index: int):
+        """Muestra la hoja `index` del día (texto, escritura a mano y sus fotos)."""
+        self.page = index
+        sheet = self._pages[index]
+        self._loading = True
+        self.ids.text.text = sheet["text"]
+        self.ids.text.scroll_y = 0
+        self._loading = False
+        self.ids.ink.clear_selection()
+        self.ids.ink.load(sheet["ink"])
+        self.saved_text = "Guardado"
         self.refresh_photos()
+
+    # ------------------------------------------------------------ hojas
+    def flip(self, step: int):
+        """Hoja siguiente (+1) o anterior (-1), con un pequeño deslizamiento."""
+        from kivy.animation import Animation
+        j = self.page + step
+        if not 0 <= j < self.n_pages or getattr(self, "_flipping", False):
+            return
+        self.save_now()
+        sheet = self.ids.sheet
+        self._flipping = True
+
+        def swap(*_):
+            self._show(j)
+            sheet.opacity = 0
+            Animation(opacity=1, d=.16, t="out_quad").start(sheet)
+            self._flipping = False
+        anim = Animation(opacity=0, d=.1, t="in_quad")
+        anim.bind(on_complete=swap)
+        anim.start(sheet)
+
+    def add_page(self):
+        """Hoja nueva en blanco al final del día."""
+        self.save_now()
+        db = notebook_db()
+        idx = db.add_note_page(self.entry["id"])
+        self.entry = db.note_for_day(self.day)
+        self._pages = db.note_pages(self.entry)
+        self.n_pages = len(self._pages)
+        app().toast(f"Hoja {idx + 1} · deslice hacia el lado para pasar de una a otra")
+        self.flip(idx - self.page)
 
     kb_pad = NumericProperty(0)           # espacio del teclado del teléfono bajo la hoja
 
@@ -660,9 +902,10 @@ class NoteScreen(MDScreen):
     def save_now(self):
         if not getattr(self, "entry", None):
             return
-        db = notebook_db()
-        db.save_note_text(self.entry["id"], self.ids.text.text)
-        db.save_note_ink(self.entry["id"], self.ids.ink.dumps())
+        text, ink = self.ids.text.text, self.ids.ink.dumps()
+        notebook_db().save_note_page(self.entry["id"], self.page, text, ink)
+        if self.page < len(getattr(self, "_pages", [])):
+            self._pages[self.page] = {"text": text, "ink": ink}
         self.saved_text = "Guardado"
 
     # ------------------------------------------------------------ lápiz
@@ -723,17 +966,20 @@ class NoteScreen(MDScreen):
 
     # ------------------------------------------------------------ fotos
     def refresh_photos(self):
-        a = app()
+        """Fotos pegadas en la hoja que se ve."""
         self.entry = notebook_db().note_for_day(self.day, create=True)
-        grid = self.ids.photos
-        grid.clear_widgets()
-        for p in self.entry["photos"]:
-            th = NoteThumb(photo=p, annotated=bool(p["annotated"]))
-            th.bind(on_release=lambda w: self.annotate(w.photo))
-            grid.add_widget(th)
-            if os.path.exists(p["path"]):
-                a.thumb_async(p["path"], 360, lambda src, th=th: setattr(th, "source", src))
-        self.ids.no_photos.opacity = 0 if self.entry["photos"] else 1
+        self.ids.stickers.show([p for p in self.entry["photos"] if int(p.get("page") or 0) == self.page])
+
+    def move_photo_page(self, st):
+        from ui.screens import pick_dialog
+
+        def go(k):
+            pl = self.ids.stickers.default_place()
+            notebook_db().place_note_photo(st.photo["id"], k, pl)
+            self.refresh_photos()
+            app().toast(f"Foto pasada a la hoja {k + 1}")
+        pick_dialog("¿A qué hoja?", [(f"Hoja {k + 1}", "", lambda k=k: go(k))
+                                     for k in range(self.n_pages) if k != self.page])
 
     def add_photos(self, source: str):
         a = app()
@@ -741,7 +987,8 @@ class NoteScreen(MDScreen):
         from platform_utils import data_subdir
         code = f"{a.db.code}-" if getattr(a.db, "code", "") else ""
         base = f"{ph.photo_date(self.day)}-{code}cuaderno"
-        entry_id, day = self.entry["id"], self.day
+        entry_id, day, page = self.entry["id"], self.day, self.page
+        count = [len(self.ids.stickers.children)]
 
         def done(result, origin):
             paths = [p for p in (result if isinstance(result, list) else [result]) if p]
@@ -750,14 +997,17 @@ class NoteScreen(MDScreen):
                     a.toast("No se pudo obtener la foto.")
                 return
             a.toast("Guardando foto…" if len(paths) == 1 else f"Guardando {len(paths)} fotos…")
+            # Se pegan en medio de lo que se ve, cada una un poco corrida (se mueven después).
+            places = [self.ids.stickers.default_place(count[0] + k) for k in range(len(paths))]
+            count[0] += len(paths)
 
             def work():
                 error = None
                 try:
                     dest = data_subdir("photos", "cuaderno")
-                    for tmp in paths:
+                    for tmp, place in zip(paths, places):
                         path = store_photo(tmp, dest, base, exact=True)
-                        notebook_db().add_note_photo(entry_id, path)
+                        notebook_db().add_note_photo(entry_id, path, page=page, place=place)
                         a.backup_notebook(path)
                 except Exception as exc:  # noqa: BLE001
                     error = exc
@@ -809,6 +1059,17 @@ class NoteScreen(MDScreen):
             self.entry = None
             app().back()
 
+        def sheet():
+            self.save_now()
+            notebook_db().delete_note_page(self.entry["id"], self.page)
+            self.load(self.day, max(0, self.page - 1))
+            app().toast("Hoja borrada")
+
+        if self.n_pages > 1:
+            confirm("Borrar", f"Este día tiene {self.n_pages} hojas. ¿Borrar solo la hoja {self.page + 1} "
+                              "(con sus fotos pegadas) o el día completo? (los archivos de fotos quedan "
+                              "en el teléfono)", [("Esta hoja", sheet), ("Todo el día", go)])
+            return
         confirm("Borrar página", f"¿Borrar la página del {nice_day(self.day, False)} con su texto y "
                                  "fotos? (los archivos de fotos quedan en el teléfono)", [("Borrar", go)])
 
@@ -1092,7 +1353,7 @@ class PenSwatch(ButtonBehavior, Widget):
 def register():
     """Registra las clases para las reglas KV (se llama al cargar la app)."""
     from kivy.factory import Factory
-    for cls in (NoteCard, NoteThumb, NotebookScreen, NoteScreen, PenSwatch, InkLayer):
+    for cls in (NoteCard, NoteThumb, NotebookScreen, NoteScreen, PenSwatch, InkLayer, StickerLayer, NotePage):
         Factory.register(cls.__name__, cls=cls)
 
 

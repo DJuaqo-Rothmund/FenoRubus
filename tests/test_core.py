@@ -3415,3 +3415,33 @@ def test_sector_at_gps_point_on_the_predio_map():
     assert hit and hit["equipo"] == 2
     assert geo.sector_at(plan, lat + 0.05, lon) is None        # a 5 km: fuera del predio
     assert geo.sector_at({"sectors": []}, lat, lon) is None    # plano sin coordenadas
+
+
+def test_notebook_sheets_and_pasted_photos(db, tmp_path):
+    """Cuaderno: varias hojas por día (la 1 sigue en text/ink) y fotos pegadas con su lugar."""
+    import notebook_export as ne
+    e = db.note_for_day("2026-11-20", create=True)
+    assert [p["text"] for p in db.note_pages(e)] == [""]
+    db.save_note_page(e["id"], 0, "hoja uno", "")
+    assert db.add_note_page(e["id"]) == 1
+    db.save_note_page(e["id"], 1, "hoja dos", '[{"c": "#000000", "w": 0.06, "p": [1, 1, 2, 2]}]')
+    db.add_note_page(e["id"])
+    db.save_note_page(e["id"], 2, "hoja tres", "")
+    e = db.note_for_day("2026-11-20")
+    assert e["text"] == "hoja uno"
+    assert [p["text"] for p in db.note_pages(e)] == ["hoja uno", "hoja dos", "hoja tres"]
+    photo = tmp_path / "f.jpg"
+    from PIL import Image
+    Image.new("RGB", (40, 30), (200, 40, 40)).save(photo)
+    p1 = db.add_note_photo(e["id"], str(photo), page=1, place={"x": 4, "y": 5, "w": 6, "r": 10})
+    p2 = db.add_note_photo(e["id"], str(photo), page=2)
+    db.place_note_photo(p2, 2, {"x": 1, "y": 2, "w": 3, "r": -5})
+    pdf = ne.render(db.note_for_day("2026-11-20"), "Prueba", "NV", str(tmp_path / "c.pdf"))
+    import pypdf
+    assert len(pypdf.PdfReader(pdf).pages) == 3
+    # borrar la hoja 2: la 3 pasa a ser la 2, con su foto; la foto de la hoja borrada se va
+    db.delete_note_page(e["id"], 1)
+    e = db.note_for_day("2026-11-20")
+    assert [p["text"] for p in db.note_pages(e)] == ["hoja uno", "hoja tres"]
+    assert [(p["id"], p["page"]) for p in e["photos"]] == [(p2, 1)]
+    assert p1 not in [p["id"] for p in e["photos"]]

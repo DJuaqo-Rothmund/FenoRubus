@@ -94,14 +94,45 @@ def _stroke(d, s: dict, top: int, col) -> None:
 
 
 def signature(entry: dict) -> str:
-    raw = json.dumps([entry.get("day"), entry.get("text"), entry.get("ink"),
-                      [p["path"] for p in entry.get("photos", [])]], ensure_ascii=False)
+    raw = json.dumps([entry.get("day"), entry.get("text"), entry.get("ink"), entry.get("pages") or "",
+                      [(p["path"], p.get("page", 0), p.get("place") or "") for p in entry.get("photos", [])]],
+                     ensure_ascii=False)
     return hashlib.sha1(raw.encode("utf-8")).hexdigest()
 
 
+def _sheets(entry: dict) -> list[dict]:
+    """Hojas del día [{"text", "ink"}] (= Database.note_pages, sin importar la base)."""
+    try:
+        extra = json.loads(entry.get("pages") or "[]")
+    except ValueError:
+        extra = []
+    return [{"text": entry.get("text") or "", "ink": entry.get("ink") or ""}] + [
+        {"text": p.get("text") or "", "ink": p.get("ink") or ""} for p in extra if isinstance(p, dict)]
+
+
+def _place(photo: dict) -> dict | None:
+    try:
+        pl = json.loads(photo.get("place") or "")
+    except (TypeError, ValueError):
+        return None
+    return pl if isinstance(pl, dict) and {"x", "y", "w"} <= set(pl) else None
+
+
+def _open_pic(path: str):
+    from PIL import Image, ImageOps
+    if not path or not os.path.exists(path):
+        return None
+    try:
+        with Image.open(path) as src:
+            return ImageOps.exif_transpose(src).convert("RGB")
+    except Exception:  # noqa: BLE001
+        return None
+
+
 def render(entry: dict, ws_name: str, code: str, dest: str) -> str:
-    """Dibuja la página (una o más hojas A4) y la guarda como PDF en `dest`."""
-    from PIL import Image, ImageDraw, ImageOps
+    """Dibuja el día (cada hoja del cuaderno en una hoja A4, con sus fotos pegadas donde
+    quedaron) y lo guarda como PDF en `dest`."""
+    from PIL import Image, ImageDraw
     pages = []
 
     def new_page():
@@ -109,59 +140,79 @@ def render(entry: dict, ws_name: str, code: str, dest: str) -> str:
         pages.append(im)
         return im, ImageDraw.Draw(im)
 
-    im, d = new_page()
     day = _dt.date.fromisoformat(entry["day"][:10])
     title = f"{WEEKDAYS[day.weekday()]} {day.day} de {ph.MESES[day.month - 1]} de {day.year}"
-    d.text((M, M - 30), "CUADERNO DE CAMPO", font=_font(22, True), fill=(200, 150, 62))
-    d.text((M, M), title, font=_font(44, True), fill=(107, 68, 35))
-    d.text((M, M + 58), f"{ws_name} ({code})" if code else ws_name, font=_font(26), fill=(110, 126, 117))
-    top = M + 120                                  # primer renglón del texto
-    font = _font(28)
-    lines = _wrap(d, entry.get("text") or "", font, W - 2 * M)
-    strokes = []
-    try:
-        strokes = json.loads(entry.get("ink") or "[]")
-    except ValueError:
-        pass
-    ink_bottom = max([max(s["p"][1::2]) for s in strokes if s.get("p")] + [0])
-    n_rows = max(len(lines), int(ink_bottom) + 1, 6)
-    bottom = min(H - M, top + n_rows * STEP)
-    for i in range(int((bottom - top) / STEP) + 1):       # renglones
-        y = top + (i + 1) * STEP - 6
-        if y < H - M:
-            d.line([(M, y), (W - M, y)], fill=(234, 222, 200), width=2)
-    for i, ln in enumerate(lines):
-        y = top + i * STEP + 8
-        if y + STEP > H - M:
-            break
-        d.text((M, y), ln, font=font, fill=(27, 42, 35))
-    # Escritura a mano (en renglones): el destacador, translúcido y debajo de la tinta.
-    hl = [s for s in strokes if s.get("k") == "hl"]
-    if hl:
-        layer = Image.new("RGBA", (W, H), (0, 0, 0, 0))
-        ld = ImageDraw.Draw(layer)
-        for s in hl:
-            _stroke(ld, s, top, (*_hex(s.get("c")), 255))
-        alpha = layer.getchannel("A").point(lambda v: int(v * .35))
-        layer.putalpha(alpha)
-        im.paste(layer, (0, 0), layer)
+    sheets = _sheets(entry)
+    photos = entry.get("photos", [])
+    loose = []
+    for n, sheet in enumerate(sheets):
+        im, d = new_page()
+        d.text((M, M - 30), "CUADERNO DE CAMPO", font=_font(22, True), fill=(200, 150, 62))
+        d.text((M, M), title + (f" · hoja {n + 1} de {len(sheets)}" if len(sheets) > 1 else ""),
+               font=_font(44 if len(sheets) == 1 else 38, True), fill=(107, 68, 35))
+        d.text((M, M + 58), f"{ws_name} ({code})" if code else ws_name, font=_font(26), fill=(110, 126, 117))
+        top = M + 120                                  # primer renglón del texto
+        font = _font(28)
+        lines = _wrap(d, sheet["text"], font, W - 2 * M)
+        strokes = []
+        try:
+            strokes = json.loads(sheet["ink"] or "[]")
+        except ValueError:
+            pass
+        mine = [p for p in photos if int(p.get("page") or 0) == n]
+        placed = [(p, _place(p)) for p in mine]
+        loose += [p for p, pl in placed if pl is None]
+        placed = [(p, pl) for p, pl in placed if pl is not None]
+        ink_bottom = max([max(s["p"][1::2]) for s in strokes if s.get("p")] +
+                         [pl["y"] + pl["w"] * .5 for _p, pl in placed] + [0])
+        n_rows = max(len(lines), int(ink_bottom) + 1, 6)
+        bottom = min(H - M, top + n_rows * STEP)
+        for i in range(int((bottom - top) / STEP) + 1):       # renglones
+            y = top + (i + 1) * STEP - 6
+            if y < H - M:
+                d.line([(M, y), (W - M, y)], fill=(234, 222, 200), width=2)
+        for i, ln in enumerate(lines):
+            y = top + i * STEP + 8
+            if y + STEP > H - M:
+                break
+            d.text((M, y), ln, font=font, fill=(27, 42, 35))
+        # Fotos pegadas en la hoja (sobre el texto, como en la app), con su marco blanco.
+        for p, pl in placed:
+            pic = _open_pic(p.get("path"))
+            if pic is None:
+                continue
+            w = max(40, int(pl["w"] * STEP))
+            pic = pic.resize((w, max(1, int(pic.height * w / pic.width))), Image.BILINEAR)
+            border = max(6, w // 28)
+            framed = Image.new("RGBA", (pic.width + 2 * border, pic.height + 2 * border), (255, 255, 255, 255))
+            framed.paste(pic, (border, border))
+            framed = framed.rotate(float(pl.get("r", 0)), expand=True, resample=Image.BICUBIC)
+            cx, cy = M + pl["x"] * STEP, top + pl["y"] * STEP
+            im.paste(framed, (int(cx - framed.width / 2), int(cy - framed.height / 2)), framed)
         d = ImageDraw.Draw(im)
-    for s in strokes:
-        if s.get("k") != "hl":
-            _stroke(d, s, top, _hex(s.get("c")))
-    # Fotos de la página, dos por fila (siguen en otra hoja si no caben).
-    y = bottom + 30
+        # Escritura a mano (en renglones): el destacador, translúcido y debajo de la tinta.
+        hl = [s for s in strokes if s.get("k") == "hl"]
+        if hl:
+            layer = Image.new("RGBA", (W, H), (0, 0, 0, 0))
+            ld = ImageDraw.Draw(layer)
+            for s in hl:
+                _stroke(ld, s, top, (*_hex(s.get("c")), 255))
+            alpha = layer.getchannel("A").point(lambda v: int(v * .35))
+            layer.putalpha(alpha)
+            im.paste(layer, (0, 0), layer)
+            d = ImageDraw.Draw(im)
+        for s in strokes:
+            if s.get("k") != "hl":
+                _stroke(d, s, top, _hex(s.get("c")))
+        last_bottom = bottom
+    # Fotos sin lugar en la hoja (de versiones anteriores), dos por fila al final.
+    y = last_bottom + 30
     col_w = (W - 2 * M - 30) // 2
     x_i = 0
     row_h = 0
-    for ph_ in entry.get("photos", []):
-        path = ph_.get("path")
-        if not path or not os.path.exists(path):
-            continue
-        try:
-            with Image.open(path) as src:
-                pic = ImageOps.exif_transpose(src).convert("RGB")
-        except Exception:  # noqa: BLE001
+    for ph_ in loose:
+        pic = _open_pic(ph_.get("path"))
+        if pic is None:
             continue
         k = col_w / pic.width
         pic = pic.resize((col_w, max(1, int(pic.height * k))), Image.BILINEAR)
@@ -191,7 +242,7 @@ def export_pending(db, drive, out_dir: str) -> int:
         sig = signature(entry)
         if done.get(entry["day"]) == sig:
             continue
-        if not (entry.get("text") or "").strip() and not entry["photos"] and not (entry.get("ink") or "").strip("[] "):
+        if not any(sh["text"].strip() or sh["ink"].strip("[] ") for sh in _sheets(entry)) and not entry["photos"]:
             continue                       # página vacía: nada que guardar
         name = page_name(code, entry["day"])
         path = render(entry, ws.get("name") or code, code, os.path.join(out_dir, name))

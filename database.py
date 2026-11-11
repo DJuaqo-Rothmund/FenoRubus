@@ -352,7 +352,10 @@ class Database:
         "variety_attachments": [("week_id", "INTEGER")],                # foto adjunta semanal
         "ai_references": [("workspace", "TEXT")],                       # ensayo de la foto
         "treatments": [("cultivar", "TEXT")],                           # variedad del tratamiento
-        "notebook_entries": [("ink", "TEXT NOT NULL DEFAULT ''")],      # escritura a mano
+        "notebook_entries": [("ink", "TEXT NOT NULL DEFAULT ''"),        # escritura a mano
+                             ("pages", "TEXT NOT NULL DEFAULT ''")],     # hojas 2, 3… (JSON)
+        # Foto pegada en la hoja: en qué hoja y dónde (JSON {x, y, w, r} en renglones).
+        "notebook_photos": [("page", "INTEGER NOT NULL DEFAULT 0"), ("place", "TEXT NOT NULL DEFAULT ''")],
     }
 
     def _add_missing_columns(self) -> None:
@@ -1092,6 +1095,64 @@ class Database:
         if cur is not None and cur["text"] != text:
             self.execute("UPDATE notebook_entries SET text=?, updated_at=? WHERE id=?", (text, _now(), entry_id))
 
+    # Hojas del día: la 1 son las columnas text/ink de siempre (así la web y los PDF
+    # anteriores la siguen leyendo); las siguientes, una lista JSON [{"text", "ink"}] en pages.
+    @staticmethod
+    def note_pages(entry: dict) -> list[dict]:
+        """Todas las hojas del día: [{"text", "ink"}, …] (al menos una)."""
+        try:
+            extra = json.loads(entry.get("pages") or "[]")
+        except ValueError:
+            extra = []
+        return [{"text": entry.get("text") or "", "ink": entry.get("ink") or ""}] + [
+            {"text": p.get("text") or "", "ink": p.get("ink") or ""} for p in extra if isinstance(p, dict)]
+
+    def save_note_page(self, entry_id: int, index: int, text: str, ink: str) -> None:
+        """Guarda la hoja `index` (0 = la primera) del día."""
+        if index == 0:
+            self.save_note_text(entry_id, text)
+            self.save_note_ink(entry_id, ink)
+            return
+        row = self.query_one("SELECT * FROM notebook_entries WHERE id=?", (entry_id,))
+        if row is None:
+            return
+        pages = self.note_pages(row)[1:]
+        while len(pages) < index:
+            pages.append({"text": "", "ink": ""})
+        if pages[index - 1] == {"text": text, "ink": ink}:
+            return
+        pages[index - 1] = {"text": text, "ink": ink}
+        self.execute("UPDATE notebook_entries SET pages=?, updated_at=? WHERE id=?",
+                     (json.dumps(pages, ensure_ascii=False), _now(), entry_id))
+
+    def add_note_page(self, entry_id: int) -> int:
+        """Agrega una hoja en blanco al final; devuelve su índice."""
+        row = self.query_one("SELECT * FROM notebook_entries WHERE id=?", (entry_id,))
+        pages = self.note_pages(row)[1:] + [{"text": "", "ink": ""}]
+        self.execute("UPDATE notebook_entries SET pages=?, updated_at=? WHERE id=?",
+                     (json.dumps(pages, ensure_ascii=False), _now(), entry_id))
+        return len(pages)
+
+    def delete_note_page(self, entry_id: int, index: int) -> None:
+        """Quita la hoja `index` (si es la 1, la 2 pasa a ser la 1). Sus fotos se quitan y las
+        de las hojas siguientes se corren una hoja."""
+        row = self.query_one("SELECT * FROM notebook_entries WHERE id=?", (entry_id,))
+        pages = self.note_pages(row)
+        if len(pages) <= 1:
+            return
+        pages.pop(index)
+        first, rest = pages[0], pages[1:]
+        self.execute("UPDATE notebook_entries SET text=?, ink=?, pages=?, updated_at=? WHERE id=?",
+                     (first["text"], first["ink"], json.dumps(rest, ensure_ascii=False) if rest else "",
+                      _now(), entry_id))
+        self.execute("DELETE FROM notebook_photos WHERE entry_id=? AND page=?", (entry_id, index))
+        self.execute("UPDATE notebook_photos SET page=page-1 WHERE entry_id=? AND page>?", (entry_id, index))
+
+    def place_note_photo(self, photo_id: int, page: int, place: dict) -> None:
+        """Dónde quedó la foto pegada en la hoja (x, y del centro y ancho en renglones; giro)."""
+        self.execute("UPDATE notebook_photos SET page=?, place=? WHERE id=?",
+                     (int(page), json.dumps({k: round(float(v), 3) for k, v in place.items()}), photo_id))
+
     def move_note(self, entry_id: int, day: str) -> None:
         """Cambia la fecha de una página (si ese día ya tenía página, se rechaza)."""
         if self.query_one("SELECT 1 FROM notebook_entries WHERE day=? AND id<>?", (day[:10], entry_id)):
@@ -1103,9 +1164,11 @@ class Database:
         self.execute("DELETE FROM notebook_entries WHERE id=?", (entry_id,))
         self.log("delete", "note", entry_id)
 
-    def add_note_photo(self, entry_id: int, path: str, caption: str = "") -> int:
-        cur = self.execute("INSERT INTO notebook_photos(entry_id, path, caption, annotated, created_at) "
-                           "VALUES (?,?,?,0,?)", (entry_id, path, caption, _now()))
+    def add_note_photo(self, entry_id: int, path: str, caption: str = "", page: int = 0,
+                       place: dict | None = None) -> int:
+        cur = self.execute("INSERT INTO notebook_photos(entry_id, path, caption, annotated, created_at, page, place) "
+                           "VALUES (?,?,?,0,?,?,?)", (entry_id, path, caption, _now(), int(page),
+                                                       json.dumps(place) if place else ""))
         self.execute("UPDATE notebook_entries SET updated_at=? WHERE id=?", (_now(), entry_id))
         return cur.lastrowid
 
