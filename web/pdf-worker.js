@@ -7,7 +7,9 @@ function boot(indexURL) {
     const { loadPyodide } = await import(`${indexURL}pyodide.mjs`);
     const py = await loadPyodide({ indexURL });
     await py.loadPackage(["sqlite3", "jinja2", "pillow"]);
-    const zip = await (await fetch(`py.zip?v=${Date.now() >> 22}`)).arrayBuffer();
+    // Siempre pregunta si hay una versión nueva del generador (si no cambió, el servidor
+    // responde «sin cambios» y se usa la copia guardada): así un cambio publicado se ve al tiro.
+    const zip = await (await fetch("py.zip", { cache: "no-cache" })).arrayBuffer();
     py.unpackArchive(zip, "zip", { extractDir: "/app" });
     py.runPython("import os, sys; sys.path.insert(0, '/app'); os.environ['FENORUBUS_DATA'] = '/data'; os.makedirs('/data', exist_ok=True)");
     return { py, wr: py.pyimport("webreport") };

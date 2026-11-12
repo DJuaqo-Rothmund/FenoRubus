@@ -41,3 +41,11 @@ def test_webreport_builds_pdfs_from_bundles(tmp_path, monkeypatch):
     path = webreport.report("AM", "weekly", week["start_date"], 2026, False, full)
     with open(path, "rb") as f:
         assert f.read(5) == b"%PDF-"
+    # «Sin fecha de generación» también en los PDF de la web (pie: solo el número de página).
+    import re
+    import zlib
+    nod = json.dumps(dict(rc.apply_template(rc.default(), "completo"), no_date=True, plain=True))
+    raw = open(webreport.report("AM", "weekly", week["start_date"], 2026, True, nod), "rb").read()
+    text = b"".join(zlib.decompress(m) for m in re.findall(rb"stream\r?\n(.*?)\r?\nendstream", raw, re.S)
+                    if m[:1] == b"x")
+    assert b"enerado" not in text and b"gina 1 de" in text
