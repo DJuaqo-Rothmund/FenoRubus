@@ -199,7 +199,8 @@ def test_aeoncrop_web_t0_units_and_week_move_apply_in_app(tmp_path):
     assert res["moved"] == {"records": 0, "merged": 1, "photos": 1, "entries": 0}
     sync.apply_changes(db, res["bundle"], str(data), week_for_date=db.week_for_date)
     assert db.trial_has_t0 and db.trial_size() == (3, 2) and db.trial_nums() == [0, 1, 2]
-    assert db.unified_pheno and db.pheno_config() == {"scope": "treatment", "names": ["Caña gruesa", "Caña delgada"]}
+    assert db.unified_pheno and db.pheno_config() == {"scope": "treatment", "names": ["Caña gruesa", "Caña delgada"],
+                                                    "counts": {}}
     names = [u["name"] for u in db.pheno_units()]
     assert names == res["units"]
     assert [u["name"] for u in db.sync_pheno_units()] == names          # la app no cambia nada
@@ -307,3 +308,20 @@ def test_report_templates_merge_same_in_web_and_app(tmp_path):
     assert res["summary"].startswith("Gerencia")
     assert re.fullmatch(r"\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\.\d{6}Z", res["ts"])      # mismo formato que la app
     assert len(res["ts"]) == len(rc._now())
+
+
+def test_unit_counts_per_treatment_web_matches_app(tmp_path):
+    import sync
+    from workspaces import Workspaces
+    wss = Workspaces(str(tmp_path / "data"))
+    db = wss.open(wss.create("id", "tratamientos", "Número de cañas", "NC"))
+    db.setup_trial(3, 4)
+    res = _node("unitcounts", {"bundle": sync.export_changes(db, str(tmp_path)), "names": ["Planta 1", "Planta 2", "Planta 3"],
+                               "counts": {"1": 3, "2": 0, "3": 3}}, tmp_path)
+    assert res["counts"] == {"1": 3, "2": 0, "3": 3}
+    assert res["units"] == ["T1 · Planta 1", "T1 · Planta 2", "T1 · Planta 3", "T3 · Planta 1", "T3 · Planta 2", "T3 · Planta 3"]
+    sync.apply_changes(db, res["bundle"], str(tmp_path))           # lo hecho en la web llega a la app
+    assert db.unit_counts() == {1: 3, 2: 0, 3: 3}
+    assert [u["name"] for u in db.pheno_units()] == res["units"]
+    db.sync_pheno_units()                                            # la app no cambia nada
+    assert [u["name"] for u in db.pheno_units()] == res["units"]

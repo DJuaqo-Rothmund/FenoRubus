@@ -169,7 +169,8 @@ ${ctx.plain ? "" : `<footer class="doc"><span>AeonCrop — seguimiento fenológi
     if (used.length) weeks = weeks.filter((w) => w >= used[0] && w <= used[used.length - 1]);
     if (!weeks.length) throw new Error("No hay semanas con registros de las parcelas en esa temporada.");
     const fmtP = (a) => !a ? "—" : (a.p < 0.001 ? "< 0,001" : C.numEs(a.p, 3)) + ` ${a.stars}`;
-    const rowsT = trts.map((t) => ({ t, cells: [], pts: [] }));
+    // Con puntos por tratamiento, los tratamientos sin fenología (0 puntos) no van en la comparación.
+    const rowsT = (uni ? trts.filter((t) => bOf(t).length) : trts).map((t) => ({ t, cells: [], pts: [] }));
     const tests = [];
     weeks.forEach((w, i) => {
       const data = new Map();

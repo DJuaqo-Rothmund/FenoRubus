@@ -2513,16 +2513,54 @@ class VarietiesTab(MDScreen):
         scroll = ScrollView(size_hint_y=None, height=0, do_scroll_x=False, bar_width=dp(3))
         scroll.add_widget(names_box)
         form.add_widget(scroll)
+        # «En cada tratamiento»: cuántos puntos lleva CADA uno (0 = sin fenología), p. ej.
+        # 3 en el de más cañas, 3 en el de menos y 0 en el intermedio.
+        counts_box = MDBoxLayout(orientation="vertical", adaptive_height=True, spacing=dp(4))
+        form.add_widget(counts_box)
         info = MDLabel(font_style="Caption", adaptive_height=True, theme_text_color="Custom",
                        text_color=c(theme.MUTED))
         form.add_widget(info)
         old = list(cfg["names"])
+        cur_counts = db.unit_counts(cfg)
+        labels = {t["num"]: t["label"] for t in db.list_treatments()}
+        st["counts"] = {}
 
-        def build(*_):
+        def counts_ui():
+            fast_clear(counts_box)
+            st["counts"] = {}
+            if st["scope"] != "treatment":
+                return
+            counts_box.add_widget(MDLabel(text="Puntos en cada tratamiento (0 = sin fenología en ese tratamiento)",
+                                          font_style="Caption", adaptive_height=True, theme_text_color="Custom",
+                                          text_color=c(theme.LEAF_DARK)))
+            grid = MDGridLayout(cols=3, adaptive_height=True, spacing=dp(6))
+            for t in db.trial_nums():
+                f = Factory.Field(hint_text=labels.get(t) or f"T{t}", input_filter="int",
+                                  text=str(cur_counts.get(t, max_n())))
+                f.bind(text=lambda *_: build(from_counts=True))
+                grid.add_widget(f)
+                st["counts"][t] = f
+            counts_box.add_widget(grid)
+
+        def max_n():
             try:
-                n = max(1, min(int(f_n.text or 1), db.MAX_REPS))
+                return max(1, min(int(f_n.text or 1), db.MAX_REPS))
             except ValueError:
-                n = 1
+                return 1
+
+        def read_counts() -> dict:
+            out = {}
+            for t, f in st["counts"].items():
+                try:
+                    out[t] = max(0, min(int(f.text or 0), db.MAX_REPS))
+                except ValueError:
+                    out[t] = 0
+            return out
+
+        def build(*_, from_counts=False):
+            n = max_n()
+            if st["scope"] == "treatment" and st["counts"]:
+                n = max([n] + list(read_counts().values()))     # nombres para el que tiene más puntos
             keep = [f.text for f in st["fields"]] or old
             fast_clear(names_box)
             st["fields"] = []
@@ -2534,24 +2572,42 @@ class VarietiesTab(MDScreen):
                     st["fields"].append(f)
             Clock.schedule_once(lambda *_: setattr(scroll, "height", min(dp(200), names_box.height)), 0)
             nt, nr = db.trial_size()
-            total = n * (len(db.trial_nums()) if st["scope"] == "treatment" else 1)
-            info.text = (f"{total} registro(s) de fenología por semana"
-                         + (f" ({n} por tratamiento)" if st["scope"] == "treatment" else "")
+            if st["scope"] == "treatment":
+                cnt = read_counts() or {t: n for t in db.trial_nums()}
+                total = sum(cnt.values())
+                detail = " (" + ", ".join(f"T{t}: {k}" for t, k in cnt.items()) + ")"
+            else:
+                total, detail = n, ""
+            info.text = (f"{total} registro(s) de fenología por semana" + detail
                          + f". Las mediciones siguen en las {nt * nr} parcelas ({nt} tratamientos × {nr} repeticiones).")
 
         def set_scope(scope):
             st["scope"] = scope
             b_all.selected, b_trt.selected = scope == "trial", scope == "treatment"
+            counts_ui()
+            build()
+
+        def n_changed(*_):
+            # Cambiar «N.º de puntos» lleva a ese número a los tratamientos que lo tenían igual.
+            prev = st.get("n_prev", len(old))
+            for f in st["counts"].values():
+                if f.text in ("", str(prev)):
+                    f.text = str(max_n())
+            st["n_prev"] = max_n()
             build()
 
         b_all.bind(on_release=lambda *_: set_scope("trial"))
         b_trt.bind(on_release=lambda *_: set_scope("treatment"))
-        f_n.bind(text=build)
+        f_n.bind(text=n_changed)
         set_scope(st["scope"])
 
         def ok(_f):
             names = [f.text.strip() for f in st["fields"]] or [""]
-            db.set_unified_pheno(on_cb.active, st["scope"], names)
+            counts = read_counts() if st["scope"] == "treatment" else {}
+            if on_cb.active and st["scope"] == "treatment" and counts and not any(counts.values()):
+                a.toast("Ponga al menos un punto en algún tratamiento.")
+                return False
+            db.set_unified_pheno(on_cb.active, st["scope"], names, counts)
             if on_cb.active:
                 n = len(db.pheno_units())
                 a.toast(f"Fenología unificada: {n} registro(s) por semana")
@@ -2642,8 +2698,10 @@ class VarietiesTab(MDScreen):
         if not on:
             state = "[b]Por parcela[/b]: el estado BBCH se registra en cada tratamiento y repetición."
         elif cfg["scope"] == "treatment":
-            state = (f"[b]Unificada[/b]: {n} punto(s) en cada tratamiento ({labels}) = "
-                     f"{n * len(db.trial_nums())} registros por semana.")
+            cnt = db.unit_counts(cfg)
+            per = (f"{n} punto(s) en cada tratamiento" if len(set(cnt.values())) <= 1 else
+                   "puntos por tratamiento: " + ", ".join(f"T{t} {k}" for t, k in cnt.items()))
+            state = f"[b]Unificada[/b]: {per} ({labels}) = {sum(cnt.values())} registros por semana."
         elif n == 1:
             state = "[b]Unificada[/b]: un solo estado BBCH por semana para todo el ensayo."
         else:

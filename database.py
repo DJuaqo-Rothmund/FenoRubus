@@ -582,7 +582,24 @@ class Database:
         tratamiento. Un solo punto sin nombre = «Fenología del ensayo»."""
         scope = self.get_setting("trial_unit_scope", "trial")
         names = [str(n).strip() for n in (self.get_setting("trial_unit_names", None) or [""])]
-        return {"scope": scope if scope in ("trial", "treatment") else "trial", "names": names or [""]}
+        scope = scope if scope in ("trial", "treatment") else "trial"
+        names = names or [""]
+        # Puntos de CADA tratamiento (solo «en cada tratamiento»): p. ej. 3 en T1, 0 en T2 y
+        # 3 en T3. Los que no se indican llevan tantos como nombres.
+        raw = self.get_setting("trial_unit_counts", None) or {}
+        counts = {}
+        if scope == "treatment" and isinstance(raw, dict):
+            for k, v in raw.items():
+                try:
+                    counts[int(k)] = max(0, min(int(v), self.MAX_REPS))
+                except (TypeError, ValueError):
+                    continue
+        return {"scope": scope, "names": names, "counts": counts}
+
+    def unit_counts(self, cfg: dict | None = None) -> dict:
+        """{tratamiento: n.º de puntos} con la fenología «en cada tratamiento»."""
+        cfg = cfg or self.pheno_config()
+        return {t: cfg["counts"].get(t, len(cfg["names"])) for t in self.trial_nums()}
 
     @property
     def unified_single(self) -> bool:
@@ -591,7 +608,7 @@ class Database:
         return self.unified_pheno and cfg["scope"] == "trial" and len(cfg["names"]) == 1
 
     def _unit_name(self, scope: str, names: list[str], t: int | None, i: int) -> str:
-        label = names[i - 1] or (f"Punto {i}" if len(names) > 1 else "")
+        label = (names[i - 1] if i <= len(names) else "") or (f"Punto {i}" if len(names) > 1 else "")
         if scope == "trial":
             return f"Ensayo · {label}" if label else self.UNIT_NAME
         return f"T{t} · {label}" if label else f"T{t} · Fenología"
@@ -599,9 +616,14 @@ class Database:
     def _want_units(self) -> dict:
         """{(tratamiento o None, n.º de punto): nombre} de los puntos vigentes."""
         cfg = self.pheno_config()
-        groups = [None] if cfg["scope"] == "trial" else self.trial_nums()
-        return {(t, i): self._unit_name(cfg["scope"], cfg["names"], t, i)
-                for t in groups for i in range(1, len(cfg["names"]) + 1)}
+        if cfg["scope"] == "trial":
+            return {(None, i): self._unit_name("trial", cfg["names"], None, i)
+                    for i in range(1, len(cfg["names"]) + 1)}
+        counts = self.unit_counts(cfg)
+        top = max(counts.values(), default=0)
+        names = cfg["names"] + [""] * (top - len(cfg["names"]))   # más puntos que nombres: «Punto n»
+        return {(t, i): self._unit_name("treatment", names, t, i)
+                for t, n in counts.items() for i in range(1, n + 1)}
 
     def sync_pheno_units(self) -> list[dict]:
         """Crea, renombra, activa o archiva los puntos según la configuración (nada se
@@ -642,7 +664,8 @@ class Database:
             units = self.sync_pheno_units()
         return units[0] if units else None
 
-    def set_unified_pheno(self, on: bool, scope: str | None = None, names: list[str] | None = None) -> None:
+    def set_unified_pheno(self, on: bool, scope: str | None = None, names: list[str] | None = None,
+                          counts: dict | None = None) -> None:
         """Activa o quita la fenología unificada (y, si se indican, sus puntos). Nada se
         borra: los registros por parcela y los de los puntos se conservan."""
         self.set_setting("trial_unified", bool(on))
@@ -651,12 +674,14 @@ class Database:
         if names is not None:
             names = [str(n).strip() for n in names][:self.MAX_REPS] or [""]
             self.set_setting("trial_unit_names", names)
+        if counts is not None:     # {tratamiento: puntos}; 0 = ese tratamiento sin fenología
+            self.set_setting("trial_unit_counts", {str(int(t)): max(0, min(int(n), self.MAX_REPS))
+                                                   for t, n in counts.items()})
         self.sync_pheno_units()
         cfg = self.pheno_config()
-        self.log("update", "trial", None,
-                 (f"Fenología unificada: {len(cfg['names'])} punto(s) "
-                  f"{'por tratamiento' if cfg['scope'] == 'treatment' else 'del ensayo'}") if on
-                 else "Fenología por parcela")
+        detail = (", ".join(f"T{t}: {n}" for t, n in self.unit_counts(cfg).items())
+                  if cfg["scope"] == "treatment" else f"{len(cfg['names'])} punto(s) del ensayo")
+        self.log("update", "trial", None, f"Fenología unificada: {detail}" if on else "Fenología por parcela")
 
     def parcel_unit_map(self) -> dict[int, dict]:
         """{parcela: punto de fenología} para pasar lo registrado por parcela a la fenología

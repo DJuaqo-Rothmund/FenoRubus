@@ -180,7 +180,20 @@ export function phenoConfig(state) {
   const scope = setting(state, "trial_unit_scope", "trial");
   let names = setting(state, "trial_unit_names", null);
   names = (Array.isArray(names) ? names : [""]).map((n) => String(n ?? "").trim());
-  return { scope: scope === "treatment" ? "treatment" : "trial", names: names.length ? names : [""] };
+  const sc = scope === "treatment" ? "treatment" : "trial";
+  // Puntos de CADA tratamiento (= Database.pheno_config): p. ej. 3 en T1, 0 en T2, 3 en T3.
+  const raw = setting(state, "trial_unit_counts", null);
+  const counts = {};
+  if (sc === "treatment" && raw && typeof raw === "object") {
+    for (const [k, v] of Object.entries(raw)) {
+      const t = parseInt(k, 10), n = parseInt(v, 10);
+      if (Number.isFinite(t) && Number.isFinite(n)) counts[t] = Math.max(0, Math.min(n, MAX_REPS));
+    }
+  }
+  return { scope: sc, names: names.length ? names : [""], counts };
+}
+export function unitCounts(state, cfg = phenoConfig(state)) {    // = Database.unit_counts
+  return Object.fromEntries(trialNums(state).map((t) => [t, cfg.counts?.[t] ?? cfg.names.length]));
 }
 export function trialNums(state) {       // [0 … n-1] con T0, si no [1 … n] (= Database.trial_nums)
   const nt = Number(setting(state, "trial_treatments", 0)) || 0;
@@ -188,7 +201,7 @@ export function trialNums(state) {       // [0 … n-1] con T0, si no [1 … n] 
   return Array.from({ length: nt }, (_, i) => first + i);
 }
 export function phenoUnitName(scope, names, t, i) {   // = Database._unit_name
-  const label = names[i - 1] || (names.length > 1 ? `Punto ${i}` : "");
+  const label = (i <= names.length ? names[i - 1] : "") || (names.length > 1 ? `Punto ${i}` : "");
   if (scope === "trial") return label ? `Ensayo · ${label}` : UNIT_NAME;
   return label ? `T${t} · ${label}` : `T${t} · Fenología`;
 }
@@ -201,17 +214,32 @@ export function phenoUnits(state) {
 }
 // Activa (o quita) la fenología unificada y crea, renombra o archiva sus puntos (nada se
 // borra). Devuelve {changes, settings}.
-export function phenoUnitChanges(state, on, scope = "trial", names = [""]) {
+export function phenoUnitChanges(state, on, scope = "trial", names = [""], counts = null) {
   const ts = nowTs();
   names = (names || []).map((n) => String(n ?? "").trim()).slice(0, MAX_REPS);
   if (!names.length) names = [""];
   scope = scope === "treatment" ? "treatment" : "trial";
   const settings = { trial_unified: JSON.stringify(!!on), trial_unit_scope: JSON.stringify(scope),
     trial_unit_names: JSON.stringify(names) };
+  if (counts) {     // {tratamiento: puntos}; 0 = ese tratamiento sin fenología
+    const c = {};
+    for (const [t, n] of Object.entries(counts)) c[String(parseInt(t, 10))] = Math.max(0, Math.min(parseInt(n, 10) || 0, MAX_REPS));
+    settings.trial_unit_counts = JSON.stringify(c);
+  }
   const want = new Map();
   if (on) {
-    const groups = scope === "trial" ? [null] : trialNums(state);
-    for (const t of groups) for (let i = 1; i <= names.length; i++) want.set(`${t}|${i}`, [t, i, phenoUnitName(scope, names, t, i)]);
+    if (scope === "trial") {
+      for (let i = 1; i <= names.length; i++) want.set(`null|${i}`, [null, i, phenoUnitName(scope, names, null, i)]);
+    } else {
+      const cfg = { names, counts: counts ?? phenoConfig(state).counts };
+      const per = unitCounts(state, { ...cfg, counts: Object.fromEntries(Object.entries(cfg.counts || {}).map(([k, v]) => [parseInt(k, 10), Number(v)])) });
+      const top = Math.max(0, ...Object.values(per));
+      const nm = [...names, ...Array(Math.max(0, top - names.length)).fill("")];   // más puntos que nombres: «Punto n»
+      for (const [t0, n] of Object.entries(per)) {
+        const t = Number(t0);
+        for (let i = 1; i <= n; i++) want.set(`${t}|${i}`, [t, i, phenoUnitName(scope, nm, t, i)]);
+      }
+    }
   }
   const all = rows(state, "varieties");
   const have = new Map(all.filter((v) => v.pheno_unit).map((v) => [`${v.treatment ?? null}|${v.rep}`, v]));
@@ -717,7 +745,7 @@ export function trialSetup(state, nt, nr, t0 = null) {
   if (unified(state) && phenoConfig(state).scope === "treatment") {
     const tmp = { ...state, settings: { ...state.settings, ...settings } };
     const cfg = phenoConfig(state);
-    changes.push(...phenoUnitChanges(tmp, true, cfg.scope, cfg.names).changes);
+    changes.push(...phenoUnitChanges(tmp, true, cfg.scope, cfg.names, null).changes);
   }
   return { ...out, changes, settings };
 }

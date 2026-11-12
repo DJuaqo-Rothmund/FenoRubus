@@ -41,6 +41,14 @@ if (mode === "stats") {
   const base = RC.applyTemplate(RC.normalize({}), "u:Gerencia", RC.visible(merged));
   writeFileSync(output, JSON.stringify({ merged, visible: RC.visible(merged).map((t) => t.name),
     summary: RC.summary(base), ts: RC.nowTs() }));
+} else if (mode === "unitcounts") {
+  // Fenología unificada con distinto n.º de puntos por tratamiento (0 = sin fenología).
+  const st = C.emptyState();
+  C.applyBundle(st, "p1.json", data.bundle);
+  const r = C.phenoUnitChanges(st, true, "treatment", data.names, data.counts);
+  C.applyBundle(st, "web.json", C.bundle("web", "NC", r.changes, r.settings));
+  writeFileSync(output, JSON.stringify({ units: C.phenoUnits(st).map((u) => u.name), counts: C.unitCounts(st),
+    bundle: C.bundle("web", "NC", r.changes, r.settings) }));
 } else if (mode === "zip") {
   // ZIP de los informes semanales (sin compresión): lo debe abrir cualquier programa.
   const files = data.files.map(([n, t]) => [n, new TextEncoder().encode(t)]);

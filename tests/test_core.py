@@ -3689,3 +3689,30 @@ def test_report_templates_saved_before_login_go_to_the_account():
     assert [t["name"] for t in rc.saved_templates()] == ["Antes"]
     assert platform_utils.global_get("report_templates@persona@ejemplo.cl")[0]["name"] == "Antes"
     assert platform_utils.global_get("report_templates@") == []
+
+
+def test_unified_points_only_in_some_treatments(tmp_path):
+    """Número de cañas: 3 plantas con fenología en el tratamiento de más cañas y 3 en el de
+    menos; el intermedio sin fenología (0 puntos). Las 3 × R parcelas siguen para medir."""
+    from reporter import ReportGenerator
+    from workspaces import Workspaces
+    wss = Workspaces(str(tmp_path / "data"))
+    db = wss.open(wss.create("id", "tratamientos", "Número de cañas", "NC"))
+    db.setup_trial(3, 4)
+    db.set_unified_pheno(True, "treatment", ["Planta 1", "Planta 2", "Planta 3"], {1: 3, 2: 0, 3: 3})
+    units = db.pheno_units()
+    assert [u["name"] for u in units] == ["T1 · Planta 1", "T1 · Planta 2", "T1 · Planta 3",
+                                          "T3 · Planta 1", "T3 · Planta 2", "T3 · Planta 3"]
+    assert db.unit_counts() == {1: 3, 2: 0, 3: 3} and len(db.list_varieties()) == 12
+    w = db.current_week(dt.date(2026, 10, 5))
+    for u in units:
+        o = db.get_or_create_observation(u["id"], w["id"])
+        db.update_observation(o["id"], bbch_code=61 if u["treatment"] == 1 else 55, bbch_label="x")
+    html = open(ReportGenerator(db, str(tmp_path / "out")).treatments(2026).path, encoding="utf-8").read()
+    assert "T1: 3, T2: 0, T3: 3" in html
+    heat = html.split("Estado BBCH medio por tratamiento")[1].split("</table>")[0]
+    assert "T1" in heat and "T3" in heat and ">T2<" not in heat          # T2 sin fenología: fuera
+    # Sin nombres y con distinto n.º por tratamiento: «Punto n»; los que sobran se archivan.
+    db.set_unified_pheno(True, "treatment", [""], {1: 2, 2: 1, 3: 0})
+    assert [u["name"] for u in db.pheno_units()] == ["T1 · Punto 1", "T1 · Punto 2", "T2 · Punto 1"]
+    assert len(db.pheno_units(include_archived=True)) == 7

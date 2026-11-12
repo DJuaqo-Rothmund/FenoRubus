@@ -1384,16 +1384,42 @@ function renderUnified(isTrial) {
   document.querySelectorAll("input[name=uscope]").forEach((r) => (r.checked = r.value === cfg.scope));
   $("unames").value = cfg.names.filter(Boolean).join(", ");
   $("uopts").classList.toggle("off", !$("uon").checked);
+  renderUnitCounts(C.unitCounts(S.state, cfg));
   const units = C.phenoUnits(S.state);
   $("uprev").textContent = on ? `Puntos: ${units.map((u) => u.name).join(" · ")}` : "La fenología se registra en cada parcela.";
+}
+
+// «Puntos en cada tratamiento»: cuántos lleva CADA uno (p. ej. 3 en el de más cañas, 3 en el
+// de menos y 0 en el intermedio).
+function renderUnitCounts(counts) {
+  const scope = document.querySelector("input[name=uscope]:checked")?.value || "trial";
+  $("ucounts").hidden = scope !== "treatment";
+  const grid = $("ucountsgrid");
+  const labels = Object.fromEntries(C.treatments(S.state).map((t) => [t.num, t.label || `T${t.num}`]));
+  grid.innerHTML = "";
+  for (const t of C.trialNums(S.state)) {
+    const l = document.createElement("label");
+    l.textContent = labels[t] || `T${t}`;
+    const i = document.createElement("input");
+    i.type = "number"; i.min = "0"; i.max = String(C.MAX_REPS); i.dataset.t = String(t);
+    i.value = String(counts?.[t] ?? 1);
+    l.appendChild(i); grid.appendChild(l);
+  }
+}
+function readUnitCounts() {
+  const out = {};
+  for (const i of $("ucountsgrid").querySelectorAll("input")) out[i.dataset.t] = Math.max(0, Math.min(parseInt(i.value, 10) || 0, C.MAX_REPS));
+  return out;
 }
 
 async function applyUnified() {
   const on = $("uon").checked;
   const scope = document.querySelector("input[name=uscope]:checked")?.value || "trial";
   const names = $("unames").value.split(/[,;\n]/).map((x) => x.trim()).filter(Boolean);
+  const counts = scope === "treatment" ? readUnitCounts() : null;
+  if (on && counts && !Object.values(counts).some(Boolean)) { $("umsg").textContent = "Ponga al menos un punto en algún tratamiento."; return; }
   try {
-    const r = C.phenoUnitChanges(S.state, on, scope, names.length ? names : [""]);
+    const r = C.phenoUnitChanges(S.state, on, scope, names.length ? names : [""], counts);
     await send(r.changes, r.settings);
     $("umsg").textContent = on ? "Fenología unificada guardada. Las parcelas siguen para las mediciones." : "La fenología vuelve a registrarse por parcela (no se borra nada).";
     render();
@@ -2215,6 +2241,9 @@ async function boot() {
   $("vshowarch").onchange = renderSettings;
   $("tapply").onclick = applyTrial;
   $("uapply").onclick = applyUnified;
+  document.querySelectorAll("input[name=uscope]").forEach((r) => (r.onchange = () => {
+    $("ucounts").hidden = r.value !== "treatment" || !r.checked;
+  }));
   $("uon").onchange = () => $("uopts").classList.toggle("off", !$("uon").checked);
   $("fweek").onchange = setFirstWeek;
   $("mdelweek").onclick = () => deleteMeasure(false);

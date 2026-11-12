@@ -1114,6 +1114,7 @@ class ReportGenerator:
         units = self.db.pheno_units() if unified else []
         if per_trt:
             ptrts = [dict(t, parcels=[u for u in units if u["treatment"] == t["num"]]) for t in trts]
+            ptrts = [t for t in ptrts if t["parcels"]]      # tratamientos sin fenología (0 puntos): fuera
         else:
             ptrts = trts
         pparcels = [p for t in ptrts for p in t["parcels"]]
@@ -1189,7 +1190,9 @@ class ReportGenerator:
                 continue
             a = st.anova(hit)
             cells = []
-            for t in ptrts:
+            pmap = {t["num"]: t for t in ptrts}
+            for t0 in trts:      # una columna por tratamiento (los sin fenología quedan «—»)
+                t = pmap.get(t0["num"]) or dict(t0, parcels=[])
                 vals = [hit[(t["num"], p["rep"])] for p in t["parcels"] if (t["num"], p["rep"]) in hit]
                 m, _se = st.mean_se(vals)
                 cells.append({"text": (f"S{num(m)}" + (f" {a['letters'].get(t['num'], '')}"
@@ -1238,7 +1241,8 @@ class ReportGenerator:
         return dict(
             weeks=weeks, rows=rows, tests=tests, compare=compare, ranking=ranking, max_abs=max_abs,
             milestones=milestones, measures=measures, treatments=trts, unified=unified and not per_trt,
-            unit_note=("Fenología unificada en " + str(len(cfg["names"])) + " punto(s) por tratamiento ("
+            unit_note=("Fenología unificada en punto(s) por tratamiento ("
+                       + ", ".join(f"T{t}: {n}" for t, n in self.db.unit_counts(cfg).items()) + "; "
                        + ", ".join(n or f"Punto {i}" for i, n in enumerate(cfg["names"], 1))
                        + "): hacen de repeticiones en la comparación fenológica; las mediciones "
                          "siguen por parcela." if per_trt else ""),

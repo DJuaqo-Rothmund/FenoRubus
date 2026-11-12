@@ -197,9 +197,13 @@
         <label class="skip"><input type="checkbox" id="uon"> Registrar la fenología en puntos propios (no en cada parcela)</label>
         <div id="uopts" class="uopts">
           <label class="skip"><input type="radio" name="uscope" value="trial"> Puntos comunes para todo el ensayo</label>
-          <label class="skip"><input type="radio" name="uscope" value="treatment"> Los mismos puntos en cada tratamiento</label>
+          <label class="skip"><input type="radio" name="uscope" value="treatment"> Puntos en cada tratamiento</label>
           <label class="field">Nombres de los puntos (separados por coma; vacío = uno solo)
-            <input id="unames" placeholder="Ej. Caña gruesa, Caña media, Caña delgada"></label>
+            <input id="unames" placeholder="Ej. Planta 1, Planta 2, Planta 3"></label>
+          <div id="ucounts" class="ucounts" hidden>
+            <div class="muted small">Puntos en cada tratamiento (0 = sin fenología en ese tratamiento)</div>
+            <div id="ucountsgrid" class="ucgrid"></div>
+          </div>
           <button id="uapply" class="ghost">Guardar</button>
         </div>
         <p id="uprev" class="muted small"></p>
