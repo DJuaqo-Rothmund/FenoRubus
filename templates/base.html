@@ -185,7 +185,7 @@ h3.sub { margin: 14px 0 6px; }
   <h1>{{ title }}</h1>
   <div class="sub">{{ subtitle }}</div>
   <div class="meta">
-    <span>Generado: {{ generated }}</span>
+    {% if generated %}<span>Generado: {{ generated }}</span>{% endif %}
     <span>{{ app_name }} · registro offline</span>
     {% block meta %}{% endblock %}
   </div>

@@ -63,7 +63,7 @@ TEMPLATES = {
                                                         "milestones", "yield", "map"],
                 "photo_mode": "both", "photo_size": "normal", "all_photos": False, "plain": True},
 }
-FORMAT_KEYS = ("photo_mode", "photo_size", "all_photos", "plain")
+FORMAT_KEYS = ("photo_mode", "photo_size", "all_photos", "plain", "no_date")
 
 
 def default(db=None) -> dict:
@@ -73,7 +73,8 @@ def default(db=None) -> dict:
     mode = get("report_photo_mode", "both")
     return {"template": "", "sections": list(CLASSIC),
             "photo_mode": mode if mode in PHOTO_MODES else "both", "photo_size": "normal",
-            "all_photos": bool(get("report_all_photos", False)), "plain": bool(get("report_plain_pdf", False))}
+            "all_photos": bool(get("report_all_photos", False)), "plain": bool(get("report_plain_pdf", False)),
+            "no_date": False}
 
 
 def normalize(cfg: dict | None, base: dict | None = None) -> dict:
@@ -89,6 +90,7 @@ def normalize(cfg: dict | None, base: dict | None = None) -> dict:
     if out["photo_size"] not in PHOTO_SIZES:
         out["photo_size"] = "normal"
     out["all_photos"], out["plain"] = bool(out["all_photos"]), bool(out["plain"])
+    out["no_date"] = bool(out.get("no_date"))     # sin «Generado dd-mm-aaaa hh:mm»
     return out
 
 
@@ -165,4 +167,6 @@ def summary(cfg: dict) -> str:
     bits = [name, f"{n} " + ("sección" if n == 1 else "secciones"), "fotos: " + PHOTO_MODES[cfg["photo_mode"]].lower()]
     if cfg["plain"]:
         bits.append("PDF simple")
+    if cfg.get("no_date"):
+        bits.append("sin fecha")
     return " · ".join(bits)

@@ -3609,3 +3609,26 @@ def test_weekly_zip_all_weeks(db, tmp_path):
     names = zipfile.ZipFile(res.path).namelist()
     n = len({w["id"] for _v, w in pairs})
     assert len(names) == n and all(x.endswith(".pdf") for x in names) and seen[-1] == (n - 1, n)
+
+
+def test_report_without_generated_date(db, tmp_path):
+    import re
+    import zlib
+    import report_config as rc
+    pairs = _fill_week(db, tmp_path)
+    week = pairs[-1][1]
+    rep = ReportGenerator(db, str(tmp_path / "out"))
+    cfg = rc.toggle(rc.apply_template(rc.default(), "completo"), "summary")
+    assert "no_date" in cfg and not cfg["no_date"]
+    rep.set_config(dict(cfg, no_date=True))
+    assert "sin fecha" in rc.summary(rep.config)
+    html = open(rep.weekly(week["id"]).path, encoding="utf-8").read()
+    assert "Generado" not in html
+    raw = open(rep.weekly(week["id"], "pdf").path, "rb").read()
+    text = b"".join(zlib.decompress(m) for m in re.findall(rb"stream\r?\n(.*?)\r?\nendstream", raw, re.S)
+                    if m[:1] == b"x")
+    assert b"enerado" not in text and b"/CreationDate" not in raw
+    rep.set_config(cfg)                                    # con fecha (lo de siempre)
+    raw = open(rep.weekly(week["id"], "pdf").path, "rb").read()
+    assert b"/CreationDate" in raw
+    assert "Generado" in open(rep.matrix(2026).path, encoding="utf-8").read()

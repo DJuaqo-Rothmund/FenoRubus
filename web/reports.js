@@ -44,7 +44,7 @@ export function makeReports(ctx) {
 <div class="toolbar"><button onclick="window.close()">Cerrar</button><button class="p" onclick="window.print()">Imprimir / Guardar PDF</button></div>
 <header class="doc"><div class="kicker">${ctx.plain ? "" : "Cuaderno de campo · "}${esc(SPECIES[ctx.crop] || SPECIES.PhenoRubus)} · Escala BBCH</div>
 <h1>${esc(title)}</h1><div class="sub">${esc(subtitle)}</div>
-<div class="meta"><span>Generado: ${esc(now)}</span>${ctx.plain ? "" : `<span>${esc(ctx.crop || "PhenoRubus")} · AeonCrop Web · ${esc(ctx.ws.name || ctx.ws.code)}</span>`}${meta.map((m) => `<span>${esc(m)}</span>`).join("")}</div></header>
+<div class="meta">${ctx.noDate ? "" : `<span>Generado: ${esc(now)}</span>`}${ctx.plain ? "" : `<span>${esc(ctx.crop || "PhenoRubus")} · AeonCrop Web · ${esc(ctx.ws.name || ctx.ws.code)}</span>`}${meta.map((m) => `<span>${esc(m)}</span>`).join("")}</div></header>
 ${content}
 ${ctx.plain ? "" : `<footer class="doc"><span>AeonCrop — seguimiento fenológico y biométrico de ensayos en ${esc(FRUIT[ctx.crop] || "frambueso")}.</span>
 <span>Estados BBCH asignados por el evaluador.</span></footer>`}</div></body></html>`;

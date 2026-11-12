@@ -151,6 +151,8 @@ class ReportConfigSheet(ModalView):
                             when=lambda c_: c_["plain"]))
         row.add_widget(Chip("Todas las fotos (no solo la principal)", False,
                             on_tap=lambda *_: self.flip("all_photos"), when=lambda c_: c_["all_photos"]))
+        row.add_widget(Chip("Sin fecha de generación", False, on_tap=lambda *_: self.flip("no_date"),
+                            when=lambda c_: c_["no_date"]))
         b.add_widget(row)
         b.add_widget(_hint("Fotos de cada variedad"))
         row = _row()

@@ -1751,7 +1751,7 @@ async function runReport(kind) {
   const season = Number($("rseason").value);
   const win = window.open("", "_blank");       // en el mismo clic: así no lo bloquea el navegador
   if (win) win.document.write("<p style='font:16px system-ui;padding:24px'>Preparando informe…</p>");
-  const rep = makeReports({ state: S.state, ws: S.ws, bbch: S.bbch, photoUrl, win, crop: CROP, plain: rcfg().plain, cfg: rcfg(),
+  const rep = makeReports({ state: S.state, ws: S.ws, bbch: S.bbch, photoUrl, win, crop: CROP, plain: rcfg().plain, noDate: rcfg().no_date, cfg: rcfg(),
     progress: (t) => { $("rmsg").textContent = t; } });
   try {
     if (kind === "weekly") await rep.weekly($("rweek").value);
@@ -1883,6 +1883,7 @@ function openReportConfig() {
     r = row();
     tog(r, "PDF simple (sin logo ni marca)", cfg.plain, () => save({ ...cfg, plain: !cfg.plain, template: "" }));
     tog(r, "Todas las fotos (no solo la principal)", cfg.all_photos, () => save({ ...cfg, all_photos: !cfg.all_photos, template: "" }));
+    tog(r, "Sin fecha de generación", cfg.no_date, () => save({ ...cfg, no_date: !cfg.no_date, template: "" }));
     gl("FOTOS DE CADA VARIEDAD");
     r = row();
     for (const [k, t] of Object.entries(RC.PHOTO_MODES)) tog(r, t, cfg.photo_mode === k, () => save({ ...cfg, photo_mode: k, template: "" }));

@@ -43,14 +43,14 @@ export const TEMPLATES = {
   cliente: { name: "Para el cliente", sections: ["summary", "bbch_table", "photos", "notes", "chart", "milestones", "yield", "map"],
     photo_mode: "both", photo_size: "normal", all_photos: false, plain: true },
 };
-const FORMAT = ["photo_mode", "photo_size", "all_photos", "plain"];
+const FORMAT = ["photo_mode", "photo_size", "all_photos", "plain", "no_date"];
 const PARTS = ["notes", "ai", "attachments", "gps"];
 
 // get(key, def): ajuste del ensayo ya leído (valor JSON), como Database.get_setting.
 export function defaults(get) {
   const mode = get("report_photo_mode", "both");
   return { template: "", sections: [...CLASSIC], photo_mode: PHOTO_MODES[mode] ? mode : "both", photo_size: "normal",
-    all_photos: !!get("report_all_photos", false), plain: !!get("report_plain_pdf", false) };
+    all_photos: !!get("report_all_photos", false), plain: !!get("report_plain_pdf", false), no_date: false };
 }
 
 export function normalize(cfg, base) {
@@ -62,6 +62,7 @@ export function normalize(cfg, base) {
   if (!PHOTO_MODES[out.photo_mode]) out.photo_mode = "both";
   if (!PHOTO_SIZES[out.photo_size]) out.photo_size = "normal";
   out.all_photos = !!out.all_photos; out.plain = !!out.plain;
+  out.no_date = !!out.no_date;                    // sin «Generado dd-mm-aaaa hh:mm»
   return out;
 }
 
@@ -105,5 +106,5 @@ export function summary(cfg) {
   const name = TEMPLATES[cfg.template]?.name || (cfg.template ? "Plantilla guardada" : "Personalizado");
   const n = cfg.sections.length;
   return [name, `${n} ${n === 1 ? "sección" : "secciones"}`, `fotos: ${PHOTO_MODES[cfg.photo_mode].toLowerCase()}`,
-    ...(cfg.plain ? ["PDF simple"] : [])].join(" · ");
+    ...(cfg.plain ? ["PDF simple"] : []), ...(cfg.no_date ? ["sin fecha"] : [])].join(" · ");
 }

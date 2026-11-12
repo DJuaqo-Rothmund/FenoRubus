@@ -72,9 +72,13 @@ class Report(PDFDoc):
     def _footer(self, doc, n, total):
         y = PAGE_H - 26
         self.line(M, y - 10, M + CW, y - 10, RULE, .5)
-        self.text(M, y, f"Generado {self.generated}" if self.plain else
-                  f"{crops.current().app} · cuaderno de campo digital · generado {self.generated}", 7.5,
-                  False, MUTED)
+        if self.plain:
+            left = f"Generado {self.generated}" if self.generated else ""
+        else:
+            left = f"{crops.current().app} · cuaderno de campo digital" + (
+                f" · generado {self.generated}" if self.generated else "")
+        if left:
+            self.text(M, y, left, 7.5, False, MUTED)
         self.text(M + CW, y, f"Página {n} de {total}", 7.5, False, MUTED, "right")
 
     # ------------------------------------------------- bloques sin cortar
@@ -470,6 +474,7 @@ class Report(PDFDoc):
 def _doc(ctx, meta, names, num) -> Report:
     r = Report(ctx["title"], ctx.get("subtitle", ""), meta, ctx["generated"], names, num)
     r.plain = bool(ctx.get("plain"))
+    r.no_date = not ctx.get("generated")      # sin fecha: tampoco en las propiedades del PDF
     if r.plain:
         r.author = ""
     r.start()

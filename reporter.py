@@ -368,7 +368,7 @@ class ReportGenerator:
 
     def _render(self, template: str, filename: str, kind: str, title: str,
                 images: ImageStore, package: str, **ctx) -> ReportResult:
-        generated = _dt.datetime.now().strftime("%d-%m-%Y %H:%M")
+        generated = "" if self.no_date else _dt.datetime.now().strftime("%d-%m-%Y %H:%M")
         ws = getattr(self.db, "workspace", None) or {}
         if ws:   # ensayo o predio: en el subtítulo y (código) en el nombre del archivo
             from workspaces import Workspaces
@@ -400,6 +400,7 @@ class ReportGenerator:
 
     include_all_photos = False  # True: agrega las fotos no principales como miniaturas
     plain_pdf = False           # True: PDF simple, sin logo ni marca (solo información e imágenes)
+    no_date = False             # True: sin «Generado dd-mm-aaaa hh:mm» (HTML y PDF)
     # Fotos de los informes: "both" (Full: general + detalle), "detail" o "canopy" (general).
     # Siempre la foto representativa (principal) de cada tipo.
     photo_mode = "both"
@@ -570,6 +571,7 @@ class ReportGenerator:
         import report_config as rc
         self.config = rc.normalize(cfg)
         self.plain_pdf = self.config["plain"]
+        self.no_date = self.config["no_date"]
         self.include_all_photos = self.config["all_photos"]
         self.photo_mode = self.config["photo_mode"]
         return self.config
@@ -579,7 +581,7 @@ class ReportGenerator:
         if self.config is not None:
             return self.config
         return rc.normalize({"photo_mode": self.photo_mode, "all_photos": self.include_all_photos,
-                             "plain": self.plain_pdf})
+                             "plain": self.plain_pdf, "no_date": self.no_date})
 
     def weekly(self, week_id: int, package: str = "html") -> ReportResult:
         cfg = self._cfg()
