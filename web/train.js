@@ -38,6 +38,7 @@ useCrop("PhenoRubus");
 const GOAL = 300;
 const $ = (id) => document.getElementById(id);
 const base = (p) => (p || "").split(/[\\/]/).pop();
+const esc = (t) => String(t).replace(/[&<>"]/g, (ch) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[ch]);
 
 let X = null;              // {S, photoUrl, loadLabels(), saveLabels(data), allStates(progress), extraList(),
                            //  extraUrl(p), extraUpload(files, progress, reduce), email()}
@@ -47,6 +48,7 @@ let filter = "todo";       // «todo» | «sin» | «con»
 let wsFilter = "";         // código del ensayo/predio o «» (todos)
 let list = [];             // fotos de detalle visibles (orden de la lista)
 let saveTimer = null;
+let loadError = "";        // no se pudieron leer las marcas de Drive: se avisa y NO se guarda
 
 // AeonCrop Web es la de laboratorio: IA+ siempre a la vista.
 export function enabled() { return true; }
@@ -118,10 +120,18 @@ async function load(fresh) {
   if (!data || fresh) {
     say("Cargando marcas…");
     data = { version: 1, classes: CLASSES.map(([k]) => k), photos: {} };
+    loadError = "";
     try {
       const got = await X.loadLabels();
       if (got && got.photos) data = { ...data, ...got, classes: data.classes };
-    } catch (e) { say(`No se pudieron leer las marcas: ${e.message}`); }
+    } catch (e) {
+      // Sin Drive (sesión vencida, sin red…): la última copia de este navegador, y no se guarda
+      // nada hasta leer bien las de Drive (así nunca se pisa lo marcado en otro equipo).
+      console.error("marcas:", e);
+      loadError = String(e.message || e);
+      const cached = await X.cachedLabels?.().catch(() => null);
+      if (cached && cached.photos) data = { ...data, ...cached, classes: data.classes };
+    }
   }
   if (!photos || fresh) {
     const detail = detailPhotos(await X.allStates(say));
@@ -152,6 +162,7 @@ function scheduleSave() {
 async function saveNow() {
   clearTimeout(saveTimer);
   if (!data) return;
+  if (loadError) { $("tsaved").textContent = "No se guardó: primero hay que leer las marcas de Drive (pulse ⟳)."; return; }
   try {
     await X.saveLabels(data);
     $("tsaved").textContent = "Guardado en Drive";
@@ -201,7 +212,14 @@ function renderList() {
   const done = all.filter((p) => marked(p.name));
   const totals = Object.fromEntries(CLASSES.map(([k]) => [k, 0]));
   for (const r of Object.values(data?.photos || {})) for (const b of r.boxes || []) totals[b.c] = (totals[b.c] || 0) + 1;
-  $("tstats").innerHTML = `<b>${done.length}</b> fotos marcadas de ${all.length} (todos los ensayos y predios) · meta ${GOAL}
+  const warn = loadError ? `<div class="warn"><b>No se pudieron leer las marcas de Drive</b> (${esc(loadError)}).
+    Se muestra la última copia de este navegador y no se guardan cambios. Pulse ⟳ para reintentar
+    (o «Reconectar» si la sesión de Google venció). Sus marcas siguen a salvo en Drive.</div>` : "";
+  const inDrive = Object.keys(data?.photos || {}).filter((k) => marked(k)).length;
+  const orphan = !loadError && inDrive > done.length
+    ? `<div class="warn">En Drive hay <b>${inDrive}</b> fotos marcadas; ${inDrive - done.length} no aparecen en esta lista
+       (fotos que la web aún no conoce). Las marcas no se pierden.</div>` : "";
+  $("tstats").innerHTML = warn + orphan + `<b>${done.length}</b> fotos marcadas de ${all.length} (todos los ensayos y predios) · meta ${GOAL}
     <div class="tbar"><i style="width:${Math.min(100, done.length / GOAL * 100)}%"></i></div>
     <div class="tclasses">${CLASSES.map(([k, n, c]) => `<span><i style="background:${c}"></i>${n} <b>${totals[k] || 0}</b></span>`).join("")}</div>`;
   list = all.filter((p) => (!wsFilter || p.code === wsFilter) && (filter === "todo" || (filter === "con") === marked(p.name)));

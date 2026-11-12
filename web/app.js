@@ -2203,7 +2203,7 @@ async function boot() {
   NB.init({ S, send, photoUrl, resize, uploadPhoto: uploadNotePhoto });
   $("aifabs").hidden = !TR.enabled();
   document.body.classList.toggle("withfabs", TR.enabled());      // se activa abriendo la web con «#lab» una vez
-  TR.init({ S, photoUrl, loadLabels, saveLabels, allStates, extraList, extraUrl, extraUpload, yieldList,
+  TR.init({ S, photoUrl, loadLabels, saveLabels, cachedLabels: () => cacheGet(trainKey()), allStates, extraList, extraUrl, extraUpload, yieldList,
     setCrop: (mod) => { trainMod = mod; },
     crop: () => (S.workspaces.length && !$("app").hidden ? CROP : null),
     email: () => store.get("ac_email") });

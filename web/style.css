@@ -514,3 +514,4 @@ dialog.rcfg { width: min(720px, 96vw); background: #FBF8F1; }
 .tog.on { background: var(--berry); color: #fff; border-color: #E0718F; box-shadow: 0 0 0 3px rgba(168, 24, 74, .22); }
 .tog .new { font-size: 9px; font-weight: 800; margin-left: 6px; letter-spacing: .04em; }
 #rcfgfoot { margin-right: auto; }
+#tstats .warn { color: #7E1238; background: #F8DCE4; padding: 8px 12px; border-radius: 10px; margin: 0 0 8px; line-height: 1.45; }
