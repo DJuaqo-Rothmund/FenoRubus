@@ -4241,17 +4241,27 @@ class ReportsTab(MDScreen):
     sel_variety = ObjectProperty(None, allownone=True)
     sel_month = ObjectProperty(None, allownone=True)
 
-    def set_plain_pdf(self, active):
-        app().db.set_setting("report_plain_pdf", bool(active))
+    def open_config(self):
+        from ui.report_config_ui import open_sheet
+        open_sheet(on_close=self._config_label)
 
-    def set_all_photos(self, active: bool):
-        app().db.set_setting("report_all_photos", bool(active))
+    def _config_label(self):
+        import report_config as rc
+        self.ids.cfg_summary.text = rc.summary(rc.load(app().db))
+
+    def generate_all_weekly(self):
+        """Un ZIP con el informe semanal (PDF) de cada semana con datos de la temporada."""
+        a = app()
+        r = a.configured_reports()
+
+        def progress(i, n, w):
+            Clock.schedule_once(lambda *_: a.toast(f"Semanales: {i + 1} de {n}…"))
+        a.run_report(lambda: r.weekly_zip(a.season, progress=progress),
+                     on_done=lambda _res: self.list_recent())
 
     def refresh(self):
         a = app()
-        self.ids.all_photos.active = bool(a.db.get_setting("report_all_photos", False))
-        self.ids.plain_pdf.active = bool(a.db.get_setting("report_plain_pdf", False))
-        self._photo_mode_label()
+        self._config_label()
         weeks = a.db.list_weeks(a.season)
         if not weeks:
             weeks = [a.db.current_week()]
@@ -4325,25 +4335,6 @@ class ReportsTab(MDScreen):
             self.sel_variety = v
             self._labels()
         open_menu(caller, [(ph.unit_compact(v), lambda v=v: choose(v)) for v in app().db.pheno_units()])
-
-    def pick_photo_mode(self):
-        a = app()
-
-        def choose(mode):
-            a.db.set_setting("report_photo_mode", mode)
-            self._photo_mode_label()
-
-        from reporter import ReportGenerator
-        hints = {"both": "La foto general y la de detalle de cada variedad",
-                 "detail": "Solo la foto de detalle representativa",
-                 "canopy": "Solo la foto general (canopia) representativa"}
-        pick_dialog("Fotos en los informes", [(label, hints[mode], lambda m=mode: choose(m))
-                                              for mode, label in ReportGenerator.PHOTO_MODES.items()])
-
-    def _photo_mode_label(self):
-        from reporter import ReportGenerator
-        mode = app().db.get_setting("report_photo_mode", "both")
-        self.ids.photo_mode_btn.text = f"Fotos: {ReportGenerator.PHOTO_MODES.get(mode, mode)}"
 
     def generate(self, kind: str, package: str = "pdf"):
         a = app()

@@ -34,3 +34,10 @@ def test_webreport_builds_pdfs_from_bundles(tmp_path, monkeypatch):
         path = webreport.report("AM", kind, arg, 2026)
         with open(path, "rb") as f:
             assert f.read(5) == b"%PDF-"
+    # Configuración de informes de la web: todas las secciones (con el plano del predio AM).
+    import report_config as rc
+    full = json.dumps(rc.apply_template(rc.default(), "completo"))
+    assert isinstance(json.loads(webreport.photos("AM", "weekly", week["start_date"], 2026, full)), list)
+    path = webreport.report("AM", "weekly", week["start_date"], 2026, False, full)
+    with open(path, "rb") as f:
+        assert f.read(5) == b"%PDF-"

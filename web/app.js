@@ -6,6 +6,7 @@ import * as NB from "./notebook.js";
 import * as TR from "./train.js";
 import { CLIENT_ID } from "./config.js";
 import { makeReports } from "./reports.js";
+import * as RC from "./reportcfg.js";
 import { warm as warmPdf, makePdf } from "./pdf.js";
 import { weekCompleted } from "./celebrate.js";
 import { photoHeat, pickPoint, sectorMap } from "./maps.js";
@@ -1742,6 +1743,7 @@ function renderReports() {
   $("rxls").hidden = !C.measures(S.state).length;
   fill($("rmonth"), [...new Set(weeks.map((w) => w.slice(0, 7)))].map((m) => [m, `${C.MESES[Number(m.slice(5)) - 1]} ${m.slice(0, 4)}`]));
   $("rtrt").hidden = !C.treatments(S.state).length;
+  $("rcfgsum").textContent = RC.summary(rcfg());
   fill($("rvar"), C.phenoUnits(S.state).map((v) => [v.uid, C.unitMain(v) + (C.unitPlace(v) ? ` · ${C.unitPlace(v)}` : "")]));
 }
 
@@ -1749,7 +1751,7 @@ async function runReport(kind) {
   const season = Number($("rseason").value);
   const win = window.open("", "_blank");       // en el mismo clic: así no lo bloquea el navegador
   if (win) win.document.write("<p style='font:16px system-ui;padding:24px'>Preparando informe…</p>");
-  const rep = makeReports({ state: S.state, ws: S.ws, bbch: S.bbch, photoUrl, win, crop: CROP, plain: $("rplain").checked,
+  const rep = makeReports({ state: S.state, ws: S.ws, bbch: S.bbch, photoUrl, win, crop: CROP, plain: rcfg().plain, cfg: rcfg(),
     progress: (t) => { $("rmsg").textContent = t; } });
   try {
     if (kind === "weekly") await rep.weekly($("rweek").value);
@@ -1785,7 +1787,7 @@ async function runPdf(kind) {
   const btns = document.querySelectorAll("[data-pdf]");
   btns.forEach((b) => (b.disabled = true));
   try {
-    const { name, blob } = await makePdf({ ws: S.ws, bundles: S.bundles, photoBlob, crop: CROP, plain: $("rplain").checked,
+    const { name, blob } = await makePdf({ ws: S.ws, bundles: S.bundles, photoBlob, crop: CROP, plain: rcfg().plain, cfg: rcfg(),
       progress: (t) => { $("rmsg").textContent = t; } }, kind, arg, season);
     const a = document.createElement("a");
     a.href = URL.createObjectURL(blob); a.download = name;
@@ -1807,13 +1809,22 @@ async function runZip() {
   btns.forEach((b) => (b.disabled = true));
   const files = [];
   try {
+    const errors = [];
     for (const [i, w] of weeks.entries()) {
       const tag = `Semana ${i + 1} de ${weeks.length} (${C.weekTitle(w)})`;
       $("rmsg").textContent = `${tag}…`;
-      const { name, blob } = await makePdf({ ws: S.ws, bundles: S.bundles, photoBlob, crop: CROP, plain: $("rplain").checked,
-        progress: (t) => { $("rmsg").textContent = `${tag}: ${t}`; } }, "weekly", w, season);
-      files.push([name, new Uint8Array(await blob.arrayBuffer())]);
+      try {
+        const { name, blob } = await makePdf({ ws: S.ws, bundles: S.bundles, photoBlob, crop: CROP, plain: rcfg().plain, cfg: rcfg(),
+          progress: (t) => { $("rmsg").textContent = `${tag}: ${t}`; } }, "weekly", w, season);
+        files.push([name, new Uint8Array(await blob.arrayBuffer())]);
+      } catch (e) {            // una semana con problemas no detiene las demás
+        console.error(e);
+        errors.push(`${C.weekTitle(w)} (${C.weekLabel(w)}): ${String(e.message || e).split("\n").filter(Boolean).pop()}`);
+        if (!files.length && errors.length >= 2 && errors.length === i + 1) throw e;   // falla todo: se avisa
+      }
     }
+    if (!files.length) throw new Error(errors[0] || "sin informes");
+    if (errors.length) files.push(["errores.txt", new TextEncoder().encode(`No se pudieron generar estas semanas:\n\n${errors.join("\n")}\n`)]);
     $("rmsg").textContent = "Armando el ZIP…";
     const zip = new Blob([C.zipStore(files)], { type: "application/zip" });
     const name = `${S.ws.code || "ensayo"}-informes-semanales-${C.seasonTitle(season).replace(/[^0-9A-Za-z]+/g, "-").replace(/^-|-$/g, "")}.zip`;
@@ -1821,11 +1832,98 @@ async function runZip() {
     a.href = URL.createObjectURL(zip); a.download = name;
     document.body.appendChild(a); a.click(); a.remove();
     setTimeout(() => URL.revokeObjectURL(a.href), 60000);
-    $("rmsg").textContent = `ZIP listo: ${name} · ${files.length} informe(s), ${Math.max(1, Math.round(zip.size / 1048576))} MB (en Descargas).`;
+    const nerr = files.some(([n]) => n === "errores.txt") ? 1 : 0;
+    $("rmsg").textContent = `ZIP listo: ${name} · ${files.length - nerr} informe(s), ${Math.max(1, Math.round(zip.size / 1048576))} MB (en Descargas).`
+      + (nerr ? " Algunas semanas fallaron: ver «errores.txt» dentro del ZIP." : "");
   } catch (e) {
     console.error(e);
     $("rmsg").textContent = `No se pudo armar el ZIP (${files.length} de ${weeks.length} listos): ${String(e.message || e).split("\n").filter(Boolean).pop()}`;
   } finally { btns.forEach((b) => (b.disabled = false)); refreshZipBtn(); }
+}
+
+// ------------------------------------------------ configuración de informes
+const rget = (k, d) => C.setting(S.state, k, d);
+function rcfg() { return RC.load(rget); }
+
+function openReportConfig() {
+  const dlg = $("rcfgdlg");
+  const draw = () => {
+    const cfg = rcfg();
+    const saved = RC.savedTemplates(rget);
+    const body = $("rcfgbody");
+    body.innerHTML = "";
+    const h = (t) => { const e = document.createElement("h3"); e.textContent = t; body.appendChild(e); };
+    const gl = (t) => { const e = document.createElement("div"); e.className = "gl"; e.textContent = t; body.appendChild(e); };
+    const row = () => { const e = document.createElement("div"); e.className = "chips"; body.appendChild(e); return e; };
+    const tog = (box, text, on, fn, isNew = false) => {
+      const b = document.createElement("button");
+      b.type = "button"; b.className = "tog" + (on ? " on" : ""); b.textContent = text;
+      b.setAttribute("aria-pressed", on ? "true" : "false");
+      if (isNew) { const n = document.createElement("span"); n.className = "new"; n.textContent = "NUEVO"; b.appendChild(n); }
+      b.onclick = fn; box.appendChild(b);
+    };
+    h("Plantilla");
+    let r = row();
+    for (const [k, t] of Object.entries(RC.TEMPLATES)) tog(r, t.name, cfg.template === k, () => save(RC.applyTemplate(cfg, k, saved)));
+    saved.forEach((t, i) => tog(r, t.name, cfg.template === `u:${i}`, () => save(RC.applyTemplate(cfg, `u:${i}`, saved))));
+    tog(r, "+ Guardar la actual", false, () => {
+      const name = (prompt("Nombre de la plantilla (ej.: Gerencia)") || "").trim();
+      if (!name) return;
+      const items = saved.filter((t) => t.name !== name);
+      items.push({ name, sections: cfg.sections, photo_mode: cfg.photo_mode, photo_size: cfg.photo_size,
+        all_photos: cfg.all_photos, plain: cfg.plain });
+      save({ ...cfg, template: `u:${items.length - 1}` }, { [RC.TEMPLATES_KEY]: JSON.stringify(items) });
+    });
+    if (saved.length) tog(r, "Borrar guardada…", false, () => {
+      const name = (prompt(`¿Qué plantilla borrar? (${saved.map((t) => t.name).join(", ")})`) || "").trim();
+      if (!saved.some((t) => t.name === name)) return;
+      save({ ...cfg, template: "" }, { [RC.TEMPLATES_KEY]: JSON.stringify(saved.filter((t) => t.name !== name)) });
+    });
+    h("Formato");
+    r = row();
+    tog(r, "PDF simple (sin logo ni marca)", cfg.plain, () => save({ ...cfg, plain: !cfg.plain, template: "" }));
+    tog(r, "Todas las fotos (no solo la principal)", cfg.all_photos, () => save({ ...cfg, all_photos: !cfg.all_photos, template: "" }));
+    gl("FOTOS DE CADA VARIEDAD");
+    r = row();
+    for (const [k, t] of Object.entries(RC.PHOTO_MODES)) tog(r, t, cfg.photo_mode === k, () => save({ ...cfg, photo_mode: k, template: "" }));
+    gl("TAMAÑO DE LAS FOTOS");
+    r = row();
+    for (const [k, t] of Object.entries(RC.PHOTO_SIZES)) tog(r, t, cfg.photo_size === k, () => save({ ...cfg, photo_size: k, template: "" }));
+    h("Secciones del informe semanal");
+    const note = document.createElement("div"); note.className = "muted small";
+    note.textContent = "Las secciones sin datos esa semana no salen en el informe. Valen para los PDF (y el ZIP), iguales a los de la app.";
+    body.appendChild(note);
+    for (const g of RC.GROUPS) {
+      gl(g.toUpperCase());
+      r = row();
+      for (const [k, name, gg] of RC.SECTIONS) if (gg === g) tog(r, name, cfg.sections.includes(k), () => save(RC.toggle(cfg, k)), RC.NEW.has(k));
+    }
+    r = row();
+    tog(r, "Todas las secciones", false, () => save({ ...cfg, sections: [...RC.SECTION_KEYS], template: "" }));
+    tog(r, "Ninguna", false, () => save({ ...cfg, sections: [], template: "" }));
+    $("rcfgfoot").textContent = RC.summary(cfg);
+  };
+  const save = (cfg, extra = {}) => {
+    const scroll = $("rcfgbody").scrollTop;
+    const set = { ...RC.settingsFor(RC.normalize(cfg)), ...extra };
+    Object.assign(S.state.settings, set);                   // se ve al instante…
+    S.rcfgSend = { ...(S.rcfgSend || {}), ...set };         // …y se sube junto, al dejar de tocar
+    clearTimeout(S.rcfgTimer);
+    S.rcfgTimer = setTimeout(flushReportConfig, 1500);
+    draw();
+    $("rcfgbody").scrollTop = scroll;
+    $("rcfgsum").textContent = RC.summary(rcfg());
+  };
+  draw();
+  dlg.onclose = flushReportConfig;
+  dlg.showModal();
+}
+
+function flushReportConfig() {
+  clearTimeout(S.rcfgTimer);
+  const set = S.rcfgSend;
+  S.rcfgSend = null;
+  if (set) send([], set).catch((e) => console.error(e));
 }
 
 function refreshZipBtn() {
@@ -2023,6 +2121,7 @@ async function boot() {
   document.querySelectorAll("[data-rep]").forEach((b) => (b.onclick = () => runReport(b.dataset.rep)));
   document.querySelectorAll("[data-pdf]").forEach((b) => (b.onclick = () => runPdf(b.dataset.pdf)));
   $("rzip").onclick = runZip;
+  $("rcfg").onclick = openReportConfig;
   // Tocar «Semana del …»: calendario; cualquier día lleva a la semana que lo contiene.
   const pickWeek = () => {
     const i = $("wpick");

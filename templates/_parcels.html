@@ -1,0 +1,6 @@
+{% from "_macros.html" import heatmap %}
+{% if not unified %}
+<h2>Detalle por parcela</h2>
+<p class="lead">Código BBCH registrado en cada parcela (T = tratamiento, R = repetición).</p>
+{{ heatmap(heat, weeks, "Parcela") }}
+{% endif %}

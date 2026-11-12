@@ -169,6 +169,10 @@ class Report(PDFDoc):
         if not self._dry:
             super().circle(*a, **k)
 
+    def polygon(self, *a, **k):
+        if not self._dry:
+            super().polygon(*a, **k)
+
     def image(self, *a, **k):
         return True if self._dry else super().image(*a, **k)
 
@@ -474,27 +478,184 @@ def _doc(ctx, meta, names, num) -> Report:
 
 def weekly(ctx: dict, names: dict, num=None) -> Report:
     cards, st = ctx["cards"], ctx["stats"]
+    sec = ctx.get("sec")
+    if sec is None:      # contexto antiguo (sin configuración): el informe de siempre
+        sec = {"bbch_table", "photos", "notes", "ai", "attachments", "gps", "measures"}
+    num = num or (lambda x, d=1: "—" if x in (None, "") else str(x))
     r = _doc(ctx, [f"{st['done']}/{st['varieties']} variedades con estado BBCH", f"{st['photos']} fotos"],
              names, num)
-    r.h2("Resumen inter-varietal")
-    rows = []
-    for c in cards:
-        n = (1 if c["img"]["canopy"] else 0) + (1 if c["img"]["detail"] else 0) + len(c.get("extras") or [])
-        ia = "—"
-        if c.get("ai_code") is not None:
-            ia = f"BBCH {ph.code_str(c['ai_code'])}" + {1: " · aceptada", 0: " · corregida"}.get(c.get("ai_accepted"), "")
-        rows.append([{"text": c["variety"]["name"], "bold": True},
-                     ph.bbch_label(c["code"], names) if c["code"] is not None else "Sin estado",
-                     {"text": macro_name(c["code"]) or "—", "color": MUTED}, str(n), {"text": ia, "color": MUTED}])
-    r.table(["Variedad", "Estado fenológico", "Estadio principal", "Fotos", "IA"], rows,
-            [2.2, 3.6, 2.4, .8, 1.8], aligns=["left", "left", "left", "center", "left"])
+    if ctx.get("summary"):
+        r.h2("Resumen ejecutivo")
+        for line in ctx["summary"]:
+            lines = r.wrap(line, CW - 14, 9.4)
+            r.ensure(len(lines) * 12.5 + 4)
+            r.circle(M + 3, r.y + 6.5, 1.8, fill=OLIVE)
+            for k, ln in enumerate(lines):
+                r.text(M + 12, r.y + 10, ln, 9.4, False, INK)
+                r.y += 12.5
+            r.y += 3
+    if "bbch_table" in sec:
+        r.h2("Resumen inter-varietal")
+        rows = []
+        for c in cards:
+            n = c.get("n_photos")
+            if n is None:
+                n = (1 if c["img"]["canopy"] else 0) + (1 if c["img"]["detail"] else 0) + len(c.get("extras") or [])
+            row = [{"text": c["variety"]["name"], "bold": True},
+                   ph.bbch_label(c["code"], names) if c["code"] is not None else "Sin estado",
+                   {"text": macro_name(c["code"]) or "—", "color": MUTED}, str(n)]
+            if "ai" in sec:
+                ia = "—"
+                if c.get("ai_code") is not None:
+                    ia = f"BBCH {ph.code_str(c['ai_code'])}" + {1: " · aceptada", 0: " · corregida"}.get(
+                        c.get("ai_accepted"), "")
+                row.append({"text": ia, "color": MUTED})
+            rows.append(row)
+        heads = ["Variedad", "Estado fenológico", "Estadio principal", "Fotos"] + (["IA"] if "ai" in sec else [])
+        r.table(heads, rows, [2.2, 3.6, 2.4, .8] + ([1.8] if "ai" in sec else []),
+                aligns=["left", "left", "left", "center", "left"][:len(heads)])
+    if ctx.get("change"):
+        prev = ctx["prev"]
+        r.h2("Cambio respecto de la semana anterior",
+             f"Estado BBCH de {ph.week_short(prev)} y de esta semana; la diferencia en unidades BBCH.")
+        rows = []
+        for c in ctx["change"]:
+            d = c["delta"]
+            cell = ({"text": "—", "color": MUTED} if d is None else
+                    {"text": f"+{num(d)}", "color": BERRY, "bold": True} if d > 0 else
+                    {"text": f"{num(d)}", "color": "#3e6a8a", "bold": True} if d < 0 else "= 0")
+            rows.append([{"text": c["variety"]["name"], "bold": True},
+                         ph.bbch_label(c["before"], names) if c["before"] is not None else {"text": "—", "color": MUTED},
+                         ph.bbch_label(c["now"], names) if c["now"] is not None else {"text": "—", "color": MUTED},
+                         cell])
+        r.table(["Variedad", ph.week_short(prev), "Esta semana", "Cambio"], rows, [2.2, 3.2, 3.2, 1.2],
+                aligns=["left", "left", "left", "center"])
+    if "missing" in sec and ctx.get("missing"):
+        r.h2("Variedades sin registro", "Lo que falta para dar por completo el registro de la semana.")
+        r.table(["Variedad", "Falta"], [[{"text": m["variety"]["name"], "bold": True}, {"text": m["what"], "color": BERRY}]
+                                        for m in ctx["missing"]], [3, 5])
 
+    if "photos" in sec:
+        _photo_cards(r, ctx, sec)
+    if ctx.get("measures"):
+        r.h2("Mediciones de la semana")
+        r.measures(ctx["measures"])
+    _progress(r, ctx.get("progress"))
+    if ctx.get("evo"):
+        _evo(r, ctx["evo"], names, sec)
+    if ctx.get("trial"):
+        _trial(r, ctx["trial"], names)
+    if ctx.get("parcels"):
+        _parcels(r, ctx["parcels"])
+    sc = ctx.get("scout")
+    if sc and sc.get("groups"):
+        r.h2("Plagas y enfermedades (AeonScout)", "Registros de AeonScout de esta semana en este ensayo o predio.")
+        for g in sc["groups"]:
+            r.ensure(40)
+            r.y += 10
+            r.text(M, r.y, f"{g['name']} · {len(g['records'])}", 10.5, True, INK)
+            r.y += 6
+            for rec in g["records"]:
+                def item(rec=rec):
+                    top = r.y
+                    r.photo(rec.get("src"), M, top, 72, 54)
+                    x = M + 82
+                    r.text(x, top + 11, r.fit(rec["species"] + (f"  ({rec['scientific']})" if rec.get("scientific") else ""),
+                                              CW - 82, 9.4, True), 9.4, True, INK)
+                    meta = " · ".join(v for v in (rec["when"], rec.get("sector"), rec.get("stage"), rec.get("organ"),
+                                                  rec.get("abundance")) if v)
+                    r.text(x, top + 24, r.fit(meta, CW - 82, 7.8), 7.8, False, MUTED)
+                    for k, ln in enumerate(r.wrap(rec.get("notes") or "", CW - 82, 8)[:2]):
+                        r.text(x, top + 36 + k * 10, ln, 8, False, INK2)
+                    r.y = top + 60
+                r.keep(item)
+    y = ctx.get("yields")
+    if y and y.get("rows"):
+        r.h2("Rendimiento estimado",
+             "Estimaciones de la temporada hasta esta semana"
+             + (f" · promedio {num(y['mean'])} t/ha" if y.get("mean") is not None else "")
+             + ". «Conteo real» corrige la estimación por foto con frutos contados en planta.")
+        if y.get("map"):
+            _map(r, y["map"], "Color por t/ha: rojo = menos, verde = más · ● foto · ◆ foto + conteo real",
+                 legend=y["map"].get("legend"))
+        r.table(["Fecha", "Sector", "Tipo", "Fotos", "t/ha (foto)", "t/ha (real)"],
+                [[rr["when"], rr["sector"], "Foto + conteo real" if rr["kind"] == "real" else "Foto",
+                  str(rr["photos"]), num(rr["photo_t"]), num(rr["real_t"])] for rr in y["rows"]],
+                [1.4, 3.4, 1.8, .8, 1.2, 1.2], 8, ["left", "left", "left", "center", "center", "center"])
+    if ctx.get("notebook"):
+        r.h2("Cuaderno de campo de la semana")
+        for d in ctx["notebook"]:
+            r.ensure(40)
+            r.y += 12
+            r.text(M, r.y, d["day"], 10.5, True, INK)
+            r.y += 4
+            if d["text"]:
+                for para in d["text"].split("\n"):
+                    r.para(para or " ", 9, INK)
+            if d["pics"]:
+                r.y += 4
+                _gallery_at(r, d["pics"], M, CW, cols=4)
+    if ctx.get("smap"):
+        r.h2("Mapa de los muestreos")
+        kinds = ctx["smap"].get("kinds") or []
+        cap = " · ".join(t for k, t in (("pheno", "azul = fenología"), ("scout", "burdeo = AeonScout"),
+                                        ("yield", "negro = rendimiento")) if k in kinds)
+        _map(r, ctx["smap"], cap)
+    w = ctx["week"]
+    iso_w, iso_y = ph.iso_week(w["start_date"])
+    r.attach(WEEKLY_DATA, json.dumps({
+        "app": "PhenoRubus", "kind": "weekly", "season": w["season"], "week_number": w["week_number"],
+        "start_date": w["start_date"], "iso_week": iso_w, "iso_year": iso_y, "cards": [
+            {"name": c["variety"]["name"], "code": c["variety"].get("code") or "", "bbch": c["code"],
+             "notes": c.get("raw_notes", c.get("notes")) or "", "photos": ctx.get("_names", {}).get(i, {})}
+            for i, c in enumerate(cards)],
+    }, ensure_ascii=False).encode("utf-8"), "application/json")
+    return r
+
+
+MAP_COLORS = {"pheno": "#2a78d6", "scout": BERRY, "yield": INK, "foto": INK, "real": INK}
+
+
+def _map(r: Report, m: dict, caption: str = "", legend=None, max_h: float = 330):
+    """Plano del predio (o puntos en metros) con sectores pintados y puntos."""
+    W, H = m["w"], m["h"]
+    k = min(CW / W, max_h / H)
+    w, h = W * k, H * k
+    r.ensure(h + 26)
+    x0, y0 = M + (CW - w) / 2, r.y + 4
+    r.rect(x0, y0, w, h, fill=PAPER, stroke=RULE, radius=4)
+    for p in m["polys"]:
+        ring = p["ring"]
+        pts = [(x0 + ring[i] * k, y0 + (H - ring[i + 1]) * k) for i in range(0, len(ring) - 1, 2)]
+        r.polygon(pts, fill=p["fill"] or "#eef0e6", stroke=MUTED, lw=.4)
+    for p in m["points"]:
+        cx, cy = x0 + p["x"] * k, y0 + (H - p["y"]) * k
+        col = MAP_COLORS.get(p["kind"], INK)
+        if p["kind"] == "real":
+            r.polygon([(cx, cy - 4), (cx + 4, cy), (cx, cy + 4), (cx - 4, cy)], fill="#ffffff", stroke=col, lw=1.2)
+        else:
+            r.circle(cx, cy, 2.8, fill=col, stroke="#ffffff", lw=.8)
+    for lb in m.get("labels") or []:        # t/ha de cada sector, sobre los puntos con fondo claro
+        tx, ty = x0 + lb["x"] * k, y0 + (H - lb["y"]) * k
+        tw = r.width(lb["text"], 6.6, True)
+        r.rect(tx - tw / 2 - 2, ty - 4.5, tw + 4, 9, fill="#ffffff", radius=2)
+        r.text(tx, ty + 2.4, lb["text"], 6.6, True, INK, "center")
+    r.y = y0 + h + 12
+    if caption:
+        r.text(M, r.y, r.fit(caption, CW, 7.6), 7.6, False, MUTED)
+        r.y += 8
+
+
+def _photo_cards(r: Report, ctx: dict, sec):
+    cards = ctx["cards"]
+    size = ctx.get("photo_size") or "normal"
     r.h2("Registro fotográfico por variedad",
-         "Foto general de canopia y foto de detalle, con el estado fenológico asignado y las "
-         "observaciones técnicas.")
-    data_cards = []
-    pw = (CW - 24 - 10) / 2
-    ph_h = pw * .6
+         "Foto general de canopia y foto de detalle, con el estado fenológico asignado"
+         + (" y las observaciones técnicas." if "notes" in sec else "."))
+    large = size == "large"
+    pw = (CW - 24) if large else (CW - 24 - 10) / 2
+    ph_h = pw * (.62 if large else .42 if size == "compact" else .6)
+
     def draw_card(i, c):
         photos = [(k, lab) for k, lab in (("canopy", "Canopia"), ("detail", "Detalle")) if c["img"][k]]
         att = c.get("attachments") or []
@@ -509,10 +670,15 @@ def weekly(ctx: dict, names: dict, num=None) -> Report:
         if photos:
             for j, (k, lab) in enumerate(photos):
                 name = f"V{i}{k[0]}"
-                r.photo(c["img"][k], x + j * (pw + 10), r.y, pw, ph_h, lab, name=name)
+                if large:
+                    r.photo(c["img"][k], x, r.y, pw, ph_h, lab, name=name)
+                    r.y += ph_h + 16
+                else:
+                    r.photo(c["img"][k], x + j * (pw + 10), r.y, pw, ph_h, lab, name=name)
                 names_map[k] = name
-            r.y += ph_h + 16
-        else:
+            if not large:
+                r.y += ph_h + 16
+        elif ctx.get("photo_mode") != "none":
             r.rect(x, r.y, CW - 24, 18, fill=CHIP, radius=4)
             r.text(x + 6, r.y + 12, "Sin fotos", 8, False, MUTED)
             r.y += 24
@@ -534,19 +700,7 @@ def weekly(ctx: dict, names: dict, num=None) -> Report:
         return names_map
 
     for i, c in enumerate(cards):
-        names_map = r.keep(lambda i=i, c=c: draw_card(i, c))   # la tarjeta entera en una hoja
-        data_cards.append({"name": c["variety"]["name"], "code": c["variety"].get("code") or "",
-                           "bbch": c["code"], "notes": c.get("notes") or "", "photos": names_map})
-    if ctx.get("measures"):
-        r.h2("Mediciones de la semana")
-        r.measures(ctx["measures"])
-    w = ctx["week"]
-    iso_w, iso_y = ph.iso_week(w["start_date"])
-    r.attach(WEEKLY_DATA, json.dumps({
-        "app": "PhenoRubus", "kind": "weekly", "season": w["season"], "week_number": w["week_number"],
-        "start_date": w["start_date"], "iso_week": iso_w, "iso_year": iso_y, "cards": data_cards,
-    }, ensure_ascii=False).encode("utf-8"), "application/json")
-    return r
+        ctx.setdefault("_names", {})[i] = r.keep(lambda i=i, c=c: draw_card(i, c))   # la tarjeta entera en una hoja
 
 
 def _gallery_at(r: Report, items, x, width, cols=4):
@@ -728,14 +882,23 @@ def variety(ctx: dict, names: dict, num=None) -> Report:
 def matrix(ctx: dict, names: dict, num=None) -> Report:
     rows, weeks = ctx["rows"], ctx["weeks"]
     r = _doc(ctx, [f"{len(rows)} variedades", f"{len(weeks)} semanas"], names, num)
-    r.h2("Matriz fenológica", "Estado BBCH por variedad (filas) y semana de muestreo (columnas).")
-    r.heatmap(ctx["heat"], weeks)
-    if ctx.get("compare"):
+    _evo(r, ctx, names, EVO)
+    _progress(r, ctx.get("progress"))
+    return r
+
+
+EVO = ("matrix", "chart", "precocity", "milestones", "gallery")
+
+
+def _evo(r: Report, ctx: dict, names: dict, sec):
+    """Matriz, gráfico, precocidad, hitos y galería paralela (matriz y semanal)."""
+    rows, weeks = ctx["rows"], ctx["weeks"]
+    if "matrix" in sec:
+        r.h2("Matriz fenológica", "Estado BBCH por variedad (filas) y semana de muestreo (columnas).")
+        r.heatmap(ctx["heat"], weeks)
+    if ctx.get("compare") and "chart" in sec:
         r.h2("Estado BBCH por semana")
         r.chart(ctx["compare"]["raw"])
-    r.h2("Precocidad relativa",
-         "Diferencia media, en unidades BBCH, entre cada variedad y el promedio de todas las variedades "
-         "en las mismas semanas. Positivo = adelantada; negativo = tardía.")
     max_abs = ctx.get("max_abs") or 1.0
     wmin = weeks[0]["week_number"] if weeks else 0
     wmax = weeks[-1]["week_number"] if weeks else 1
@@ -758,17 +921,24 @@ def matrix(ctx: dict, names: dict, num=None) -> Report:
     rank_rows = [[{"text": str(i + 1), "color": MUTED}, {"text": rr["variety"]["name"], "bold": True},
                   bar(rr["delta"]), ph.bbch_label(rr["last"], names) if rr["last"] is not None else "—",
                   spark(rr.get("pts") or [])] for i, rr in enumerate(ctx["ranking"])]
-    if rank_rows:
-        r.table(["#", "Variedad", "Dif. BBCH vs. promedio", "Último estado", "Trayectoria"], rank_rows,
-                [.4, 2, 2.6, 3, 1.6], 8)
-    else:
-        r.para("Se necesitan al menos dos variedades registradas en una misma semana.", 9, MUTED)
-    r.h2("Hitos fenológicos", "Primera semana en que cada variedad alcanzó (o superó) el estado indicado.")
+    if "precocity" in sec:
+        r.h2("Precocidad relativa",
+             "Diferencia media, en unidades BBCH, entre cada variedad y el promedio de todas las variedades "
+             "en las mismas semanas. Positivo = adelantada; negativo = tardía.")
+        if rank_rows:
+            r.table(["#", "Variedad", "Dif. BBCH vs. promedio", "Último estado", "Trayectoria"], rank_rows,
+                    [.4, 2, 2.6, 3, 1.6], 8)
+        else:
+            r.para("Se necesitan al menos dos variedades registradas en una misma semana.", 9, MUTED)
     ms = ctx["milestones"]
-    r.table(["Variedad"] + [f"{name} (>= {ph.code_str(code)})" for code, name in ms],
-            [[{"text": rr["variety"]["name"], "bold": True}]
-             + [f"S{h}" if h else {"text": "—", "color": MUTED} for h in rr["hits"]] for rr in rows],
-            [2.2] + [1] * len(ms), 7.6, ["left"] + ["center"] * len(ms))
+    if "milestones" in sec:
+        r.h2("Hitos fenológicos", "Primera semana en que cada variedad alcanzó (o superó) el estado indicado.")
+        r.table(["Variedad"] + [f"{name} (>= {ph.code_str(code)})" for code, name in ms],
+                [[{"text": rr["variety"]["name"], "bold": True}]
+                 + [f"S{h}" if h else {"text": "—", "color": MUTED} for h in rr["hits"]] for rr in rows],
+                [2.2] + [1] * len(ms), 7.6, ["left"] + ["center"] * len(ms))
+    if "gallery" not in sec:
+        return
     r.h2(f"Galería paralela ({ctx.get('gallery_label') or 'fotos de detalle'})")
     cols, gap = 8, 5
     w = (CW - gap * (cols - 1)) / cols
@@ -790,14 +960,20 @@ def matrix(ctx: dict, names: dict, num=None) -> Report:
 
     for rr in rows:
         r.keep(lambda rr=rr: draw_gallery(rr))
-    _progress(r, ctx.get("progress"))
-    return r
 
 
 def treatments(ctx: dict, names: dict, num=None) -> Report:
     weeks, rows = ctx["weeks"], ctx["rows"]
     r = _doc(ctx, [f"{ctx['n_t']} tratamientos", f"{ctx['n_r']} repeticiones", f"{len(weeks)} semanas"],
              names, num)
+    _trial(r, ctx, names)
+    _parcels(r, ctx)
+    return r
+
+
+def _trial(r: Report, ctx: dict, names: dict):
+    """Tratamientos, BBCH medio, ANOVA, precocidad, hitos y mediciones (también en el semanal)."""
+    weeks, rows = ctx["weeks"], ctx["rows"]
     r.h2("Tratamientos")
     r.table(["Tratamiento", "Variedad", "Descripción", "Parcelas"],
             [[{"text": t["label"], "bold": True}, t.get("variety") or "—", t.get("description") or "—",
@@ -893,10 +1069,12 @@ def treatments(ctx: dict, names: dict, num=None) -> Report:
         for b in m["blocks"]:
             r.keep(lambda b=b: block(b))
 
+
+
+def _parcels(r: Report, ctx: dict):
     if not ctx.get("unified"):
         r.h2("Detalle por parcela", "Código BBCH registrado en cada parcela (T = tratamiento, R = repetición).")
-        r.heatmap(ctx["heat"], weeks, label="Parcela")
-    return r
+        r.heatmap(ctx["heat"], ctx["weeks"], label="Parcela")
 
 
 RENDERERS = {"weekly.html": weekly, "period.html": period, "variety.html": variety, "matrix.html": matrix,

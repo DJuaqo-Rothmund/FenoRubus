@@ -1679,39 +1679,15 @@
             padding: dp(16), dp(14), dp(16), dp(24)
             spacing: dp(12)
             PaperCard:
-                MDBoxLayout:
-                    adaptive_height: True
-                    spacing: dp(6)
-                    MDCheckbox:
-                        id: all_photos
-                        size_hint: None, None
-                        size: dp(40), dp(40)
-                        pos_hint: {"center_y": .5}
-                        selected_color: c(theme.BERRY)
-                        unselected_color: c(theme.LEAF_DARK, .5)
-                        on_active: root.set_all_photos(self.active)
-                    Body:
-                        text: "Incluir todas las fotos (no solo la principal)"
-                        pos_hint: {"center_y": .5}
-                MDBoxLayout:
-                    adaptive_height: True
-                    spacing: dp(6)
-                    MDCheckbox:
-                        id: plain_pdf
-                        size_hint: None, None
-                        size: dp(40), dp(40)
-                        pos_hint: {"center_y": .5}
-                        selected_color: c(theme.BERRY)
-                        unselected_color: c(theme.LEAF_DARK, .5)
-                        on_active: root.set_plain_pdf(self.active)
-                    Body:
-                        text: "PDF simple: sin logo ni marca (solo la información e imágenes)"
-                        pos_hint: {"center_y": .5}
+                SectionLabel:
+                    text: "CONFIGURACIÓN DE INFORMES"
+                Muted:
+                    id: cfg_summary
+                    text: ""
                 GhostButton:
-                    id: photo_mode_btn
-                    icon: "image-multiple-outline"
-                    text: "Fotos: Full (general y detalle)"
-                    on_release: root.pick_photo_mode()
+                    icon: "tune-variant"
+                    text: "Configuración de informes"
+                    on_release: root.open_config()
             PaperCard:
                 SectionLabel:
                     text: "1 · REPORTE SEMANAL INTER-VARIETAL"
@@ -1725,6 +1701,10 @@
                 PrimaryButton:
                     text: "Generar PDF"
                     on_release: root.generate("weekly")
+                GhostButton:
+                    icon: "folder-zip-outline"
+                    text: "Todos los semanales (ZIP)"
+                    on_release: root.generate_all_weekly()
             PaperCard:
                 SectionLabel:
                     text: "2 · EVOLUCIÓN MENSUAL / RANGO DE SEMANAS"

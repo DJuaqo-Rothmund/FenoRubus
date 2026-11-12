@@ -500,3 +500,17 @@ dialog.tpage[open] { display: flex; }
 .nbstmenu button:hover { background: #F6EBD6; }
 .nbstmenu button.danger { color: #B3261E; }
 .nbsthelp { margin: 6px 0 0; }
+
+/* Configuración de informes: botones que se encienden (rojo con brillo) */
+.rcfgrow { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 8px 0 4px; }
+dialog.rcfg { width: min(720px, 96vw); background: #FBF8F1; }
+.rcfgbody { display: grid; gap: 6px; max-height: 64vh; overflow: auto; padding-right: 4px; }
+.rcfgbody h3 { margin: 10px 0 2px; font-size: 14px; color: var(--leaf-dark); }
+.rcfgbody .gl { font-size: 11px; letter-spacing: .06em; color: #6E7E75; margin-top: 6px; }
+.chips { display: flex; flex-wrap: wrap; gap: 8px; }
+.tog { border: 1px solid rgba(30, 74, 58, .3); background: #fff; color: #1B2A23; border-radius: 999px; padding: 8px 14px;
+  font: inherit; font-size: 13.5px; cursor: pointer; transition: background .15s, box-shadow .15s, color .15s; }
+.tog:hover { border-color: var(--berry); }
+.tog.on { background: var(--berry); color: #fff; border-color: #E0718F; box-shadow: 0 0 0 3px rgba(168, 24, 74, .22); }
+.tog .new { font-size: 9px; font-weight: 800; margin-left: 6px; letter-spacing: .04em; }
+#rcfgfoot { margin-right: auto; }

@@ -28,7 +28,7 @@ self.onmessage = async ({ data: m }) => {
     say("Preparando los datos…");
     wr.use_crop(m.crop || "PhenoRubus");
     wr.load(m.ws.code, JSON.stringify(m.ws), JSON.stringify(m.bundles));
-    const paths = ["treatments", "excel"].includes(m.kind) ? [] : JSON.parse(wr.photos(m.ws.code, m.kind, m.arg, m.season));
+    const paths = ["treatments", "excel"].includes(m.kind) ? [] : JSON.parse(wr.photos(m.ws.code, m.kind, m.arg, m.season, m.cfg ? JSON.stringify(m.cfg) : ""));
     const need = [...new Set(paths)].filter((p) => !py.FS.analyzePath(`/data/${p}`).exists);
     if (need.length) {
       const photos = await new Promise((res) => { waiting.set(m.id, res); self.postMessage({ id: m.id, need }); });
@@ -39,7 +39,7 @@ self.onmessage = async ({ data: m }) => {
       }
     }
     say(m.kind === "excel" ? "Generando la planilla Excel…" : "Generando el PDF…");
-    const path = wr.report(m.ws.code, m.kind, m.arg, m.season, !!m.plain);
+    const path = wr.report(m.ws.code, m.kind, m.arg, m.season, !!m.plain, m.cfg ? JSON.stringify(m.cfg) : "");
     const bytes = py.FS.readFile(path);
     py.FS.unlink(path);
     self.postMessage({ id: m.id, name: path.split("/").pop(), pdf: bytes.buffer }, [bytes.buffer]);

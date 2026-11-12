@@ -135,8 +135,8 @@
       <section class="card reports">
         <div class="row-h"><div class="label">INFORMES</div><select id="rseason" class="pill"></select></div>
         <p class="muted small">«PDF» descarga el mismo informe que genera la app. «Ver» lo abre en una pestaña nueva.</p>
-        <label class="skip" title="Sin logo, nombre de la app, productor ni autor: solo la información y las imágenes">
-          <input type="checkbox" id="rplain"> PDF simple (sin logo ni marca)</label>
+        <div class="rcfgrow"><div><b>Configuración de informes</b><div id="rcfgsum" class="muted small"></div></div>
+          <button id="rcfg" class="ghost">⚙ Configurar</button></div>
         <div class="rep">
           <div><b>Semanal</b><div class="muted small">Fotos, estado BBCH y notas de cada variedad en una semana.</div></div>
           <select id="rweek" class="pill"></select><span class="btns"><button class="ghost" data-rep="weekly" title="Ver en una pestaña nueva">Ver</button><button class="primary" data-pdf="weekly">PDF</button></span>
@@ -236,6 +236,14 @@
     </form>
   </dialog>
 
+  <dialog id="rcfgdlg" class="rcfg">
+    <form method="dialog" class="detail">
+      <div class="dhead"><div><h2>Configuración de informes</h2><div class="muted small">Se guarda en el ensayo y se sincroniza con la app.</div></div>
+        <button value="cancel" class="round" aria-label="Cerrar">✕</button></div>
+      <div id="rcfgbody" class="rcfgbody"></div>
+      <div class="actions"><span id="rcfgfoot" class="muted small"></span><button value="default" class="primary">Listo</button></div>
+    </form>
+  </dialog>
   <dialog id="pickmap">
     <form method="dialog" class="detail">
       <div class="dhead"><div><h2>Marcar en el mapa</h2><div class="muted small">Toque el lugar donde se tomó la muestra (el pin se puede arrastrar).</div></div>

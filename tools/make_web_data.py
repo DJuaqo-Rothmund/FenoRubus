@@ -82,7 +82,7 @@ def images():
 
 
 PY_MODULES = ["phenology", "crops", "database", "sync", "reporter", "pdf_report", "pdfdoc", "platform_utils",
-              "trial_stats", "measures_export", "workspaces", "geo"]
+              "trial_stats", "measures_export", "workspaces", "geo", "report_config"]
 
 
 def py_zip():
@@ -95,6 +95,10 @@ def py_zip():
         for name in sorted(os.listdir(os.path.join(ROOT, "templates"))):
             z.write(os.path.join(ROOT, "templates", name), f"templates/{name}")
         z.write(os.path.join(ROOT, "assets", "ui", "logo_line_report.png"), "assets/ui/logo_line_report.png")
+        maps = os.path.join(ROOT, "assets", "maps")      # planos de los predios (mapa de los muestreos)
+        for name in sorted(os.listdir(maps)):
+            if name.endswith(".json"):
+                z.write(os.path.join(maps, name), f"assets/maps/{name}")
     print(out, os.path.getsize(out) // 1024, "KB")
 
 

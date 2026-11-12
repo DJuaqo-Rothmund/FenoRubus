@@ -1,35 +1,65 @@
 {% extends "base.html" %}
-{% from "_macros.html" import geo_line, bbch_chip, photo, photo_pair, ai_line, attach_gallery, measures_block %}
+{% from "_macros.html" import geo_line, bbch_chip, photo, photo_pair, ai_line, attach_gallery, measures_block, progress_block %}
 {% block meta %}<span>{{ stats.done }}/{{ stats.varieties }} variedades con estado BBCH</span><span>{{ stats.photos }} fotos</span>{% endblock %}
 {% block content %}
+{% if summary %}
+<h2>Resumen ejecutivo</h2>
+<ul class="summary">{% for s in summary %}<li>{{ s }}</li>{% endfor %}</ul>
+{% endif %}
+
+{% if "bbch_table" in sec %}
 <h2>Resumen inter-varietal</h2>
 <div class="scroll-x">
 <table>
-  <thead><tr><th>Variedad</th><th>Estado fenológico</th><th>Estadio principal</th><th>Fotos</th><th>IA</th></tr></thead>
+  <thead><tr><th>Variedad</th><th>Estado fenológico</th><th>Estadio principal</th><th>Fotos</th>{% if "ai" in sec %}<th>IA</th>{% endif %}</tr></thead>
   <tbody>
   {% for c in cards %}
   <tr>
     <td><strong>{{ c.variety.name }}</strong></td>
     <td>{{ bbch_chip(c.code) }}</td>
     <td class="muted">{{ macro_name(c.code) if c.code is not none else '—' }}</td>
-    <td>{{ (1 if c.img.canopy else 0) + (1 if c.img.detail else 0) + (c.extras|length if c.extras else 0) }}</td>
-    <td class="small muted">{% if c.ai_code is not none %}BBCH {{ c.ai_code|code }}{% if c.ai_accepted == 1 %} ✓{% elif c.ai_accepted == 0 %} → corregida{% endif %}{% else %}—{% endif %}</td>
+    <td>{{ c.n_photos }}</td>
+    {% if "ai" in sec %}<td class="small muted">{% if c.ai_code is not none %}BBCH {{ c.ai_code|code }}{% if c.ai_accepted == 1 %} ✓{% elif c.ai_accepted == 0 %} → corregida{% endif %}{% else %}—{% endif %}</td>{% endif %}
   </tr>
   {% endfor %}
   </tbody>
 </table>
 </div>
+{% endif %}
 
+{% if change %}
+<h2>Cambio respecto de la semana anterior</h2>
+<p class="lead">Estado BBCH de {{ prev|wks }} y de esta semana; la diferencia en unidades BBCH.</p>
+<div class="scroll-x">
+<table>
+  <thead><tr><th>Variedad</th><th>{{ prev|wks }}</th><th>Esta semana</th><th>Cambio</th></tr></thead>
+  <tbody>
+  {% for r in change %}
+  <tr><td><strong>{{ r.variety.name }}</strong></td><td>{{ bbch_chip(r.before) }}</td><td>{{ bbch_chip(r.now) }}</td>
+    <td class="delta-txt {{ 'up' if r.delta and r.delta > 0 else ('down' if r.delta and r.delta < 0 else '') }}">{% if r.delta is none %}<span class="muted">—</span>{% elif r.delta > 0 %}▲ +{{ r.delta|num }}{% elif r.delta < 0 %}▼ {{ r.delta|num }}{% else %}= 0{% endif %}</td></tr>
+  {% endfor %}
+  </tbody>
+</table>
+</div>
+{% endif %}
+
+{% if "missing" in sec and missing %}
+<h2>Variedades sin registro</h2>
+<p class="lead">Lo que falta para dar por completo el registro de la semana.</p>
+<ul class="missing">{% for m in missing %}<li><strong>{{ m.variety.name }}</strong> <span class="muted">· falta {{ m.what }}</span></li>{% endfor %}</ul>
+{% endif %}
+
+{% if "photos" in sec %}
 <h2>Registro fotográfico por variedad</h2>
-<p class="lead">Foto general de canopia y foto de detalle lado a lado, con el estado fenológico asignado y las observaciones técnicas del evaluador.</p>
-<div class="grid-cards">
+<p class="lead">Foto general de canopia y foto de detalle lado a lado, con el estado fenológico asignado{% if "notes" in sec %} y las observaciones técnicas del evaluador{% endif %}.</p>
+<div class="grid-cards size-{{ photo_size }}">
 {% for c in cards %}
   <article class="card vcard">
     <div class="head">
       <h3>{{ c.variety.name }}</h3>
       {% if c.variety.code %}<span class="vcode">{{ c.variety.code }}</span>{% endif %}
     </div>
-    {{ photo_pair(c.img) }}
+    {% if c.img.canopy or c.img.detail or c.extras %}{{ photo_pair(c.img) }}{% endif %}
     {% if c.extras %}<div class="extras">{% for src in c.extras %}<img src="{{ src }}" alt="Foto adicional" loading="lazy">{% endfor %}</div>{% endif %}
     <div>{{ bbch_chip(c.code) }}</div>
     {{ ai_line(c) }}
@@ -39,8 +69,83 @@
   </article>
 {% endfor %}
 </div>
+{% endif %}
+
 {% if measures %}
 <h2>Mediciones de la semana</h2>
 {{ measures_block(measures) }}
+{% endif %}
+{% if progress %}{{ progress_block(progress) }}{% endif %}
+
+{% if evo %}
+{% with weeks=evo.weeks, heat=evo.heat, rows=evo.rows, compare=evo.compare, ranking=evo.ranking, max_abs=evo.max_abs, milestones=evo.milestones, gallery_label=evo.gallery_label, evo_sec=sec %}
+{% include "_evo.html" %}
+{% endwith %}
+{% endif %}
+
+{% if trial %}
+{% with weeks=trial.weeks, rows=trial.rows, tests=trial.tests, compare=trial.compare, ranking=trial.ranking, max_abs=trial.max_abs, milestones=trial.milestones, measures=trial.measures, treatments=trial.treatments, unified=trial.unified, unit_note=trial.unit_note, heat=trial.heat %}
+{% include "_trial.html" %}
+{% endwith %}
+{% endif %}
+{% if parcels %}
+{% with weeks=parcels.weeks, heat=parcels.heat, unified=parcels.unified %}
+{% include "_parcels.html" %}
+{% endwith %}
+{% endif %}
+
+{% if scout and scout.groups %}
+<h2>Plagas y enfermedades (AeonScout)</h2>
+<p class="lead">Registros de AeonScout de esta semana en este ensayo o predio.</p>
+{% for g in scout.groups %}
+<h3 class="sub">{{ g.name }} <span class="muted small">· {{ g.records|length }}</span></h3>
+<div class="scout-list">
+{% for r in g.records %}
+  <div class="scout-item">
+    {% if r.src %}<img src="{{ r.src }}" alt="" loading="lazy">{% else %}<div class="nophoto">—</div>{% endif %}
+    <div><strong>{{ r.species }}</strong>{% if r.scientific %} <em class="muted">{{ r.scientific }}</em>{% endif %}
+      <div class="small muted">{{ r.when }}{% if r.sector %} · {{ r.sector }}{% endif %}{% if r.stage %} · {{ r.stage }}{% endif %}{% if r.organ %} · {{ r.organ }}{% endif %}{% if r.abundance %} · {{ r.abundance }}{% endif %}</div>
+      {% if r.notes %}<div class="small">{{ r.notes }}</div>{% endif %}</div>
+  </div>
+{% endfor %}
+</div>
+{% endfor %}
+{% endif %}
+
+{% if yields and yields.rows %}
+<h2>Rendimiento estimado</h2>
+<p class="lead">Estimaciones de la temporada hasta esta semana{% if yields.mean is not none %} · promedio {{ yields.mean|num }} t/ha{% endif %}. «Conteo real» corrige la estimación por foto con frutos contados en planta.</p>
+{% if yields.map %}
+<figure class="mapbox">{{ yields.map.svg|safe }}
+<figcaption class="small muted">Color por t/ha: <span class="sw" style="background:#c62828"></span> menos ({{ yields.map.legend[0][0] }}) → <span class="sw" style="background:#f4b400"></span> → <span class="sw" style="background:#2e7d32"></span> más ({{ yields.map.legend[1][0] }}) · ● foto · ◆ foto + conteo real</figcaption></figure>
+{% endif %}
+<div class="scroll-x">
+<table>
+  <thead><tr><th>Fecha</th><th>Sector</th><th>Tipo</th><th>Fotos</th><th>t/ha (foto)</th><th>t/ha (real)</th></tr></thead>
+  <tbody>
+  {% for r in yields.rows %}
+  <tr><td>{{ r.when }}</td><td>{{ r.sector }}</td><td>{{ "Foto + conteo real" if r.kind == "real" else "Foto" }}</td><td>{{ r.photos }}</td>
+    <td>{{ r.photo_t|num }}</td><td>{{ r.real_t|num }}</td></tr>
+  {% endfor %}
+  </tbody>
+</table>
+</div>
+{% endif %}
+
+{% if notebook %}
+<h2>Cuaderno de campo de la semana</h2>
+{% for d in notebook %}
+<article class="card nb-day">
+  <h3>{{ d.day }}</h3>
+  {% if d.text %}<div class="notes">{{ d.text }}</div>{% endif %}
+  {{ attach_gallery(d.pics) }}
+</article>
+{% endfor %}
+{% endif %}
+
+{% if smap %}
+<h2>Mapa de los muestreos</h2>
+<figure class="mapbox">{{ smap.svg|safe }}
+<figcaption class="small muted">{% if "pheno" in smap.kinds %}<span class="dot" style="background:#2a78d6"></span> fenología {% endif %}{% if "scout" in smap.kinds %}<span class="dot" style="background:#9c3350"></span> AeonScout {% endif %}{% if "yield" in smap.kinds %}<span class="dot" style="background:#22261c"></span> rendimiento{% endif %}</figcaption></figure>
 {% endif %}
 {% endblock %}

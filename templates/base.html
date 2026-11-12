@@ -163,6 +163,19 @@ svg.cmp .hit { fill: transparent; }
 .cmp-tip .t-r .key { width: 12px; height: 3px; border-radius: 2px; background: var(--ctx); }
 .cmp-tip .t-r span:last-child { color: var(--ink-2); }
 .cmp-note { margin: 6px 0 0; }
+.summary { margin: 4px 0 8px; padding-left: 20px; line-height: 1.55; }
+.summary li { margin: 3px 0; }
+.missing { list-style: none; padding: 0; margin: 0; display: grid; gap: 4px; }
+.delta-txt.up { color: var(--pos); font-weight: 700; } .delta-txt.down { color: var(--neg); font-weight: 700; }
+.grid-cards.size-compact { grid-template-columns: repeat(auto-fill, minmax(min(100%, 260px), 1fr)); }
+.grid-cards.size-large { grid-template-columns: 1fr; }
+h3.sub { margin: 14px 0 6px; }
+.scout-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 300px), 1fr)); gap: 10px; }
+.scout-item { display: flex; gap: 10px; align-items: flex-start; }
+.scout-item img, .scout-item .nophoto { width: 84px; height: 64px; object-fit: cover; border-radius: 6px; flex: none; }
+.mapbox { margin: 8px 0 12px; } .mapbox svg { width: 100%; height: auto; max-height: 520px; background: var(--paper); border: 1px solid var(--rule, #ddd6c4); border-radius: 8px; }
+.sw, .dot { display: inline-block; width: 10px; height: 10px; border-radius: 2px; vertical-align: middle; margin: 0 2px; } .dot { border-radius: 50%; }
+.nb-day { padding: 12px 14px; margin: 8px 0; display: flex; flex-direction: column; gap: 8px; }
 </style>
 </head>
 <body>

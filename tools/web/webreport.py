@@ -81,14 +81,31 @@ def _week_number(db, start: str) -> int:
     return row["week_number"]
 
 
-def photos(code: str, kind: str, arg: str, season: int) -> str:
+def _cfg(db, cfg_json: str = "") -> dict:
+    import report_config as rc
+    if cfg_json:
+        try:
+            return rc.normalize(json.loads(cfg_json), rc.default(db))
+        except ValueError:
+            pass
+    return rc.load(db)
+
+
+def photos(code: str, kind: str, arg: str, season: int, cfg_json: str = "") -> str:
     """Rutas de fotos (relativas a la carpeta de datos) que usa el informe: se bajan antes."""
     db, _ = _dbs[_key(code)]
+    cfg = _cfg(db, cfg_json)
+    sec = set(cfg["sections"])
     q = ("SELECT p.path FROM photos p JOIN observations o ON o.id = p.observation_id "
-         "JOIN sampling_weeks w ON w.id = o.week_id WHERE p.is_primary = 1 AND w.season = ?")
+         "JOIN sampling_weeks w ON w.id = o.week_id WHERE w.season = ?")
+    if not (kind == "weekly" and cfg["all_photos"]):
+        q += " AND p.is_primary = 1"
     params: list = [season]
     if kind == "weekly":
-        q += " AND w.start_date = ?"
+        if "gallery" in sec:      # galería paralela: las semanas hasta esta
+            q += " AND w.start_date <= ?"
+        else:
+            q += " AND w.start_date = ?"
         params.append(arg)
     elif kind == "month":
         q += " AND substr(w.start_date, 1, 7) = ?"
@@ -108,6 +125,12 @@ def photos(code: str, kind: str, arg: str, season: int) -> str:
         paths += [r["path"] for r in db.query(
             "SELECT path FROM measure_entries WHERE week_id=? AND path IS NOT NULL "
             "UNION SELECT path FROM variety_attachments WHERE week_id=? AND path IS NOT NULL", (wid, wid))]
+        if "notebook" in sec:
+            import datetime as _dt
+            end = (_dt.date.fromisoformat(arg[:10]) + _dt.timedelta(days=6)).isoformat()
+            paths += [r["path"] for r in db.query(
+                "SELECT p.path FROM notebook_photos p JOIN notebook_entries e ON e.id = p.entry_id "
+                "WHERE e.day BETWEEN ? AND ?", (arg[:10], end))]
     elif kind == "variety":
         paths += [r["path"] for r in db.query(
             "SELECT path FROM variety_attachments WHERE variety_id=(SELECT id FROM varieties WHERE uid=?) "
@@ -115,11 +138,15 @@ def photos(code: str, kind: str, arg: str, season: int) -> str:
     return json.dumps([os.path.relpath(p, DATA) if os.path.isabs(p) else p for p in paths if p])
 
 
-def report(code: str, kind: str, arg: str, season: int, plain: bool = False) -> str:
-    """Genera el PDF y devuelve su ruta. plain: PDF simple (sin logo ni marca)."""
+def report(code: str, kind: str, arg: str, season: int, plain: bool = False, cfg_json: str = "") -> str:
+    """Genera el PDF y devuelve su ruta. plain: PDF simple (sin logo ni marca); cfg_json: la
+    «Configuración de informes» (si no, la del ensayo)."""
     db, _ = _dbs[_key(code)]
     r = ReportGenerator(db, os.path.join(DATA, "reports"))
-    r.plain_pdf = bool(plain)
+    cfg = _cfg(db, cfg_json)
+    if not cfg_json:
+        cfg["plain"] = bool(plain) or cfg["plain"]
+    r.set_config(cfg)
     if kind == "weekly":
         res = r.weekly(_week_id(db, arg), "pdf")
     elif kind == "month":

@@ -3538,3 +3538,74 @@ def test_manual_sync_opens_google_consent_when_needed(tmp_path):
         assert b._get_token() == "nuevo"
     assert asked == [False, False, True]
     assert dbk._INTERACTIVE_OK["on"] is False
+
+
+def test_report_config_templates_toggle_and_legacy(db):
+    import report_config as rc
+    db.set_setting("report_plain_pdf", True)
+    cfg = rc.load(db)                       # sin configurar: el informe de siempre + casillas antiguas
+    assert cfg["sections"] == rc.CLASSIC and cfg["plain"] and cfg["template"] == ""
+    full = rc.apply_template(cfg, "completo")
+    assert full["sections"] == rc.SECTION_KEYS and full["template"] == "completo"
+    off = rc.toggle(full, "photos")         # sin registro fotográfico, sin sus partes
+    assert not {"photos", "notes", "ai", "attachments", "gps"} & set(off["sections"])
+    assert "photos" in rc.toggle(off, "notes")["sections"]
+    saved = rc.save(db, rc.apply_template(cfg, "resumido"))
+    assert rc.load(db) == saved and db.get_setting("report_photo_mode") == "both"
+    items = rc.save_template(db, "Gerencia", full)
+    assert rc.apply_template(saved, "u:0", items)["sections"] == rc.SECTION_KEYS
+    assert rc.delete_template(db, "Gerencia") == []
+    assert "Resumido" in rc.summary(saved)
+
+
+def test_weekly_report_all_sections_html_pdf_and_import(db, tmp_path):
+    import datetime as _d
+    import report_config as rc
+    from data_transfer import import_reports
+    from rendimiento import YieldDB
+    from scout import ScoutDB
+    pairs = _fill_week(db, tmp_path)
+    weeks = sorted({w["id"] for _v, w in pairs})
+    week = db.get_week(weeks[-1])
+    start = week["start_date"][:10]
+    e = db.note_for_day(start, create=True)
+    db.save_note_text(e["id"], "Riego normal; revisar trips.")
+    sdb = ScoutDB(str(tmp_path / "scout"))
+    sp = sdb.species("plagas")[0]
+    sdb.add_record("plagas", sp["id"], place_code="", latitude=-39.547, longitude=-72.46,
+                   taken_at=start + "T10:00:00")
+    ydb = YieldDB(str(tmp_path / "y"), "frambuesa")
+    sid = ydb.new_set({"kind": "predio", "name": "X", "code": ""}, sector="Sector 1", taken_on=start,
+                      fruit_g=4, plants_ha=3000)
+    ydb.update_set(sid, latitude=-39.548, longitude=-72.461)
+    rep = ReportGenerator(db, str(tmp_path / "out"))
+    rep.scout_db, rep.yield_db = sdb, ydb
+    rep.set_config(rc.apply_template(rc.default(), "completo"))
+    html = open(rep.weekly(week["id"]).path, encoding="utf-8").read()
+    for title in ("Resumen ejecutivo", "Cambio respecto de la semana anterior", "Registro fotográfico",
+                  "Matriz fenológica", "Hitos fenológicos", "Galería paralela", "AeonScout",
+                  "Rendimiento estimado", "Cuaderno de campo de la semana", "revisar trips",
+                  "Mapa de los muestreos"):
+        assert title in html, title
+    big = os.path.getsize(rep.weekly(week["id"], "pdf").path)
+    rep.set_config(rc.apply_template(rc.default(), "resumido"))      # sin fotos ni notas visibles
+    html2 = open(rep.weekly(week["id"]).path, encoding="utf-8").read()
+    assert "Registro fotográfico" not in html2 and "Resumen ejecutivo" in html2
+    slim = rep.weekly(week["id"], "pdf").path
+    assert os.path.getsize(slim) < big
+    fresh = Database(str(tmp_path / "nuevo.sqlite3"))
+    res = import_reports(fresh, [slim])          # los datos incrustados siguen completos
+    assert res.bbch >= 1, res.summary()
+    fresh.close()
+    del _d
+
+
+def test_weekly_zip_all_weeks(db, tmp_path):
+    import zipfile
+    pairs = _fill_week(db, tmp_path)
+    rep = ReportGenerator(db, str(tmp_path / "out"))
+    seen = []
+    res = rep.weekly_zip(2026, progress=lambda i, n, w: seen.append((i, n)))
+    names = zipfile.ZipFile(res.path).namelist()
+    n = len({w["id"] for _v, w in pairs})
+    assert len(names) == n and all(x.endswith(".pdf") for x in names) and seen[-1] == (n - 1, n)

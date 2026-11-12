@@ -214,6 +214,13 @@ class PDFDoc:
     def circle(self, cx, cy, r, fill=None, stroke=None, lw: float = 0.6):
         self.rect(cx - r, cy - r, 2 * r, 2 * r, fill, stroke, lw, radius=r)
 
+    def polygon(self, pts, fill=None, stroke=None, lw: float = 0.6):
+        """Polígono cerrado (mapas de los sectores)."""
+        if len(pts) < 3 or (fill is None and stroke is None):
+            return
+        path = " ".join(f"{x:.2f} {PAGE_H - y:.2f} {'m' if i == 0 else 'l'}" for i, (x, y) in enumerate(pts))
+        self.ops.append(f"q {self._color(fill, stroke, lw)} 1 j {path} h {self._paint(fill, stroke)} Q")
+
     # ------------------------------------------------------------ imágenes
     def add_image(self, src, max_px: int = 1000, name: str | None = None) -> tuple[str, int, int] | None:
         """Registra una foto (ruta o bytes); devuelve (nombre, ancho, alto) o None si falla."""

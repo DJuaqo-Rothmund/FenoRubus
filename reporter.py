@@ -406,6 +406,8 @@ class ReportGenerator:
     PHOTO_MODES = {"both": "Full (general y detalle)", "detail": "Solo detalle", "canopy": "Solo general"}
 
     def _kinds(self) -> tuple[str, ...]:
+        if self.photo_mode == "none":
+            return ()
         return ("canopy", "detail") if self.photo_mode not in ("detail", "canopy") else (self.photo_mode,)
 
     def _extras(self, obs: dict | None, images: ImageStore) -> list[str]:
@@ -524,6 +526,7 @@ class ReportGenerator:
         if obs.get("latitude") is not None and obs.get("longitude") is not None:
             import geo
             geo_ = {"text": geo.fmt(obs["latitude"], obs["longitude"]),
+                    "lat": obs["latitude"], "lon": obs["longitude"],
                     "link": geo.osm_link(obs["latitude"], obs["longitude"]),
                     "acc": obs.get("gps_accuracy"), "source": obs.get("gps_source") or ""}
         return {"code": obs["bbch_code"], "notes": obs["notes"] or "",
@@ -558,25 +561,375 @@ class ReportGenerator:
         return rows
 
     # ------------------------------------------------------ 1. semanal
+    config: dict | None = None   # report_config (None: el informe de siempre, con las casillas antiguas)
+    scout_db = None              # AeonScout del cultivo (plagas, enfermedades y malezas)
+    yield_db = None              # estimaciones de rendimiento del cultivo
+
+    def set_config(self, cfg: dict | None) -> dict:
+        """Usa la «Configuración de informes» (plantilla, formato y secciones)."""
+        import report_config as rc
+        self.config = rc.normalize(cfg)
+        self.plain_pdf = self.config["plain"]
+        self.include_all_photos = self.config["all_photos"]
+        self.photo_mode = self.config["photo_mode"]
+        return self.config
+
+    def _cfg(self) -> dict:
+        import report_config as rc
+        if self.config is not None:
+            return self.config
+        return rc.normalize({"photo_mode": self.photo_mode, "all_photos": self.include_all_photos,
+                             "plain": self.plain_pdf})
+
     def weekly(self, week_id: int, package: str = "html") -> ReportResult:
+        cfg = self._cfg()
+        sec = set(cfg["sections"])
         week = self.db.get_week(week_id)
+        season = week["season"]
         images = self._images(package)
+        show_photos = "photos" in sec
         cards = []
         for row in self.db.week_overview(week_id):
-            cards.append({"variety": row["variety"], **self._obs_ctx(row["observation"]),
-                          "img": self._photo_ctx(row["photos"], images),
-                          "extras": self._extras(row["observation"], images),
-                          "attachments": self._attachments(row["variety"]["id"], week_id, images)})
+            obs = row["observation"]
+            card = {"variety": row["variety"], **self._obs_ctx(obs),
+                    "img": self._photo_ctx(row["photos"], images) if show_photos else {"canopy": None, "detail": None},
+                    "extras": self._extras(obs, images) if show_photos else [],
+                    "attachments": self._attachments(row["variety"]["id"], week_id, images)
+                    if show_photos and "attachments" in sec else [],
+                    "n_photos": len(row["photos"]) + (len([p for p in self.db.list_photos(obs["id"])
+                                                           if not p["is_primary"]]) if obs else 0),
+                    "missing": _missing_items(obs, row["photos"])}
+            card["raw_notes"] = card["notes"]      # para «Importar informes», aunque no se muestren
+            if "notes" not in sec:
+                card["notes"] = ""
+            if "ai" not in sec:
+                card["ai_code"] = None
+            if "gps" not in sec:
+                card["geo"] = None
+            cards.append(card)
         done = sum(1 for c in cards if c["code"] is not None)
+        # Semanas de la temporada hasta esta (sin las vacías del comienzo).
+        upto = [w for w in self.db.list_weeks(season, include_skipped=False)
+                if w["week_number"] <= week["week_number"]]
+        matrix = self.db.phenology_matrix(season)
+        used = [w for w in upto if any(wn == w["week_number"] for (_v, wn) in matrix)]
+        if used:
+            upto = [w for w in upto if w["week_number"] >= used[0]["week_number"]]
+        prev = next((w for w in reversed(upto) if w["week_number"] < week["week_number"]), None)
+
+        change = []
+        if prev is not None and ({"change", "summary"} & sec):
+            for c in cards:
+                o = self.db.get_observation(c["variety"]["id"], prev["id"])
+                before = o["bbch_code"] if o else None
+                delta = (round(ph.bbch_value(c["code"]) - ph.bbch_value(before), 1) + 0.0
+                         if before is not None and c["code"] is not None else None)
+                change.append({"variety": c["variety"], "before": before, "now": c["code"], "delta": delta})
+        missing = [{"variety": c["variety"], "what": ", ".join(c["missing"])} for c in cards if c["missing"]]
+
+        evo = None
+        if {"matrix", "chart", "precocity", "milestones", "gallery"} & sec and upto:
+            evo = self._matrix_ctx(season, upto, self._images(package, max_side=360),
+                                   gallery="gallery" in sec)
+            if not any(c["code"] is not None for r in evo["heat"] for c in r["cells"]):
+                evo = None
+            else:
+                for r in evo["rows"]:            # galería: las últimas 8 semanas (una fila)
+                    r["gallery"] = r["gallery"][-8:]
+        trial = None
+        if {"treatments", "parcels"} & sec:
+            try:
+                trial = self._treatments_ctx(season, upto=week["week_number"])
+            except (ValueError, ZeroDivisionError, KeyError):
+                trial = None
+        start = _dt.date.fromisoformat(week["start_date"][:10])
+        end = start + _dt.timedelta(days=6)
+        scout = self._scout_ctx(start, end, images) if "scout" in sec else None
+        yields = self._yield_ctx(season, end) if {"yield", "summary", "map"} & sec else None
+        notebook = self._notebook_ctx(start, end, images) if "notebook" in sec else []
+        plan = self._plan()
+        smap = self._sampling_map(cards, scout, yields, plan) if "map" in sec else None
+        if yields is not None:
+            yields["map"] = self._yield_map(yields, plan) if "yield" in sec else None
+        stats = {"varieties": len(cards), "done": done,
+                 "photos": sum(c["n_photos"] for c in cards)}
+        summary = self._summary(cards, change, missing, prev, scout, yields, stats) if "summary" in sec else []
+
         title = f"Reporte semanal · {ph.week_title(week)}"
         return self._render(
             "weekly.html", "semanal_{1}_S{0:02d}".format(*ph.iso_week(week["start_date"]))
             + ("-extra" if ph.is_extra(week) else ""),
-            "semanal", title, images, package, week=week, cards=cards,
-            measures=self._measures(images, week_id=week_id),
-            subtitle=f"{week['label']} · {ph.week_title(week)}",
-            stats={"varieties": len(cards), "done": done,
-                   "photos": sum(bool(c["img"]["canopy"]) + bool(c["img"]["detail"]) for c in cards)})
+            "semanal", title, images, package, week=week, cards=cards, sec=sec, photo_mode=cfg["photo_mode"],
+            photo_size=cfg["photo_size"], prev=prev, change=change, missing=missing, summary=summary,
+            evo=evo, trial=trial if trial and "treatments" in sec else None,
+            parcels=trial if trial and "parcels" in sec and not trial.get("unified") else None,
+            progress=self._progress(season, upto) if "progress" in sec and upto else [],
+            scout=scout, yields=yields if "yield" in sec else None, notebook=notebook, smap=smap,
+            measures=self._measures(images, week_id=week_id) if "measures" in sec else [],
+            subtitle=f"{week['label']} · {ph.week_title(week)}", stats=stats)
+
+    def weekly_zip(self, season: int, progress=None) -> ReportResult:
+        """Todos los semanales de la temporada con datos, en un ZIP (un PDF por semana).
+        Si una semana falla, sigue con las demás y lo anota en «errores.txt»."""
+        import zipfile
+        weeks = [w for w in self.db.list_weeks(season, include_skipped=False)
+                 if self.db.query_one("SELECT 1 AS x FROM observations WHERE week_id=? AND "
+                                      "(bbch_code IS NOT NULL OR id IN (SELECT observation_id FROM photos)) "
+                                      "LIMIT 1", (w["id"],))]
+        if not weeks:
+            raise ValueError("No hay semanas con datos en esta temporada.")
+        code = getattr(self.db, "code", "") or ""
+        path = os.path.join(self.out_dir, f"semanal_{code + '_' if code else ''}{season}_todas.zip")
+        errors, n = [], 0
+        tmp = path + ".part"
+        with zipfile.ZipFile(tmp, "w", zipfile.ZIP_STORED) as z:     # los PDF ya vienen comprimidos
+            for i, w in enumerate(weeks):
+                if progress:
+                    progress(i, len(weeks), w)
+                try:
+                    res = self.weekly(w["id"], "pdf")
+                    z.write(res.path, os.path.basename(res.path))
+                    n += 1
+                except Exception as exc:  # noqa: BLE001
+                    errors.append(f"{ph.week_title(w)} ({w['label']}): {exc}")
+            if errors:
+                z.writestr("errores.txt", "No se pudieron generar estas semanas:\n\n" + "\n".join(errors) + "\n")
+        if not n:
+            os.remove(tmp)
+            raise ValueError("No se pudo generar ninguna semana: " + errors[0])
+        os.replace(tmp, path)
+        self.db.log("create", "report", None, f"semanal: {os.path.basename(path)} ({n} semanas)")
+        return ReportResult(path, f"Todos los semanales · {ph.season_title(season)}", "semanal",
+                            max(1, os.path.getsize(path) // 1024))
+
+    # Secciones del semanal ---------------------------------------------------
+    def _summary(self, cards, change, missing, prev, scout, yields, stats) -> list[str]:
+        """Resumen ejecutivo: 3 a 6 frases con lo más importante de la semana."""
+        out = []
+        n, done = stats["varieties"], stats["done"]
+        if n:
+            out.append(f"{done} de {n} {self._who(n)} con estado BBCH esta semana; {stats['photos']} fotos.")
+        coded = [c for c in cards if c["code"] is not None]
+        if coded:
+            macros: dict = {}
+            for c in coded:
+                macros.setdefault(ph.MACRO_STAGES.get(ph.macro_of(c["code"]), ""), []).append(c)
+            top = max(macros.items(), key=lambda kv: len(kv[1]))
+            if top[0]:
+                out.append(f"Estadio predominante: {top[0].lower()} ({len(top[1])} de {len(coded)}).")
+            hi = max(coded, key=lambda c: ph.bbch_value(c["code"]))
+            lo = min(coded, key=lambda c: ph.bbch_value(c["code"]))
+            if hi is not lo and ph.bbch_value(hi["code"]) != ph.bbch_value(lo["code"]):
+                out.append(f"Más adelantada: {hi['variety']['name']} (BBCH {ph.code_str(hi['code'])}); "
+                           f"más atrasada: {lo['variety']['name']} (BBCH {ph.code_str(lo['code'])}).")
+        moved = [c for c in change if c["delta"] is not None]
+        if moved and prev is not None:
+            avg = sum(c["delta"] for c in moved) / len(moved)
+            best = max(moved, key=lambda c: c["delta"])
+            txt = f"Respecto de {ph.week_short(prev)}: avance medio {self._num(avg)} unidades BBCH"
+            if best["delta"] > 0:
+                txt += f"; la que más avanzó, {best['variety']['name']} (+{self._num(best['delta'])})"
+            out.append(txt + ".")
+        if missing:
+            names = ", ".join(m["variety"]["name"] for m in missing[:6]) + ("…" if len(missing) > 6 else "")
+            out.append(f"Sin registro completo: {names}.")
+        if scout and scout["records"]:
+            one = {"plagas": "plaga", "enfermedades": "enfermedad", "malezas": "maleza"}
+            parts = [f"{len(g['records'])} {one[g['key']] if len(g['records']) == 1 else g['key']}"
+                     for g in scout["groups"]]
+            out.append("AeonScout: " + ", ".join(parts) + " registrados en la semana.")
+        if yields and yields["mean"] is not None:
+            out.append(f"Rendimiento estimado: {self._num(yields['mean'])} t/ha en promedio "
+                       f"({len(yields['rows'])} {'estimación' if len(yields['rows']) == 1 else 'estimaciones'}).")
+        return out
+
+    def _who(self, n: int) -> str:
+        if getattr(self.db, "is_predio", False):
+            return "sectores" if n != 1 else "sector"
+        return "variedades" if n != 1 else "variedad"
+
+    def _code(self) -> str:
+        return (getattr(self.db, "code", "") or "").upper()
+
+    def _scout_ctx(self, start, end, images) -> dict | None:
+        sdb = self.scout_db
+        if sdb is None:
+            return None
+        code = self._code()
+        try:
+            rows = sdb.query("SELECT r.*, s.name AS species, s.scientific FROM scout_records r "
+                             "JOIN scout_species s ON s.id = r.species_id "
+                             "WHERE substr(r.taken_at, 1, 10) BETWEEN ? AND ? ORDER BY r.taken_at",
+                             (start.isoformat(), end.isoformat()))
+        except Exception:  # noqa: BLE001 (base de AeonScout antigua o dañada: sin la sección)
+            return None
+        rows = [r for r in rows if not code or (r.get("place_code") or "").upper() in ("", code)]
+        if not rows:
+            return {"records": [], "groups": []}
+        names = {"plagas": "Plagas", "enfermedades": "Enfermedades", "malezas": "Malezas"}
+        groups = []
+        for key, name in names.items():
+            recs = []
+            for r in rows:
+                if r["section"] != key:
+                    continue
+                pics = sdb.photos(r["id"])
+                recs.append({**r, "src": images.src(pics[0]["path"], 360) if pics else None,
+                             "when": ph.format_date_es(_dt.date.fromisoformat(r["taken_at"][:10]), False)})
+            if recs:
+                groups.append({"key": key, "name": name, "records": recs})
+        return {"records": rows, "groups": groups}
+
+    def _yield_ctx(self, season: int, end) -> dict | None:
+        ydb = self.yield_db
+        if ydb is None:
+            return None
+        code = self._code()
+        first = self.db.season_start(season)
+        try:
+            sets = ydb.sets()
+        except Exception:  # noqa: BLE001
+            return None
+        import rendimiento as rd
+        sets = [s for s in sets if (s.get("place_code") or "").upper() == code
+                and first.isoformat() <= (s.get("taken_on") or "")[:10] <= end.isoformat()]
+        rows = []
+        for s in sets:
+            t = rd.best_t_ha(s)
+            rows.append({"set": s, "sector": s.get("sector") or "—", "kind": s.get("kind") or "foto",
+                         "when": ph.format_date_es(_dt.date.fromisoformat(s["taken_on"][:10]), False),
+                         "t_ha": t, "photo_t": s.get("t_ha"), "real_t": s.get("real_t_ha"),
+                         "photos": s.get("photos") or 0})
+        vals = [r["t_ha"] for r in rows if r["t_ha"] is not None]
+        return {"rows": rows, "sets": sets, "mean": sum(vals) / len(vals) if vals else None,
+                "lo": min(vals) if vals else None, "hi": max(vals) if vals else None}
+
+    def _notebook_ctx(self, start, end, images) -> list[dict]:
+        try:
+            days = [d for d in self.db.note_days() if start.isoformat() <= d["day"][:10] <= end.isoformat()]
+        except Exception:  # noqa: BLE001 (base sin cuaderno)
+            return []
+        out = []
+        for d in sorted(days, key=lambda d: d["day"]):
+            text = "\n\n".join(p["text"].strip() for p in self.db.note_pages(d) if p["text"].strip())
+            pics = [{"src": src, "caption": p.get("caption") or ""} for p in d["photos"]
+                    for src in [images.src(p["path"], 480)] if src]
+            if text or pics:
+                out.append({"day": ph.format_date_es(_dt.date.fromisoformat(d["day"][:10])),
+                            "text": text, "pics": pics})
+        return out
+
+    def _plan(self) -> dict | None:
+        code = self._code()
+        if not code:
+            return None
+        path = resource_path(os.path.join("assets", "maps", f"{code}.json"))
+        try:
+            with open(path, encoding="utf-8") as f:
+                plan = json.load(f)
+        except (OSError, ValueError):
+            return None
+        return plan if plan.get("geo") and plan.get("sectors") else None
+
+    def _yield_map(self, yields: dict, plan: dict | None) -> dict | None:
+        """Sectores del predio pintados por t/ha (rojo → amarillo → verde) y los puntos."""
+        if not plan or not yields["sets"]:
+            return None
+        import rendimiento as rd
+        lay = rd.map_layers(yields["sets"], plan)
+        if not lay["sectors"] and not lay["points"]:
+            return None
+        fills = {}
+        for sid, d in lay["sectors"].items():
+            r, g, b = rd.yield_color(d["t_ha"], lay["lo"], lay["hi"])
+            fills[sid] = {"color": "#%02x%02x%02x" % tuple(int(round(v * 255 if v <= 1 else v)) for v in (r, g, b)),
+                          "label": self._num(d["t_ha"])}
+        pts = [{"x": p["x"], "y": p["y"], "kind": "real" if p["kind"] == "real" else "foto"} for p in lay["points"]]
+        return self._map(plan, fills, pts, legend=[(self._num(lay["lo"]), "#c62828"),
+                                                    (self._num(lay["hi"]), "#2e7d32")])
+
+    def _sampling_map(self, cards, scout, yields, plan) -> dict | None:
+        """Dónde se muestreó esta semana: fenología (GPS de cada registro), AeonScout y
+        rendimiento, sobre el plano del predio (o, sin plano, en metros relativos)."""
+        pts = []
+        for c in cards:
+            if c.get("geo") is None:
+                continue
+            o = self._latlon(c)
+            if o:
+                pts.append({"lat": o[0], "lon": o[1], "kind": "pheno", "label": c["variety"]["name"]})
+        for r in (scout or {}).get("records") or []:
+            if r.get("latitude") is not None and r.get("longitude") is not None:
+                pts.append({"lat": r["latitude"], "lon": r["longitude"], "kind": "scout", "label": r["species"]})
+        for s in (yields or {}).get("sets") or []:
+            if s.get("latitude") is not None and s.get("longitude") is not None:
+                pts.append({"lat": s["latitude"], "lon": s["longitude"], "kind": "yield", "label": s.get("sector") or ""})
+        if not pts:
+            return None
+        if plan:
+            g = plan["geo"]
+            for p in pts:
+                p["x"], p["y"] = p["lon"] * g["kx"] - g["x0"], p["lat"] * g["ky"] - g["y0"]
+            return self._map(plan, {}, pts)
+        # Sin plano: metros alrededor del primer punto.
+        lat0 = pts[0]["lat"]
+        kx, ky = 111320 * math.cos(math.radians(lat0)), 110574
+        for p in pts:
+            p["x"], p["y"] = p["lon"] * kx, p["lat"] * ky
+        x0, y0 = min(p["x"] for p in pts), min(p["y"] for p in pts)
+        for p in pts:
+            p["x"], p["y"] = p["x"] - x0 + 20, p["y"] - y0 + 20
+        w = max(max(p["x"] for p in pts) + 20, 80)
+        h = max(max(p["y"] for p in pts) + 20, 60)
+        return self._map({"w": w, "h": h, "sectors": []}, {}, pts)
+
+    @staticmethod
+    def _latlon(card) -> tuple[float, float] | None:
+        g = card.get("geo") or {}
+        return (g["lat"], g["lon"]) if g.get("lat") is not None and g.get("lon") is not None else None
+
+    @staticmethod
+    def _map(plan: dict, fills: dict, pts: list[dict], legend=None) -> dict:
+        """Mapa listo para dibujar (HTML con SVG y PDF): polígonos de los sectores y puntos,
+        en un cuadro de plan["w"] × plan["h"] metros (y hacia arriba = norte)."""
+        polys = []
+        for s in plan.get("sectors") or []:
+            f = fills.get(s["id"])
+            for ring in s.get("parts") or []:
+                polys.append({"id": s["id"], "ring": ring, "fill": f["color"] if f else None})
+        labels = []
+        for s in plan.get("sectors") or []:
+            f = fills.get(s["id"])
+            if not f or not s.get("parts"):
+                continue
+            ring = max(s["parts"], key=len)
+            labels.append({"x": sum(ring[0::2]) / (len(ring) / 2), "y": sum(ring[1::2]) / (len(ring) / 2),
+                           "text": f["label"]})
+        W, H = float(plan["w"]), float(plan["h"])
+        parts = []
+        for p in polys:
+            xy = " ".join(f"{p['ring'][i]:.1f},{H - p['ring'][i + 1]:.1f}" for i in range(0, len(p["ring"]) - 1, 2))
+            parts.append(f'<polygon points="{xy}" fill="{p["fill"] or "#eef0e6"}" stroke="#7d8272" '
+                         f'stroke-width="{W / 600:.2f}"/>')
+        r = max(W, H) / 110
+        colors = {"pheno": "#2a78d6", "scout": "#9c3350", "yield": "#22261c", "foto": "#22261c", "real": "#22261c"}
+        for p in pts:
+            x, y, col = p["x"], H - p["y"], colors.get(p["kind"], "#22261c")
+            if p["kind"] == "real":
+                parts.append(f'<polygon points="{x:.1f},{y - r * 1.3:.1f} {x + r * 1.3:.1f},{y:.1f} '
+                             f'{x:.1f},{y + r * 1.3:.1f} {x - r * 1.3:.1f},{y:.1f}" fill="#fff" stroke="{col}" '
+                             f'stroke-width="{r / 2.5:.2f}"/>')
+            else:
+                parts.append(f'<circle cx="{x:.1f}" cy="{y:.1f}" r="{r:.1f}" fill="{col}" stroke="#fff" '
+                             f'stroke-width="{r / 3:.2f}"/>')
+        for lb in labels:
+            parts.append(f'<text x="{lb["x"]:.1f}" y="{H - lb["y"]:.1f}" font-size="{r * 2.2:.1f}" '
+                         f'text-anchor="middle" dominant-baseline="middle" font-weight="700" fill="#22261c" stroke="#fff" stroke-width="{r / 2.2:.2f}" paint-order="stroke">'
+                         f'{escape(lb["text"])}</text>')
+        svg = (f'<svg class="map" viewBox="0 0 {W:.1f} {H:.1f}" xmlns="http://www.w3.org/2000/svg" '
+               f'role="img" aria-label="Mapa">{"".join(parts)}</svg>')
+        return {"w": W, "h": H, "polys": polys, "labels": labels, "points": pts, "svg": svg,
+                "legend": legend or [], "kinds": sorted({p["kind"] for p in pts})}
 
     # ---------------------------------------------- 2. periodo / mensual
     def period(self, season: int, week_from: int, week_to: int, package: str = "html",
@@ -667,9 +1020,24 @@ class ReportGenerator:
             weeks = [w for w in weeks if w["week_number"] <= week_to]
         if not weeks:
             raise ValueError("No hay semanas de muestreo registradas en la temporada.")
+        images = self._images(package, max_side=360)
+        ctx = self._matrix_ctx(season, weeks, images)
+        rows, heat = ctx["rows"], ctx["heat"]
+        title = "Matriz comparativa inter-varietal"
+        return self._render(
+            "matrix.html", f"matriz_{season}", "matriz", title, images, package, **ctx,
+            progress=self._progress(season, weeks),
+            subtitle=f"Avance fenológico relativo · {ph.season_title(season)} · "
+                     f"Semanas {ph.week_of_year(weeks[0])}–{ph.week_of_year(weeks[-1])}",
+            data_json=json.dumps([{"variedad": r["variety"]["name"],
+                                   "bbch": [c["code"] for c in h["cells"]]}
+                                  for r, h in zip(rows, heat)], ensure_ascii=False).replace("</", "<\\/"))
+
+    def _matrix_ctx(self, season: int, weeks: list[dict], images: ImageStore, gallery: bool = True) -> dict:
+        """Matriz, gráfico, precocidad, hitos y galería paralela (informe «matriz» y secciones
+        del semanal)."""
         varieties = self.db.pheno_units()
         heat = self._heatmap(season, weeks, varieties)
-        images = self._images(package, max_side=360)
 
         # Precocidad relativa: diferencia media vs. el promedio de las variedades por semana.
         week_means = {}
@@ -688,43 +1056,47 @@ class ReportGenerator:
             for code, name in MILESTONES:
                 hit = next((p for p in sorted(pts) if ph.bbch_value(p[1]) >= ph.bbch_value(code)), None)
                 hits.append(self._wlabel(season)(hit[0]) if hit else None)
-            gallery = []
-            for c in r["cells"]:
+            gal = []
+            for c in (r["cells"] if gallery else []):
                 obs = self.db.get_observation(r["variety"]["id"], c["week"]["id"])
                 photos = self.db.get_photos(obs["id"]) if obs else {}
-                gallery.append({"week": c["week"], "code": c["code"],
+                gal.append({"week": c["week"], "code": c["code"],
                                 "src": images.src(photos[gk]["path"]) if gk in photos else None})
             rows.append({"variety": r["variety"], "delta": delta, "hits": hits,
                          "last": pts[-1][1] if pts else None, "pts": pts,
                          "spark": svg_progress(pts, wmin, max(wmax, wmin + 1), 160, 40, spark=True,
                                                wlabel=self._wlabel(season))
-                         if pts else "", "gallery": gallery})
+                         if pts else "", "gallery": gal})
         max_abs = max([abs(r["delta"]) for r in rows if r["delta"] is not None] or [1.0]) or 1.0
         ranking = sorted([r for r in rows if r["delta"] is not None], key=lambda r: -r["delta"])
-        title = "Matriz comparativa inter-varietal"
-        return self._render(
-            "matrix.html", f"matriz_{season}", "matriz", title, images, package,
-            weeks=weeks, heat=heat, rows=rows, compare=self._compare(heat, weeks), ranking=ranking, max_abs=max_abs,
-            progress=self._progress(season, weeks),
-            milestones=MILESTONES,
-            gallery_label="fotos generales" if gk == "canopy" else "fotos de detalle",
-            subtitle=f"Avance fenológico relativo · {ph.season_title(season)} · "
-                     f"Semanas {ph.week_of_year(weeks[0])}–{ph.week_of_year(weeks[-1])}",
-            data_json=json.dumps([{"variedad": r["variety"]["name"],
-                                   "bbch": [c["code"] for c in h["cells"]]}
-                                  for r, h in zip(rows, heat)], ensure_ascii=False).replace("</", "<\\/"))
+        return dict(weeks=weeks, heat=heat, rows=rows, compare=self._compare(heat, weeks), ranking=ranking,
+                    max_abs=max_abs, milestones=MILESTONES,
+                    gallery_label="fotos generales" if gk == "canopy" else "fotos de detalle")
 
 
     # ------------------------------------- 5. tratamientos × repeticiones
     def treatments(self, season: int, package: str = "html") -> ReportResult:
         """Compara tratamientos: promedio de las repeticiones por semana, ANOVA (bloques =
         repeticiones), letras LSD, hitos fenológicos y mediciones numéricas."""
+        ctx = self._treatments_ctx(season)
+        weeks, nt, nr = ctx["weeks"], ctx["n_t"], ctx["n_r"]
+        images = self._images(package, max_side=360)
+        title = "Comparación de tratamientos"
+        return self._render(
+            "treatments.html", f"tratamientos_{season}", "tratamientos", title, images, package, **ctx,
+            subtitle=f"{nt} tratamientos × {nr} repeticiones · {ph.season_title(season)} · "
+                     f"Semanas {ph.week_of_year(weeks[0])}–{ph.week_of_year(weeks[-1])}")
+
+    def _treatments_ctx(self, season: int, upto: int | None = None) -> dict:
+        """Datos de la comparación de tratamientos (hasta la semana «upto», si se da)."""
         import trial_stats as st
         from measures_export import as_number
         trts = self.db.list_treatments()
         if not trts or not any(t["parcels"] for t in trts):
             raise ValueError("Este ensayo no tiene tratamientos ni parcelas (Ajustes › Parcelas).")
         weeks = self.db.list_weeks(season, include_skipped=False)
+        if upto is not None:
+            weeks = [w for w in weeks if w["week_number"] <= upto]
         if not weeks:
             raise ValueError("No hay semanas de muestreo registradas en la temporada.")
         matrix = self.db.phenology_matrix(season)
@@ -860,11 +1232,8 @@ class ReportGenerator:
             if blocks:
                 measures.append({"name": m["name"], "columns": cols, "blocks": blocks})
 
-        images = self._images(package, max_side=360)
         nt, nr = self.db.trial_size()
-        title = "Comparación de tratamientos"
-        return self._render(
-            "treatments.html", f"tratamientos_{season}", "tratamientos", title, images, package,
+        return dict(
             weeks=weeks, rows=rows, tests=tests, compare=compare, ranking=ranking, max_abs=max_abs,
             milestones=milestones, measures=measures, treatments=trts, unified=unified and not per_trt,
             unit_note=("Fenología unificada en " + str(len(cfg["names"])) + " punto(s) por tratamiento ("
@@ -872,9 +1241,7 @@ class ReportGenerator:
                        + "): hacen de repeticiones en la comparación fenológica; las mediciones "
                          "siguen por parcela." if per_trt else ""),
             heat=self._heatmap(season, weeks, units if unified else parcels),
-            n_t=nt or len(trts), n_r=nr,
-            subtitle=f"{nt or len(trts)} tratamientos × {nr} repeticiones · {ph.season_title(season)} · "
-                     f"Semanas {ph.week_of_year(weeks[0])}–{ph.week_of_year(weeks[-1])}")
+            n_t=nt or len(trts), n_r=nr)
 
 
 # ===========================================================================

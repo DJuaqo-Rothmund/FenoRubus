@@ -248,3 +248,46 @@ def test_web_zip_of_weekly_reports_opens_in_python(tmp_path):
         assert z.testzip() is None
         assert z.namelist() == [f[0] for f in files]
         assert [z.read(n).decode() for n in z.namelist()] == [f[1] for f in files]
+
+
+def test_report_config_js_matches_python():
+    """web/reportcfg.js y report_config.py: mismas secciones, plantillas y claves."""
+    import re
+    import report_config as rc
+    js = open(os.path.join(ROOT, "web", "reportcfg.js"), encoding="utf-8").read()
+    keys = re.findall(r'^\s*\["(\w+)", "([^"]+)", "([^"]+)"\],', js, re.M)
+    assert keys == [tuple(s) for s in rc.SECTIONS]
+    assert f'KEY = "{rc.KEY}"' in js and f'TEMPLATES_KEY = "{rc.TEMPLATES_KEY}"' in js
+    for k, t in rc.TEMPLATES.items():
+        m = re.search(rf'{k}: {{ name: "{t["name"]}", sections: (\[[^\]]*\]|\[\.\.\.SECTION_KEYS\])', js)
+        assert m, k
+        if "SECTION_KEYS" not in m.group(1):
+            assert re.findall(r'"(\w+)"', m.group(1)) == t["sections"], k
+
+
+def test_report_config_travels_with_sync(tmp_path):
+    import report_config as rc
+    import sync
+    from database import Database
+    a = Database(str(tmp_path / "a.sqlite3"))
+    rc.save(a, rc.apply_template(rc.default(a), "cliente"))
+    bundle = sync.export_changes(a, str(tmp_path))
+    assert rc.KEY in bundle["settings"]
+    b = Database(str(tmp_path / "b.sqlite3"))
+    sync.apply_changes(b, bundle, str(tmp_path))
+    assert rc.load(b)["template"] == "cliente" and rc.load(b)["plain"]
+
+
+def test_report_config_app_to_web_and_back(tmp_path):
+    import report_config as rc
+    import sync
+    from database import Database
+    a = Database(str(tmp_path / "a.sqlite3"))
+    rc.save(a, rc.apply_template(rc.default(a), "resumido"))
+    res = _node("reportcfg", sync.export_changes(a, str(tmp_path)), tmp_path)
+    assert res["read"] == rc.load(a)                       # la web lee lo mismo que la app
+    back = {"format": 1, "device": "web", "workspace": "", "changes": [], "settings": res["settings"]}
+    sync.apply_changes(a, back, str(tmp_path))
+    got = rc.load(a)
+    assert "gps" not in got["sections"] and "summary" in got["sections"] and got["template"] == ""
+    assert res["summary"] == rc.summary(got)

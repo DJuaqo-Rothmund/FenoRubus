@@ -3,6 +3,7 @@
 import { readFileSync, writeFileSync } from "node:fs";
 import * as C from "../web/core.js";
 import * as ST from "../web/stats.js";
+import * as RC from "../web/reportcfg.js";
 
 const [, , mode, input, output] = process.argv;
 const data = JSON.parse(readFileSync(input, "utf-8"));
@@ -26,6 +27,14 @@ if (mode === "stats") {
 } else if (mode === "exif") {
   const out = data.files.map((f) => { const b = readFileSync(f); return C.exifGps(b.buffer.slice(b.byteOffset, b.byteOffset + b.byteLength)); });
   writeFileSync(output, JSON.stringify(out));
+} else if (mode === "reportcfg") {
+  // Configuración de informes guardada en la app -> la web la lee, la cambia y la devuelve.
+  const st = C.emptyState();
+  C.applyBundle(st, "p1.json", data);
+  const get = (k, d) => C.setting(st, k, d);
+  const cfg = RC.load(get);
+  const changed = RC.toggle(RC.applyTemplate(cfg, "completo"), "gps");
+  writeFileSync(output, JSON.stringify({ read: cfg, summary: RC.summary(changed), settings: RC.settingsFor(changed) }));
 } else if (mode === "zip") {
   // ZIP de los informes semanales (sin compresión): lo debe abrir cualquier programa.
   const files = data.files.map(([n, t]) => [n, new TextEncoder().encode(t)]);

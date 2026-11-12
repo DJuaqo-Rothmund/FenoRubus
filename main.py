@@ -285,10 +285,15 @@ class FenoRubusApp(MDApp):
 
     def configured_reports(self):
         """Generador de informes con las preferencias del teléfono (fotos a incluir)."""
+        import report_config as rc
         r = self.reports
-        r.include_all_photos = bool(self.db.get_setting("report_all_photos", False))
-        r.photo_mode = self.db.get_setting("report_photo_mode", "both")
-        r.plain_pdf = bool(self.db.get_setting("report_plain_pdf", False))
+        r.set_config(rc.load(self.db))      # «Configuración de informes» del ensayo
+        for attr, get in (("scout_db", lambda: self.scout), ("yield_db", lambda: self.yields)):
+            try:        # secciones de AeonScout y Rendimiento (si sus bases abren)
+                setattr(r, attr, get())
+            except Exception as exc:  # noqa: BLE001
+                print(f"informes: sin {attr}:", exc)
+                setattr(r, attr, None)
         return r
 
     @cached_property
