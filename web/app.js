@@ -1847,9 +1847,10 @@ function rcfg() { return RC.load(rget); }
 
 function openReportConfig() {
   const dlg = $("rcfgdlg");
+  if (!S.tpls) { try { S.tpls = JSON.parse(localStorage.getItem(tplCacheKey()) || "[]"); } catch { S.tpls = []; } }
   const draw = () => {
     const cfg = rcfg();
-    const saved = RC.savedTemplates(rget);
+    const saved = RC.visible(S.tpls || []);
     const body = $("rcfgbody");
     body.innerHTML = "";
     const h = (t) => { const e = document.createElement("h3"); e.textContent = t; body.appendChild(e); };
@@ -1865,19 +1866,21 @@ function openReportConfig() {
     h("Plantilla");
     let r = row();
     for (const [k, t] of Object.entries(RC.TEMPLATES)) tog(r, t.name, cfg.template === k, () => save(RC.applyTemplate(cfg, k, saved)));
-    saved.forEach((t, i) => tog(r, t.name, cfg.template === `u:${i}`, () => save(RC.applyTemplate(cfg, `u:${i}`, saved))));
+    // Plantillas de la cuenta: las mismas en todos los cultivos, ensayos y en la app.
+    for (const t of saved) tog(r, t.name, cfg.template === `u:${t.name}`, () => save(RC.applyTemplate(cfg, `u:${t.name}`, saved)));
     tog(r, "+ Guardar la actual", false, () => {
       const name = (prompt("Nombre de la plantilla (ej.: Gerencia)") || "").trim();
       if (!name) return;
-      const items = saved.filter((t) => t.name !== name);
-      items.push({ name, sections: cfg.sections, photo_mode: cfg.photo_mode, photo_size: cfg.photo_size,
-        all_photos: cfg.all_photos, plain: cfg.plain });
-      save({ ...cfg, template: `u:${items.length - 1}` }, { [RC.TEMPLATES_KEY]: JSON.stringify(items) });
+      S.tpls = RC.merge(S.tpls || [], [RC.templateOf(name, cfg)]);
+      save({ ...cfg, template: `u:${name}` });
+      pushTemplates();
     });
     if (saved.length) tog(r, "Borrar guardada…", false, () => {
       const name = (prompt(`¿Qué plantilla borrar? (${saved.map((t) => t.name).join(", ")})`) || "").trim();
       if (!saved.some((t) => t.name === name)) return;
-      save({ ...cfg, template: "" }, { [RC.TEMPLATES_KEY]: JSON.stringify(saved.filter((t) => t.name !== name)) });
+      S.tpls = RC.merge(S.tpls || [], [{ name, deleted: true, ts: RC.nowTs() }]);
+      save({ ...cfg, template: cfg.template === `u:${name}` ? "" : cfg.template });
+      pushTemplates();
     });
     h("Formato");
     r = row();
@@ -1918,6 +1921,49 @@ function openReportConfig() {
   draw();
   dlg.onclose = flushReportConfig;
   dlg.showModal();
+  S.redrawRcfg = () => dlg.open && draw();
+  pullTemplates().then(() => S.redrawRcfg?.()).catch((e) => console.warn("plantillas:", e));
+}
+
+// ------------------------------------- plantillas de informes de la cuenta (Drive)
+const tplCacheKey = () => `ac_report_templates@${(store.get("ac_email") || "").toLowerCase()}`;   // por cuenta, todos los cultivos
+async function tplFile(create) {
+  const top = await folder(TOP, null, create);
+  if (!top) return { top: null, file: null };
+  const f = (await list(`'${top}' in parents and name='${q(RC.DRIVE_FILE)}' and trashed=false`, "files(id,name)"))[0];
+  return { top, file: f || null };
+}
+async function pullTemplates() {
+  let local = [];
+  try { local = JSON.parse(localStorage.getItem(tplCacheKey()) || "[]"); } catch { local = []; }
+  // Las que quedaron guardadas en el ensayo (versión anterior) pasan a la cuenta.
+  const legacy = RC.savedTemplates(rget).map((t) => ({ ...t, ts: t.ts || RC.nowTs() }));
+  S.tpls = RC.merge(RC.merge(S.tpls || [], local), legacy);
+  const { file } = await tplFile(false);
+  const remote = file ? ((await (await download(file.id)).json().catch(() => ({}))).templates || []) : [];
+  const merged = RC.merge(S.tpls, remote);
+  S.tpls = merged;
+  try { localStorage.setItem(tplCacheKey(), JSON.stringify(merged)); } catch { /* sin espacio */ }
+  if (legacy.length) send([], { [RC.TEMPLATES_KEY]: JSON.stringify([]) }).catch(() => {});
+  if (JSON.stringify(merged) !== JSON.stringify(RC.merge(remote, []))) await pushTemplates();
+  return merged;
+}
+async function pushTemplates() {
+  try { localStorage.setItem(tplCacheKey(), JSON.stringify(S.tpls || [])); } catch { /* sin espacio */ }
+  try {
+    const { top, file } = await tplFile(true);
+    if (file) {     // antes de escribir se suma lo que otro equipo guardó entretanto
+      const remote = (await (await download(file.id)).json().catch(() => ({}))).templates || [];
+      S.tpls = RC.merge(S.tpls || [], remote);
+    }
+    const blob = new Blob([JSON.stringify({ version: 1, templates: S.tpls }, null, 1)], { type: "application/json" });
+    if (file) await updateFile(file.id, blob, "application/json");
+    else await upload(top, RC.DRIVE_FILE, blob, "application/json");
+    try { localStorage.setItem(tplCacheKey(), JSON.stringify(S.tpls)); } catch { /* sin espacio */ }
+  } catch (e) {
+    console.warn("plantillas:", e);
+    $("rmsg").textContent = "No se pudo guardar la plantilla en Drive (se intentará de nuevo al abrir la configuración).";
+  }
 }
 
 function flushReportConfig() {

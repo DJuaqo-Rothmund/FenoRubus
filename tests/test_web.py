@@ -291,3 +291,19 @@ def test_report_config_app_to_web_and_back(tmp_path):
     got = rc.load(a)
     assert "gps" not in got["sections"] and "summary" in got["sections"] and got["template"] == ""
     assert res["summary"] == rc.summary(got)
+
+
+def test_report_templates_merge_same_in_web_and_app(tmp_path):
+    import re
+    import report_config as rc
+    a = [{"name": "Gerencia", "sections": ["summary"], "plain": True, "ts": "2026-11-12T10:00:00.000000Z"},
+         {"name": "Vieja", "sections": [], "ts": "2026-11-12T09:00:00.000000Z"}]
+    b = [{"name": "Vieja", "deleted": True, "ts": "2026-11-12T11:00:00.000000Z"},
+         {"name": "Gerencia", "sections": ["map"], "ts": "2026-11-12T08:00:00.000000Z"},
+         {"name": "cliente B", "sections": ["map"], "ts": "2026-11-12T08:00:00.000000Z"}]
+    res = _node("tplmerge", {"a": a, "b": b}, tmp_path)
+    assert res["merged"] == rc.merge(a, b)
+    assert res["visible"] == [t["name"] for t in rc.visible(rc.merge(a, b))] == ["cliente B", "Gerencia"]
+    assert res["summary"].startswith("Gerencia")
+    assert re.fullmatch(r"\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\.\d{6}Z", res["ts"])      # mismo formato que la app
+    assert len(res["ts"]) == len(rc._now())

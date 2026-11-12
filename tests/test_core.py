@@ -3632,3 +3632,60 @@ def test_report_without_generated_date(db, tmp_path):
     raw = open(rep.weekly(week["id"], "pdf").path, "rb").read()
     assert b"/CreationDate" in raw
     assert "Generado" in open(rep.matrix(2026).path, encoding="utf-8").read()
+
+
+def test_report_templates_belong_to_the_account_and_travel_by_drive(tmp_path, monkeypatch):
+    """Plantillas guardadas: de la cuenta (todos los ensayos y cultivos), por Drive a otro equipo."""
+    import json
+    import platform_utils
+    import report_config as rc
+    fake = FakeDrive()
+
+    def on(device):            # cada equipo con su propio archivo global
+        monkeypatch.setenv("FENORUBUS_DATA", str(tmp_path / f"g-{device}"))
+        platform_utils.reset_global_cache()
+
+    on("cel")
+    cel, cws, copen, _ = _device(tmp_path, "cel", fake)
+    am, nv = copen(cws.by_code("AM")), copen(cws.by_code("NV"))
+    full = rc.apply_template(rc.default(am), "completo")
+    rc.save_template(am, "Gerencia", dict(full, plain=True))
+    assert [t["name"] for t in rc.saved_templates(nv)] == ["Gerencia"]        # en otro ensayo también
+    assert rc.apply_template(rc.default(nv), "u:Gerencia", rc.saved_templates(nv))["plain"]
+    cel.sync_report_templates()
+    top = next(k for k, f in fake.files.items() if f["name"] == "AeonCrop")
+    files = [f for f in fake.files.values() if f["name"] == rc.DRIVE_FILE]
+    assert len(files) == 1 and top in files[0]["parents"]
+    assert json.loads(files[0]["data"])["templates"][0]["name"] == "Gerencia"
+
+    on("pc")
+    pc, pws, popen, _ = _device(tmp_path, "pc", fake)
+    assert rc.saved_templates() == []
+    pc.run()                                                    # al sincronizar llega
+    assert [t["name"] for t in rc.saved_templates()] == ["Gerencia"]
+    rc.delete_template(None, "Gerencia")
+    rc.save_template(None, "Cliente", rc.default())
+    pc.sync_report_templates()
+
+    on("cel")
+    cel.sync_report_templates()                                 # el borrado y la nueva vuelven
+    assert [t["name"] for t in rc.saved_templates()] == ["Cliente"]
+    assert len([f for f in fake.files.values() if f["name"] == rc.DRIVE_FILE]) == 1
+
+
+def test_report_templates_from_an_ensayo_move_to_the_account(db):
+    import report_config as rc
+    db.set_setting(rc.TEMPLATES_KEY, [{"name": "Antigua", "sections": ["summary"], "plain": True}])
+    assert [t["name"] for t in rc.saved_templates(db)] == ["Antigua"]
+    assert db.get_setting(rc.TEMPLATES_KEY) == []
+    assert rc.summary(rc.apply_template(rc.default(db), "u:Antigua", rc.saved_templates())).startswith("Antigua")
+
+
+def test_report_templates_saved_before_login_go_to_the_account():
+    import platform_utils
+    import report_config as rc
+    rc.save_template(None, "Antes", rc.default())
+    platform_utils.global_set("drive_account", "Persona@Ejemplo.cl")
+    assert [t["name"] for t in rc.saved_templates()] == ["Antes"]
+    assert platform_utils.global_get("report_templates@persona@ejemplo.cl")[0]["name"] == "Antes"
+    assert platform_utils.global_get("report_templates@") == []

@@ -79,7 +79,11 @@ export function settingsFor(cfg) {
 
 export function applyTemplate(cfg, key, saved = []) {
   let tpl = TEMPLATES[key];
-  if (!tpl && key.startsWith("u:")) tpl = saved[Number(key.slice(2))];
+  if (!tpl && key.startsWith("u:")) {
+    const ref = key.slice(2);
+    tpl = saved.find((t) => t.name === ref);
+    if (!tpl && /^\d+$/.test(ref) && saved[Number(ref)]) { tpl = saved[Number(ref)]; key = `u:${tpl.name}`; }   // versiones anteriores
+  }
   if (!tpl) return { ...cfg };
   const out = { ...cfg };
   for (const k of FORMAT) if (k in tpl) out[k] = tpl[k];
@@ -96,14 +100,36 @@ export function toggle(cfg, section) {
   return normalize({ ...cfg, sections: [...sel], template: "" });
 }
 
-export function savedTemplates(get) {
+export function savedTemplates(get) {      // las que quedaron en un ensayo (versión anterior)
   let raw = get(TEMPLATES_KEY, null);
   if (typeof raw === "string") { try { raw = JSON.parse(raw); } catch { raw = null; } }
   return Array.isArray(raw) ? raw.filter((t) => t && t.name) : [];
 }
 
+// Plantillas de la CUENTA (todos los cultivos, ensayos y equipos): «AeonCrop/plantillas-
+// informes.json» en Drive, igual que la app. Cada una con «ts»; borrada = {name, deleted, ts}.
+export const DRIVE_FILE = "plantillas-informes.json";
+export const nowTs = () => new Date().toISOString().replace(/(\.\d{3})Z$/, "$1000Z");
+export function merge(a = [], b = []) {
+  const out = new Map();
+  for (const t of [...a, ...b]) {
+    if (!t || !t.name) continue;
+    const cur = out.get(t.name);
+    if (!cur || (t.ts || "") > (cur.ts || "")) out.set(t.name, t);
+  }
+  return [...out.values()].sort((x, y) => x.name.toLowerCase().localeCompare(y.name.toLowerCase()));
+}
+export const visible = (items) => items.filter((t) => !t.deleted);
+export function templateOf(name, cfg) {
+  const t = { name, sections: [...cfg.sections] };
+  for (const k of FORMAT) t[k] = cfg[k];
+  t.ts = nowTs();
+  return t;
+}
+
 export function summary(cfg) {
-  const name = TEMPLATES[cfg.template]?.name || (cfg.template ? "Plantilla guardada" : "Personalizado");
+  const tpl = cfg.template || "";
+  const name = TEMPLATES[tpl]?.name || (tpl.startsWith("u:") ? tpl.slice(2) : "") || "Personalizado";
   const n = cfg.sections.length;
   return [name, `${n} ${n === 1 ? "sección" : "secciones"}`, `fotos: ${PHOTO_MODES[cfg.photo_mode].toLowerCase()}`,
     ...(cfg.plain ? ["PDF simple"] : []), ...(cfg.no_date ? ["sin fecha"] : [])].join(" · ");

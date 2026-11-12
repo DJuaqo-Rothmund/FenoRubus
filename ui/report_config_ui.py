@@ -117,6 +117,9 @@ class ReportConfigSheet(ModalView):
         card.add_widget(foot)
         self.add_widget(card)
         self.build()
+        names = [t["name"] for t in rc.saved_templates(self.db)]
+        # Las de la web u otros equipos: aparecen apenas llegan de Drive.
+        _push_templates(lambda: [t["name"] for t in rc.saved_templates(self.db)] != names and self.build())
 
     # ------------------------------------------------------------------ armar
     def build(self):
@@ -137,9 +140,10 @@ class ReportConfigSheet(ModalView):
         for key, t in rc.TEMPLATES.items():
             row.add_widget(Chip(t["name"], False, on_tap=lambda _w, k=key: self.use(k),
                                 when=lambda c_, k=key: c_.get("template") == k))
-        for i, t in enumerate(saved):
-            row.add_widget(Chip(t["name"], False, on_tap=lambda _w, i=i: self.use(f"u:{i}"),
-                                when=lambda c_, i=i: c_.get("template") == f"u:{i}"))
+        for t in saved:               # plantillas de la cuenta (todos los cultivos y equipos)
+            key = f"u:{t['name']}"
+            row.add_widget(Chip(t["name"], False, on_tap=lambda _w, k=key: self.use(k),
+                                when=lambda c_, k=key: c_.get("template") == k))
         row.add_widget(Chip("+ Guardar la actual", False, on_tap=lambda *_: self.save_as()))
         if saved:
             row.add_widget(Chip("Borrar guardada…", False, on_tap=lambda *_: self.delete_saved()))
@@ -223,9 +227,9 @@ class ReportConfigSheet(ModalView):
             name = f.text.strip()
             if not name:
                 return False
-            items = rc.save_template(self.db, name, self.cfg)
-            i = next(i for i, t in enumerate(items) if t["name"] == name)
-            self._store(dict(self.cfg, template=f"u:{i}"), rebuild=True)
+            rc.save_template(self.db, name, self.cfg)
+            self._store(dict(self.cfg, template=f"u:{name}"), rebuild=True)
+            _push_templates()
 
         form_dialog("Guardar plantilla", form, ok)
 
@@ -235,6 +239,7 @@ class ReportConfigSheet(ModalView):
         def drop(name):
             rc.delete_template(self.db, name)
             self._store(dict(self.cfg, template=""), rebuild=True)
+            _push_templates()
 
         pick_dialog("Borrar plantilla guardada", [(t["name"], "", lambda n=t["name"]: drop(n))
                                                   for t in rc.saved_templates(self.db)])
@@ -242,6 +247,33 @@ class ReportConfigSheet(ModalView):
     def on_dismiss(self):
         if self._on_close:
             self._on_close()
+
+
+def _push_templates(done=None):
+    """Une las plantillas de la cuenta con Drive, en segundo plano (sin Drive, al sincronizar).
+    done(): cuando terminó (en el hilo de Kivy)."""
+    a = app()
+    try:
+        if not a.db.get_setting("drive_enabled", False):
+            return
+    except Exception:  # noqa: BLE001
+        return
+    import threading
+
+    def work():
+        try:
+            a.sync.sync_report_templates()
+            if done:
+                Clock.schedule_once(lambda *_: done(), 0)
+        except Exception as exc:  # noqa: BLE001 (sin red: se suben al sincronizar)
+            print("plantillas de informes:", exc)
+        finally:
+            try:
+                from drive_backup import _detach
+                _detach()
+            except Exception:  # noqa: BLE001
+                pass
+    threading.Thread(target=work, daemon=True).start()
 
 
 def open_sheet(on_close=None):

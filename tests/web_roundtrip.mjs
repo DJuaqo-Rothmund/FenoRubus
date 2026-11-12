@@ -35,6 +35,12 @@ if (mode === "stats") {
   const cfg = RC.load(get);
   const changed = RC.toggle(RC.applyTemplate(cfg, "completo"), "gps");
   writeFileSync(output, JSON.stringify({ read: cfg, summary: RC.summary(changed), settings: RC.settingsFor(changed) }));
+} else if (mode === "tplmerge") {
+  // Plantillas de la cuenta: la web une lo de Drive con lo suyo igual que la app.
+  const merged = RC.merge(data.a, data.b);
+  const base = RC.applyTemplate(RC.normalize({}), "u:Gerencia", RC.visible(merged));
+  writeFileSync(output, JSON.stringify({ merged, visible: RC.visible(merged).map((t) => t.name),
+    summary: RC.summary(base), ts: RC.nowTs() }));
 } else if (mode === "zip") {
   // ZIP de los informes semanales (sin compresión): lo debe abrir cualquier programa.
   const files = data.files.map(([n, t]) => [n, new TextEncoder().encode(t)]);

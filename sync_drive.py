@@ -123,6 +123,29 @@ class DriveSync:
             found.update(res)
         return found
 
+    # ------------------------------------------------- plantillas de informes
+    def sync_report_templates(self) -> int:
+        """«AeonCrop/plantillas-informes.json»: une las plantillas de este equipo con las de
+        la cuenta en Drive (las de la web y de otros teléfonos). Devuelve cuántas hay."""
+        import crops
+        import report_config as rc
+        self.drive.root_id()                                   # crea «AeonCrop» si falta
+        top = self.drive._find_folder(crops.DRIVE_TOP, None)
+        if not top:
+            return 0
+        found = [f for f in self._list(top) if f["name"] == rc.DRIVE_FILE]
+        remote = []
+        if found:
+            try:
+                remote = json.loads(self._get(found[0]["id"]).decode("utf-8")).get("templates") or []
+            except (ValueError, AttributeError):
+                remote = []
+        merged, push = rc.receive_account(remote)
+        if push or not found:
+            raw = json.dumps({"version": 1, "templates": merged}, ensure_ascii=False, indent=1).encode("utf-8")
+            self._put(top, rc.DRIVE_FILE, raw, found[0]["id"] if found else None)
+        return len(rc.visible(merged))
+
     # ------------------------------------------------------------ ensayos
     def _sync_workspaces(self, root: str, device: str, files: list[dict]) -> int:
         """Crea aquí los ensayos/predios que el otro equipo tiene y este no; publica los de aquí."""
@@ -261,6 +284,10 @@ class DriveSync:
         total = {"workspaces": 0, "created": 0, "received": 0, "sent": 0, "applied": 0,
                  "missing_files": [], "downloaded": 0, "pending_photos": 0, "when": _dt.datetime.now().isoformat(timespec="seconds")}
         total["created"] = self._sync_workspaces(root, device, files)
+        try:        # plantillas de informes de la cuenta (todos los cultivos y equipos)
+            self.sync_report_templates()
+        except Exception as exc:  # noqa: BLE001 (no detiene la sincronización)
+            print("plantillas de informes:", exc)
         total["uploaded"] = total["moved"] = 0
         folders = {f["name"]: f["id"] for f in files}
         wss = self.workspaces.list()

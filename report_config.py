@@ -118,11 +118,14 @@ def save(db, cfg: dict) -> dict:
 
 
 def apply_template(cfg: dict, key: str, saved: list[dict] | None = None) -> dict:
-    """La plantilla «key» (de las fijas o «u:<n>», una guardada) sobre cfg."""
+    """La plantilla «key» (de las fijas o «u:<nombre>», una guardada) sobre cfg."""
     tpl = TEMPLATES.get(key)
     if tpl is None and key.startswith("u:") and saved:
-        i = int(key[2:]) if key[2:].isdigit() else -1
-        tpl = saved[i] if 0 <= i < len(saved) else None
+        ref = key[2:]
+        tpl = next((t for t in saved if t["name"] == ref), None)
+        if tpl is None and ref.isdigit() and int(ref) < len(saved):   # versiones anteriores: «u:<n>»
+            tpl = saved[int(ref)]
+            key = f"u:{tpl['name']}"
     if tpl is None:
         return dict(cfg)
     out = dict(cfg, **{k: tpl[k] for k in FORMAT_KEYS if k in tpl})
@@ -141,28 +144,104 @@ def toggle(cfg: dict, section: str) -> dict:
     return normalize(dict(cfg, sections=list(sel), template=""))
 
 
-def saved_templates(db) -> list[dict]:
-    raw = _parse(db.get_setting(TEMPLATES_KEY, None))
-    return [t for t in raw if isinstance(t, dict) and t.get("name")] if isinstance(raw, list) else []
+# --------------------------------------------------- plantillas de la cuenta
+# Las plantillas guardadas son de la CUENTA de Google (todos los cultivos, ensayos y equipos):
+# en el teléfono, en el archivo global de la app (una lista por cuenta) y, en Drive,
+# «AeonCrop/plantillas-informes.json», que la app y la web leen y suman al sincronizar.
+# Cada una lleva «ts» (cuándo se guardó); al borrarla queda {"name", "deleted": true, "ts"}
+# para que el borrado también llegue a los demás equipos.
+DRIVE_FILE = "plantillas-informes.json"
+
+
+def _now() -> str:
+    import datetime as _dt
+    return _dt.datetime.now(_dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
+
+
+def _account(db=None) -> str:
+    from platform_utils import global_get
+    return (global_get("drive_account", "") or "").strip().lower()
+
+
+def _store_key(account: str | None = None) -> str:
+    return "report_templates@" + (_account() if account is None else account)
+
+
+def account_items(db=None, account: str | None = None) -> list[dict]:
+    """Todas las plantillas de la cuenta, con las borradas (para sincronizar)."""
+    from platform_utils import global_get
+    raw = global_get(_store_key(account), None)
+    items = [t for t in raw if isinstance(t, dict) and t.get("name")] if isinstance(raw, list) else []
+    acc = _account() if account is None else account
+    if acc:                   # guardadas antes de conectar la cuenta de Google: pasan a la cuenta
+        loose = global_get(_store_key(""), None)
+        if isinstance(loose, list) and loose:
+            items = merge(items, [t for t in loose if isinstance(t, dict) and t.get("name")])
+            _put_items(items, account)
+            _put_items([], "")
+    if db is not None:      # plantillas guardadas en un ensayo (versión anterior): pasan a la cuenta
+        old = _parse(db.get_setting(TEMPLATES_KEY, None))
+        if isinstance(old, list) and old:
+            have = {t["name"] for t in items}
+            for t in old:
+                if isinstance(t, dict) and t.get("name") and t["name"] not in have:
+                    items.append(dict(t, ts=_now()))
+            _put_items(items, account)
+            db.set_setting(TEMPLATES_KEY, [])
+    return items
+
+
+def _put_items(items: list[dict], account: str | None = None) -> None:
+    from platform_utils import global_set
+    global_set(_store_key(account), items)
+
+
+def merge(a: list[dict], b: list[dict]) -> list[dict]:
+    """Une dos listas de plantillas: por nombre, gana la guardada (o borrada) más reciente."""
+    out: dict = {}
+    for t in list(a or []) + list(b or []):
+        if not isinstance(t, dict) or not t.get("name"):
+            continue
+        cur = out.get(t["name"])
+        if cur is None or (t.get("ts") or "") > (cur.get("ts") or ""):
+            out[t["name"]] = t
+    return sorted(out.values(), key=lambda t: t["name"].lower())
+
+
+def visible(items: list[dict]) -> list[dict]:
+    return [t for t in items if not t.get("deleted")]
+
+
+def saved_templates(db=None) -> list[dict]:
+    return visible(account_items(db))
 
 
 def save_template(db, name: str, cfg: dict) -> list[dict]:
-    items = [t for t in saved_templates(db) if t["name"] != name]
-    items.append({"name": name, "sections": list(cfg["sections"]), **{k: cfg[k] for k in FORMAT_KEYS}})
-    db.set_setting(TEMPLATES_KEY, items)
-    return items
+    item = {"name": name, "sections": list(cfg["sections"]), **{k: cfg[k] for k in FORMAT_KEYS}, "ts": _now()}
+    items = merge(account_items(db), [item])
+    _put_items(items)
+    return visible(items)
 
 
 def delete_template(db, name: str) -> list[dict]:
-    items = [t for t in saved_templates(db) if t["name"] != name]
-    db.set_setting(TEMPLATES_KEY, items)
-    return items
+    items = merge(account_items(db), [{"name": name, "deleted": True, "ts": _now()}])
+    _put_items(items)
+    return visible(items)
+
+
+def receive_account(remote: list[dict]) -> tuple[list[dict], bool]:
+    """Suma lo que llegó de Drive. Devuelve (todo, hay que subir lo de aquí)."""
+    local = account_items()
+    merged = merge(local, remote or [])
+    if merged != merge(local, []):
+        _put_items(merged)
+    return merged, merged != merge(remote or [], [])
 
 
 def summary(cfg: dict) -> str:
     """Una línea para el botón: «Completo · 22 secciones · PDF simple»."""
-    name = TEMPLATES.get(cfg.get("template") or "", {}).get("name") or (
-        cfg["template"] and "Plantilla guardada") or "Personalizado"
+    tpl = cfg.get("template") or ""
+    name = TEMPLATES.get(tpl, {}).get("name") or (tpl[2:] if tpl.startswith("u:") else "") or "Personalizado"
     n = len(cfg["sections"])
     bits = [name, f"{n} " + ("sección" if n == 1 else "secciones"), "fotos: " + PHOTO_MODES[cfg["photo_mode"]].lower()]
     if cfg["plain"]:
