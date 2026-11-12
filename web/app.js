@@ -1731,6 +1731,9 @@ function renderReports() {
     if ([...sel.options].some((o) => o.value === keep)) sel.value = keep;
   };
   fill($("rweek"), [...weeks].reverse().map((w) => [w, `${C.weekTitle(w)} · ${C.weekLabel(w)}`]));
+  const nz = C.dataWeeks(S.state, season).length;
+  $("rzipn").textContent = nz ? `${nz} semana(s)` : "sin semanas con datos";
+  $("rzip").disabled = !nz;
   if (weeks.includes(S.week) && !$("rweek").dataset.touched) $("rweek").value = S.week;
   const wopts = weeks.map((w) => [w, `${C.weekTitle(w)} · ${C.weekLabel(w)}`]);
   const hadFrom = $("rfrom").value;
@@ -1793,6 +1796,41 @@ async function runPdf(kind) {
     console.error(e);
     $("rmsg").textContent = `No se pudo generar el PDF: ${String(e.message || e).split("\n").filter(Boolean).pop()}`;
   } finally { btns.forEach((b) => (b.disabled = false)); }
+}
+
+// Todos los informes semanales de la temporada (cada semana con datos, hasta hoy) en un ZIP.
+async function runZip() {
+  const season = Number($("rseason").value);
+  const weeks = C.dataWeeks(S.state, season);
+  if (!weeks.length) { $("rmsg").textContent = "No hay semanas con datos en esta temporada."; return; }
+  const btns = document.querySelectorAll("[data-pdf], [data-pdf-zip]");
+  btns.forEach((b) => (b.disabled = true));
+  const files = [];
+  try {
+    for (const [i, w] of weeks.entries()) {
+      const tag = `Semana ${i + 1} de ${weeks.length} (${C.weekTitle(w)})`;
+      $("rmsg").textContent = `${tag}…`;
+      const { name, blob } = await makePdf({ ws: S.ws, bundles: S.bundles, photoBlob, crop: CROP, plain: $("rplain").checked,
+        progress: (t) => { $("rmsg").textContent = `${tag}: ${t}`; } }, "weekly", w, season);
+      files.push([name, new Uint8Array(await blob.arrayBuffer())]);
+    }
+    $("rmsg").textContent = "Armando el ZIP…";
+    const zip = new Blob([C.zipStore(files)], { type: "application/zip" });
+    const name = `${S.ws.code || "ensayo"}-informes-semanales-${C.seasonTitle(season).replace(/[^0-9A-Za-z]+/g, "-").replace(/^-|-$/g, "")}.zip`;
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(zip); a.download = name;
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(a.href), 60000);
+    $("rmsg").textContent = `ZIP listo: ${name} · ${files.length} informe(s), ${Math.max(1, Math.round(zip.size / 1048576))} MB (en Descargas).`;
+  } catch (e) {
+    console.error(e);
+    $("rmsg").textContent = `No se pudo armar el ZIP (${files.length} de ${weeks.length} listos): ${String(e.message || e).split("\n").filter(Boolean).pop()}`;
+  } finally { btns.forEach((b) => (b.disabled = false)); refreshZipBtn(); }
+}
+
+function refreshZipBtn() {
+  const n = C.dataWeeks(S.state, Number($("rseason").value)).length;
+  $("rzip").disabled = !n;
 }
 
 async function start() {
@@ -1984,6 +2022,7 @@ async function boot() {
   $("rweek").onchange = (e) => { e.target.dataset.touched = "1"; };
   document.querySelectorAll("[data-rep]").forEach((b) => (b.onclick = () => runReport(b.dataset.rep)));
   document.querySelectorAll("[data-pdf]").forEach((b) => (b.onclick = () => runPdf(b.dataset.pdf)));
+  $("rzip").onclick = runZip;
   // Tocar «Semana del …»: calendario; cualquier día lleva a la semana que lo contiene.
   const pickWeek = () => {
     const i = $("wpick");

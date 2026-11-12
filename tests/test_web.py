@@ -234,3 +234,17 @@ def test_web_notebook_sheets_and_pasted_photos_roundtrip(tmp_path):
     assert ph[pid]["page"] == 2 and json.loads(ph[pid]["place"]) == {"x": 3, "y": 4, "w": 5, "r": 350}
     new = [p for p in e["photos"] if p["id"] != pid]
     assert len(new) == 1 and new[0]["page"] == 0 and json.loads(new[0]["place"])["w"] == 6
+
+
+def test_web_zip_of_weekly_reports_opens_in_python(tmp_path):
+    """«Todos los semanales»: el ZIP armado en la web (sin compresión) se abre normal."""
+    import zipfile
+    files = [["20261012-NV-semanal.pdf", "%PDF-1.4 uno"], ["20261019-NV-semanal.pdf", "%PDF-1.4 dos ñ"]]
+    src, out = tmp_path / "zip_in.json", tmp_path / "out.zip"
+    src.write_text(json.dumps({"files": files}), encoding="utf-8")
+    subprocess.run([NODE, os.path.join(ROOT, "tests", "web_roundtrip.mjs"), "zip", str(src), str(out)],
+                   check=True, cwd=ROOT)
+    with zipfile.ZipFile(out) as z:
+        assert z.testzip() is None
+        assert z.namelist() == [f[0] for f in files]
+        assert [z.read(n).decode() for n in z.namelist()] == [f[1] for f in files]

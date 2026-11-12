@@ -26,6 +26,10 @@ if (mode === "stats") {
 } else if (mode === "exif") {
   const out = data.files.map((f) => { const b = readFileSync(f); return C.exifGps(b.buffer.slice(b.byteOffset, b.byteOffset + b.byteLength)); });
   writeFileSync(output, JSON.stringify(out));
+} else if (mode === "zip") {
+  // ZIP de los informes semanales (sin compresión): lo debe abrir cualquier programa.
+  const files = data.files.map(([n, t]) => [n, new TextEncoder().encode(t)]);
+  writeFileSync(output, C.zipStore(files, new Date(2026, 10, 12, 9, 30, 0)));
 } else if (mode === "notebook") {
   // Cuaderno: hojas del día y fotos pegadas (lo que hace la web), de vuelta a la app.
   const st = C.emptyState();
