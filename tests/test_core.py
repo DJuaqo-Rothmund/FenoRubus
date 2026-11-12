@@ -3510,3 +3510,31 @@ def test_drop_blueberry_defaults_from_raspberry_db(db):
     assert db.drop_foreign_defaults("frambuesa") == ["Duke"]
     ids = {v["id"] for v in db.query("SELECT id FROM varieties")}
     assert a not in ids and b in ids and keep in ids
+
+
+def test_manual_sync_opens_google_consent_when_needed(tmp_path):
+    """Si Google pide aceptar de nuevo el permiso: en lo automático falla con el aviso; al
+    tocar «Sincronizar» se abre su ventana (interactiva) y sigue."""
+    import drive_backup as dbk
+    from drive_backup import DriveBackup, NeedsConsent, interactive_auth
+
+    asked = []
+
+    class Auth:
+        account = None
+
+        def get_token(self, interactive):
+            asked.append(interactive)
+            if not interactive:
+                raise NeedsConsent("Conecte su cuenta de Google en Ajustes")
+            return "nuevo"
+    dbk._SHARED_TOKEN.clear()
+    d = Database(str(tmp_path / "d.sqlite3"))
+    d.set_setting("drive_enabled", True)
+    b = DriveBackup(d, authorizer=Auth(), transport=FakeDrive(), metered=lambda: False)
+    with pytest.raises(NeedsConsent):
+        b._get_token()
+    with interactive_auth(True):
+        assert b._get_token() == "nuevo"
+    assert asked == [False, False, True]
+    assert dbk._INTERACTIVE_OK["on"] is False

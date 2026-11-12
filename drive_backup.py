@@ -35,7 +35,26 @@ _FOLDER_LOCK = threading.RLock()     # buscar-o-crear carpetas: de a una (ver _f
 # uno pedía el suyo y, si coincidían varios hilos, los «oyentes» Java de un pedido se
 # borraban antes de que Google respondiera y la app se cerraba sin dejar error.
 _TOKEN_LOCK = threading.RLock()
-_SHARED_TOKEN: dict = {}             # cuenta -> (token, vence)
+_SHARED_TOKEN: dict = {}
+# Mientras corre algo que pidió el usuario (botón «Sincronizar»): si Google pide aceptar de
+# nuevo el permiso, se puede abrir su ventana (en lo automático, nunca).
+_INTERACTIVE_OK: dict = {"on": False}
+
+
+class interactive_auth:
+    """with interactive_auth(manual): permite abrir la ventana de Google si hace falta."""
+
+    def __init__(self, on: bool = True):
+        self.on, self.prev = on, False
+
+    def __enter__(self):
+        self.prev = _INTERACTIVE_OK["on"]
+        _INTERACTIVE_OK["on"] = self.on or self.prev
+        return self
+
+    def __exit__(self, *exc):
+        _INTERACTIVE_OK["on"] = self.prev
+        return False             # cuenta -> (token, vence)
 _AUTHORIZER = None                   # un solo AndroidAuthorizer para toda la app
 FOLDER_MIME = "application/vnd.google-apps.folder"
 API = "https://www.googleapis.com/drive/v3/files"
@@ -706,7 +725,18 @@ class DriveBackup:
                 return shared[0]
             if not self.available:
                 raise NeedsConsent("Sin cuenta de Google conectada")
-            token = self.authorizer.get_token(interactive=False)
+            auth = self.authorizer
+            auth.account = self.account        # el autorizador es uno solo para toda la app
+            try:
+                token = auth.get_token(interactive=False)
+            except NeedsConsent:
+                # Google pide volver a aceptar el permiso. Si fue el usuario quien tocó
+                # «Sincronizar», se abre la ventana de Google (antes solo fallaba con
+                # «Conecte su cuenta de Google en Ajustes»).
+                if not (_INTERACTIVE_OK.get("on") and self.db.get_setting("drive_enabled", False)):
+                    raise
+                self.log("Google pide aceptar de nuevo el permiso: abriendo su ventana…")
+                token = auth.get_token(interactive=True)
             self._token = _SHARED_TOKEN[key] = (token, time.monotonic() + self.TOKEN_TTL)
             return token
 

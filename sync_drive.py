@@ -249,6 +249,11 @@ class DriveSync:
         def p(f, text=""):
             if progress:
                 progress(f, text)
+        from drive_backup import interactive_auth
+        with interactive_auth(manual):
+            return self._run(manual, p)
+
+    def _run(self, manual, p) -> dict:
         p(.01, "Leyendo Drive")
         root = self._root()
         files = self._list(root)
