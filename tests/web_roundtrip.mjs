@@ -49,6 +49,14 @@ if (mode === "stats") {
   C.applyBundle(st, "web.json", C.bundle("web", "NC", r.changes, r.settings));
   writeFileSync(output, JSON.stringify({ units: C.phenoUnits(st).map((u) => u.name), counts: C.unitCounts(st),
     bundle: C.bundle("web", "NC", r.changes, r.settings) }));
+} else if (mode === "unitrename") {
+  const st = C.emptyState();
+  C.applyBundle(st, "p1.json", data.bundle);
+  const v = C.phenoUnits(st).find((u) => u.name === data.from);
+  const r = C.unitRenameChanges(st, v, data.to);
+  C.applyBundle(st, "web.json", C.bundle("web", "NC", r.changes, r.settings));
+  writeFileSync(output, JSON.stringify({ units: C.phenoUnits(st).map((u) => u.name), auto: C.unitAutoName(st, v),
+    bundle: C.bundle("web", "NC", r.changes, r.settings) }));
 } else if (mode === "zip") {
   // ZIP de los informes semanales (sin compresión): lo debe abrir cualquier programa.
   const files = data.files.map(([n, t]) => [n, new TextEncoder().encode(t)]);

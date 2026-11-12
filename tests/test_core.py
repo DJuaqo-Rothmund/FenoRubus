@@ -3716,3 +3716,27 @@ def test_unified_points_only_in_some_treatments(tmp_path):
     db.set_unified_pheno(True, "treatment", [""], {1: 2, 2: 1, 3: 0})
     assert [u["name"] for u in db.pheno_units()] == ["T1 · Punto 1", "T1 · Punto 2", "T2 · Punto 1"]
     assert len(db.pheno_units(include_archived=True)) == 7
+
+
+def test_rename_one_pheno_point_keeps_its_name(tmp_path):
+    from workspaces import Workspaces
+    wss = Workspaces(str(tmp_path / "data"))
+    db = wss.open(wss.create("id", "tratamientos", "Número de cañas", "NC"))
+    db.setup_trial(3, 4)
+    db.set_unified_pheno(True, "treatment", ["Planta 1", "Planta 2", "Planta 3"], {1: 3, 2: 0, 3: 3})
+    p = next(u for u in db.pheno_units() if u["name"] == "T3 · Planta 2")
+    w = db.current_week(dt.date(2026, 10, 5))
+    o = db.get_or_create_observation(p["id"], w["id"])
+    db.update_observation(o["id"], bbch_code=61, bbch_label="x")
+    assert db.rename_pheno_unit(p["id"], "  T3 ·  Planta junto al poste ")["name"] == "T3 · Planta junto al poste"
+    db.set_unified_pheno(True, "treatment", ["Planta 1", "Planta 2", "Planta 3"], {1: 3, 2: 1, 3: 3})
+    names = [u["name"] for u in db.pheno_units()]
+    assert "T3 · Planta junto al poste" in names and "T2 · Planta 1" in names       # sigue al reconfigurar
+    assert db.get_observation(p["id"], w["id"])["bbch_code"] == 61                   # mismo punto, mismo registro
+    import pytest
+    with pytest.raises(ValueError):
+        db.rename_pheno_unit(p["id"], "T1 · Planta 1")                               # nombre ya usado
+    with pytest.raises(ValueError):
+        db.rename_pheno_unit(db.list_varieties()[0]["id"], "x")                      # una parcela: no
+    assert db.rename_pheno_unit(p["id"], "")["name"] == "T3 · Planta 2"                # vacío: automático
+    assert db.unit_labels() == {}

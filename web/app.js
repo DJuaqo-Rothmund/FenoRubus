@@ -742,7 +742,8 @@ function renderSampling() {
     el.querySelector(".place").textContent = C.unitPlace(v);
     el.querySelector(".name").textContent = C.unitMain(v);
     el.querySelector(".sub").textContent = sub + (obs?.notes ? ` · ${obs.notes}` : "");
-    el.onclick = () => openDetail(v);
+    el.onclick = () => { if (longFired) { longFired = false; return; } openDetail(v); };
+    if (v.pheno_unit) longPress(el, 3000, () => renameUnit(v));   // mantener 3 s: nombre del punto
     box.appendChild(el);
     if (photos.length) firstUrl(photos).then((u) => {
       if (u) { const t = el.querySelector(".thumb"); t.style.backgroundImage = `url(${u})`; t.textContent = ""; }
@@ -1458,6 +1459,18 @@ function longPress(el, ms, fn) {
   });
   for (const ev of ["pointerup", "pointerleave", "pointercancel"]) el.addEventListener(ev, stop);
   el.addEventListener("contextmenu", (e) => e.preventDefault());
+}
+
+// Nombre propio de un punto de la fenología unificada (= rename_unit_dialog de la app).
+async function renameUnit(v) {
+  const auto = C.unitAutoName(S.state, v);
+  const name = prompt(`Nombre del punto (vacío = automático: «${auto}»). Los registros y fotos siguen en el punto.`, v.name);
+  if (name === null) return;
+  try {
+    const r = C.unitRenameChanges(S.state, v, name);
+    await send(r.changes, r.settings);
+    render();
+  } catch (e) { alert(e.message); }
 }
 
 function moveText(sum) {

@@ -108,9 +108,9 @@ class GlassCard(BoxLayout):
             self.height = self.minimum_height
 
 
-class WeekTitle(ButtonBehavior, MDLabel):
-    """Título «Semana del …»: tocar = calendario; mantener presionado 3 s = on_long_press
-    (y entonces no se abre el calendario)."""
+class LongPress:
+    """Mezcla para botones: mantener presionado HOLD s = on_long_press (y entonces no se
+    dispara el toque normal). Se cancela si el dedo se mueve (desplazar la lista)."""
     HOLD = 3.0
     __events__ = ("on_long_press",)
 
@@ -134,7 +134,7 @@ class WeekTitle(ButtonBehavior, MDLabel):
 
     def on_touch_up(self, touch):
         self._cancel()
-        if self._fired and touch.grab_current is self:   # fue un mantener presionado: sin calendario
+        if self._fired and touch.grab_current is self:   # fue un mantener presionado: sin toque
             self._fired = False
             touch.ungrab(self)
             self.state = "normal"
@@ -153,6 +153,11 @@ class WeekTitle(ButtonBehavior, MDLabel):
 
     def on_long_press(self):
         pass
+
+
+class WeekTitle(LongPress, ButtonBehavior, MDLabel):
+    """Título «Semana del …»: tocar = calendario; mantener presionado 3 s = on_long_press
+    (y entonces no se abre el calendario)."""
 
 
 class GlassButton(ButtonBehavior, GlassCard):
@@ -1933,7 +1938,9 @@ class SettingsScreen(MDScreen):
 
 
 @themed(code_bg=("BERRY_SOFT", None), code_fg=("LEAF_DARK", None))
-class VarietyRow(GlassButton):
+class VarietyRow(LongPress, GlassButton):
+    """Fila del muestreo. Mantener presionado 3 s sobre un punto de la fenología unificada:
+    cambiar su nombre."""
     kicker = StringProperty()      # parcela «T1R1» (chica) cuando el tratamiento tiene nombre
     title = StringProperty()
     subtitle = StringProperty()
@@ -1966,6 +1973,37 @@ def season_dialog(on_done=None):
         accent = c(theme.LEAF) if s["season"] == a.season else None
         items.append((s["title"], sub, choose, accent))
     pick_dialog("Temporada", items)
+
+
+def rename_unit_dialog(variety_id: int, on_done=None):
+    """Nombre propio de un punto de la fenología unificada (p. ej. «T1 · Planta del poste»).
+    Vacío = vuelve al nombre automático. Solo los puntos (las parcelas y variedades se
+    renombran en Ajustes)."""
+    from kivy.factory import Factory
+    a = app()
+    v = a.db.get_variety(variety_id)
+    if not v or not v.get("pheno_unit"):
+        a.toast("Solo los puntos de la fenología unificada se renombran aquí (el resto, en Ajustes › Registros).")
+        return
+    auto = a.db.unit_auto_name(v)
+    form = MDBoxLayout(orientation="vertical", adaptive_height=True, spacing=dp(6), padding=(0, dp(8), 0, 0))
+    f = Factory.Field(hint_text="Nombre del punto", text=v["name"])
+    form.add_widget(f)
+    form.add_widget(MDLabel(text=f"Vacío = nombre automático («{auto}»). Los registros y fotos siguen en el punto.",
+                            font_style="Caption", adaptive_height=True, theme_text_color="Custom",
+                            text_color=c(theme.MUTED)))
+
+    def ok(_f):
+        try:
+            a.db.rename_pheno_unit(variety_id, f.text)
+        except ValueError as exc:
+            a.toast(str(exc))
+            return False
+        a.toast("Nombre del punto guardado")
+        if on_done:
+            on_done()
+
+    form_dialog("Cambiar nombre del punto", form, ok)
 
 
 class SamplingTab(MDBoxLayout):
@@ -2008,6 +2046,7 @@ class SamplingTab(MDBoxLayout):
             for r in rows:
                 row = VarietyRow(variety_id=r["variety"]["id"])
                 row.bind(on_release=lambda w: a.open_observation(w.variety_id, a.week["id"]))
+                row.bind(on_long_press=lambda w: rename_unit_dialog(w.variety_id, self.refresh))
                 cache[r["variety"]["id"]] = row
                 box.add_widget(row)
             self._rows = cache

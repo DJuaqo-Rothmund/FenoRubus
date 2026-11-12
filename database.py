@@ -613,8 +613,52 @@ class Database:
             return f"Ensayo · {label}" if label else self.UNIT_NAME
         return f"T{t} · {label}" if label else f"T{t} · Fenología"
 
+    @staticmethod
+    def _unit_key(t, i) -> str:
+        return f"{'' if t is None else int(t)}|{int(i)}"
+
+    def unit_labels(self) -> dict:
+        """Nombres propios de los puntos (mantener presionado en el muestreo): {"t|i": nombre}."""
+        raw = self.get_setting("trial_unit_labels", None)
+        return {str(k): str(v).strip() for k, v in raw.items() if str(v).strip()} if isinstance(raw, dict) else {}
+
+    def unit_auto_name(self, v: dict) -> str:
+        """El nombre que el punto llevaría sin nombre propio."""
+        cfg = self.pheno_config()
+        t, i = v.get("treatment"), int(v.get("rep") or 1)
+        names = cfg["names"]
+        if cfg["scope"] == "treatment":
+            top = max(self.unit_counts(cfg).values(), default=0)
+            names = names + [""] * (top - len(names))
+        return self._unit_name(cfg["scope"], names, t, i)
+
+    def rename_pheno_unit(self, variety_id: int, name: str) -> dict:
+        """Nombre propio de un punto de la fenología unificada (vacío: el automático). Se guarda
+        en los ajustes del ensayo, así no lo pisa cambiar la configuración y viaja a la web."""
+        v = self.get_variety(variety_id)
+        if not v or not v.get("pheno_unit"):
+            raise ValueError("Solo se renombran aquí los puntos de la fenología unificada.")
+        name = " ".join((name or "").split())[:80]
+        clash = self.query_one("SELECT id FROM varieties WHERE name=? AND id<>?", (name, variety_id)) if name else None
+        if clash:
+            raise ValueError(f"Ya hay un registro llamado «{name}».")
+        labels = self.unit_labels()
+        key = self._unit_key(v["treatment"], v["rep"])
+        if name and name != self.unit_auto_name(v):
+            labels[key] = name
+        else:
+            labels.pop(key, None)
+        self.set_setting("trial_unit_labels", labels)
+        self.sync_pheno_units()
+        self.log("update", "variety", variety_id, f"Punto de fenología: {name or 'nombre automático'}")
+        return self.get_variety(variety_id)
+
     def _want_units(self) -> dict:
         """{(tratamiento o None, n.º de punto): nombre} de los puntos vigentes."""
+        own = self.unit_labels()
+        return {k: own.get(self._unit_key(*k), n) for k, n in self._auto_units().items()}
+
+    def _auto_units(self) -> dict:
         cfg = self.pheno_config()
         if cfg["scope"] == "trial":
             return {(None, i): self._unit_name("trial", cfg["names"], None, i)

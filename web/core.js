@@ -212,6 +212,35 @@ export function phenoUnits(state) {
   return rows(state, "varieties").filter((v) => v.active !== 0 && v.pheno_unit)
     .sort((a, b) => (a.sort_order || 0) - (b.sort_order || 0) || (a.name || "").localeCompare(b.name || "", "es"));
 }
+export function unitLabels(state) {
+  const raw = setting(state, "trial_unit_labels", null);
+  const out = {};
+  if (raw && typeof raw === "object") for (const [k, v] of Object.entries(raw)) if (String(v ?? "").trim()) out[k] = String(v).trim();
+  return out;
+}
+export function unitAutoName(state, v) {          // = Database.unit_auto_name
+  const cfg = phenoConfig(state);
+  let names = cfg.names;
+  if (cfg.scope === "treatment") {
+    const top = Math.max(0, ...Object.values(unitCounts(state, cfg)));
+    names = [...names, ...Array(Math.max(0, top - names.length)).fill("")];
+  }
+  return phenoUnitName(cfg.scope, names, cfg.scope === "trial" ? null : v.treatment, Number(v.rep || 1));
+}
+// Nombre propio de un punto (vacío = el automático) = Database.rename_pheno_unit.
+export function unitRenameChanges(state, v, name) {
+  if (!v || !v.pheno_unit) throw new Error("Solo se renombran aquí los puntos de la fenología unificada.");
+  name = String(name || "").split(/\s+/).filter(Boolean).join(" ").slice(0, 80);
+  if (name && rows(state, "varieties").some((x) => x.uid !== v.uid && sameName(x.name, name))) throw new Error(`Ya hay un registro llamado «${name}».`);
+  const labels = { ...unitLabels(state) };
+  const key = `${v.treatment == null ? "" : Number(v.treatment)}|${Number(v.rep || 1)}`;
+  if (name && name !== unitAutoName(state, v)) labels[key] = name; else delete labels[key];
+  const settings = { trial_unit_labels: JSON.stringify(labels) };
+  const tmp = { ...state, settings: { ...state.settings, ...settings } };
+  const cfg = phenoConfig(state);
+  const r = phenoUnitChanges(tmp, true, cfg.scope, cfg.names, cfg.scope === "treatment" ? unitCounts(state, cfg) : null);
+  return { changes: r.changes, settings: { ...r.settings, ...settings } };
+}
 // Activa (o quita) la fenología unificada y crea, renombra o archiva sus puntos (nada se
 // borra). Devuelve {changes, settings}.
 export function phenoUnitChanges(state, on, scope = "trial", names = [""], counts = null) {
@@ -240,6 +269,12 @@ export function phenoUnitChanges(state, on, scope = "trial", names = [""], count
         for (let i = 1; i <= n; i++) want.set(`${t}|${i}`, [t, i, phenoUnitName(scope, nm, t, i)]);
       }
     }
+  }
+  // Nombres propios de los puntos (mantener presionado en el muestreo) = Database.unit_labels.
+  const own = unitLabels(state);
+  for (const [key, [t, i]] of want) {
+    const label = own[`${t === null ? "" : t}|${i}`];
+    if (label) want.set(key, [t, i, label]);
   }
   const all = rows(state, "varieties");
   const have = new Map(all.filter((v) => v.pheno_unit).map((v) => [`${v.treatment ?? null}|${v.rep}`, v]));

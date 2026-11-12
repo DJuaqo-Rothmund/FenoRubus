@@ -325,3 +325,18 @@ def test_unit_counts_per_treatment_web_matches_app(tmp_path):
     assert [u["name"] for u in db.pheno_units()] == res["units"]
     db.sync_pheno_units()                                            # la app no cambia nada
     assert [u["name"] for u in db.pheno_units()] == res["units"]
+
+
+def test_rename_point_in_web_reaches_app(tmp_path):
+    import sync
+    from workspaces import Workspaces
+    wss = Workspaces(str(tmp_path / "data"))
+    db = wss.open(wss.create("id", "tratamientos", "Número de cañas", "NC"))
+    db.setup_trial(3, 4)
+    db.set_unified_pheno(True, "treatment", ["Planta 1", "Planta 2", "Planta 3"], {1: 3, 2: 0, 3: 3})
+    res = _node("unitrename", {"bundle": sync.export_changes(db, str(tmp_path)), "from": "T1 · Planta 3",
+                               "to": "T1 · Planta del poste"}, tmp_path)
+    assert res["auto"] == "T1 · Planta 3" and "T1 · Planta del poste" in res["units"] and len(res["units"]) == 6
+    sync.apply_changes(db, res["bundle"], str(tmp_path))
+    db.sync_pheno_units()                                     # la app lo conserva
+    assert [u["name"] for u in db.pheno_units()] == res["units"]
