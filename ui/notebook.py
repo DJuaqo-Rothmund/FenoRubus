@@ -1018,7 +1018,7 @@ class NoteScreen(MDScreen):
 
         if source == "camera":
             from ui import camera_burst          # varias seguidas, hasta «Listo»
-            camera_burst.burst(done, base, exact=True)
+            camera_burst.burst(done, base, exact=True, title="Cuaderno de campo")
         else:
             a.media.pick_images(done)
 

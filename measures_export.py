@@ -134,7 +134,10 @@ def write_xlsx(path: str, sheets: list[tuple[str, list[list]]]) -> str:
 
 def measure_rows(db, measure: dict, season: int | None = None) -> list[list]:
     """Filas (con encabezado) de una medición para toda la temporada."""
-    head = ["Semana del año", "Año", "Inicio de semana", "Variedad"]
+    cfg = db.sheet_first()
+    head = ["Semana del año", "Año", "Inicio de semana", cfg["title"]]
+    names = db.treatment_names()
+    vmap = {v["id"]: v for v in db.list_varieties(include_archived=True)}
     if measure["kind"] == "table":
         head += measure["columns"]
         # Columnas que ya no están en la definición, pero tienen datos: no se pierden.
@@ -154,7 +157,7 @@ def measure_rows(db, measure: dict, season: int | None = None) -> list[list]:
     for e in entries:
         week, year = ph.iso_week(e["start_date"])
         start = _dt.date.fromisoformat(e["start_date"][:10])
-        row = [week, year, f"{start:%d-%m-%Y}", e["variety_name"] or "General"]
+        row = [week, year, f"{start:%d-%m-%Y}", db.sheet_label(vmap.get(e["variety_id"]), names, cfg)]
         if measure["kind"] == "table":
             row += [e["data"].get(c, "") for c in head[4:-1]]
         else:

@@ -719,7 +719,7 @@ class YieldSet(YieldScreenBase):
 
         if source == "camera":
             from ui import camera_burst          # varias seguidas, hasta «Listo»
-            camera_burst.burst(done, "Estimación")
+            camera_burst.burst(done, "Estimación", title="Estimación de rendimiento")
         else:
             a.media.pick_images(done)
 

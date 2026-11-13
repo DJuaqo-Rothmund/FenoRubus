@@ -3893,3 +3893,25 @@ def test_report_photos_reused_from_cache(db, tmp_path):
         assert sum(len(f) for _r, _d, f in os.walk(photo_cache._dir)) == 0
     finally:
         photo_cache.MAX_BYTES = old
+
+
+def test_sheet_first_column_treatment_labels_and_export(db):
+    from measures_export import measure_rows
+    db.setup_trial(2, 2)
+    db.execute("UPDATE treatments SET name='34,5 kg/ha' WHERE num=1")
+    assert db.sheet_first() == {"title": "Tratamiento", "show": "desc"}
+    names = db.treatment_names()
+    t1r1 = next(v for v in db.list_varieties() if v["name"] == "T1R1")
+    t2r1 = next(v for v in db.list_varieties() if v["name"] == "T2R1")
+    assert db.sheet_label(t1r1, names) == "34,5 kg/ha"
+    assert db.sheet_label(t2r1, names) == "T2R1"                      # sin descripción: el código
+    db.set_sheet_first(title="Parcela", show="both")
+    assert db.sheet_label(t1r1, names, two_lines=True) == "34,5 kg/ha\nT1R1"
+    assert db.sheet_label(None) == "General"
+    db.ensure_weeks(2026, 1)
+    w = db.list_weeks(2026)[0]
+    mid = db.add_measure("Largo", "table")
+    db.add_measure_column(mid, "Arriba 1")
+    db.add_entry(mid, w["id"], t1r1["id"], data={"Arriba 1": "12"})
+    rows = measure_rows(db, db.get_measure(mid))
+    assert rows[0][3] == "Parcela" and rows[1][3] == "34,5 kg/ha (T1R1)" and "12" in rows[1]

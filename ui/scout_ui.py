@@ -647,7 +647,7 @@ class ScoutCapture(ScoutScreenBase):
 
         if source == "camera":
             from ui import camera_burst          # varias seguidas, hasta «Listo»
-            camera_burst.burst(done, "AeonScout")
+            camera_burst.burst(done, "AeonScout", title="AeonScout")
         else:
             a.media.pick_images(done)
 

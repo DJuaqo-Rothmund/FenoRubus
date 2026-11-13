@@ -282,7 +282,7 @@ class Panel:
 
         if source == "camera":
             from ui import camera_burst          # varias seguidas, hasta «Listo»
-            camera_burst.burst(done, "extra")
+            camera_burst.burst(done, "extra", title="Foto extra")
         else:
             a.media.pick_images(done)
 

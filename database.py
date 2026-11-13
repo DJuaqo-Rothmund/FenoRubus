@@ -1034,6 +1034,42 @@ class Database:
         title, tag = self.parcel_labels(v, self.treatment_names() if names is None else names)
         return f"{title} ({tag})" if tag else title
 
+    # Primera columna de las planillas de mediciones (por ensayo, se sincroniza: «trial_»).
+    SHEET_SHOW = ("desc", "code", "both")
+
+    def sheet_first(self) -> dict:
+        """{"title": encabezado, "show": desc | code | both} de la 1.ª columna de las planillas.
+        En un ensayo: «Tratamiento» con la descripción («34,5 kg/ha»); si no: «Variedad»."""
+        cfg = self.get_setting("trial_sheet_first", None) or {}
+        trial = self.is_trial
+        title = str(cfg.get("title") or "").strip() or ("Tratamiento" if trial else "Variedad")
+        show = cfg.get("show") if cfg.get("show") in self.SHEET_SHOW else ("desc" if trial else "code")
+        return {"title": title, "show": show}
+
+    def set_sheet_first(self, title: str | None = None, show: str | None = None) -> dict:
+        cur = self.sheet_first()
+        if title is not None:
+            cur["title"] = title.strip()[:40] or cur["title"]
+        if show in self.SHEET_SHOW:
+            cur["show"] = show
+        self.set_setting("trial_sheet_first", cur)
+        return cur
+
+    def sheet_label(self, v: dict | None, names: dict | None = None, cfg: dict | None = None,
+                    two_lines: bool = False) -> str:
+        """Texto de la 1.ª columna para la fila de la parcela/variedad `v` (None = «General»)."""
+        if not v:
+            return "General"
+        cfg = cfg or self.sheet_first()
+        title, tag = self.parcel_labels(v, self.treatment_names() if names is None else names)
+        if not tag:                       # sin descripción del tratamiento: el código
+            return title
+        if cfg["show"] == "code":
+            return tag
+        if cfg["show"] == "both":
+            return f"{title}\n{tag}" if two_lines else f"{title} ({tag})"
+        return title
+
     @property
     def trial_cultivar(self) -> str:
         """Variedad de todo el ensayo (opcional; cada tratamiento puede tener otra)."""

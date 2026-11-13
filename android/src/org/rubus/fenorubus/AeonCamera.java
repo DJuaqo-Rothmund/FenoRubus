@@ -71,7 +71,7 @@ public class AeonCamera extends ComponentActivity {
     private LinearLayout strip;
     private TextView count, keyInfo, title;
     private View focusRing;
-    private final Button[] zoomBtns = new Button[3];
+    private final TextView[] zoomBtns = new TextView[3];
     private static final float[] ZOOMS = {1f, 2f, 4f};
     private boolean busy = false;
     private OrientationEventListener orientation;
@@ -116,14 +116,24 @@ public class AeonCamera extends ComponentActivity {
         top.setBackgroundColor(0x66000000);
         title = new TextView(this);
         title.setTextColor(Color.WHITE);
-        title.setTextSize(16);
+        title.setGravity(Gravity.CENTER_HORIZONTAL);
         String t = getIntent().getStringExtra(EXTRA_TITLE);
-        title.setText(t != null ? t : "Cámara");
+        if (t == null || t.isEmpty()) t = "Cámara";
+        // 1.ª línea grande (FOTO GENERAL / FOTO DE DETALLE), 2.ª chica (la parcela o variedad)
+        int nl = t.indexOf('\n');
+        android.text.SpannableString sp = new android.text.SpannableString(
+                nl < 0 ? t.toUpperCase(Locale.ROOT) : t.substring(0, nl).toUpperCase(Locale.ROOT) + t.substring(nl));
+        int end = nl < 0 ? sp.length() : nl;
+        sp.setSpan(new android.text.style.StyleSpan(android.graphics.Typeface.BOLD), 0, end, 0);
+        sp.setSpan(new android.text.style.AbsoluteSizeSpan(22, true), 0, end, 0);
+        if (nl >= 0) sp.setSpan(new android.text.style.AbsoluteSizeSpan(15, true), nl, sp.length(), 0);
+        title.setText(sp);
         top.addView(title);
         keyInfo = new TextView(this);
         keyInfo.setTextColor(0xCCFFFFFF);
         keyInfo.setTextSize(12);
-        keyInfo.setText("Toque para enfocar · dos dedos: zoom");
+        keyInfo.setGravity(Gravity.CENTER_HORIZONTAL);
+        keyInfo.setText("Botón del control o volumen: toque = foto · mantener = zoom");
         top.addView(keyInfo);
         root.addView(top, new FrameLayout.LayoutParams(-1, -2, Gravity.TOP));
 
@@ -137,23 +147,18 @@ public class AeonCamera extends ComponentActivity {
         zooms.setGravity(Gravity.CENTER);
         for (int i = 0; i < ZOOMS.length; i++) {
             final float z = ZOOMS[i];
-            Button b = new Button(this);
+            TextView b = new TextView(this);        // círculo exacto (Button recorta su fondo)
             b.setText(((int) z) + "×");
             b.setTextColor(Color.WHITE);
-            b.setAllCaps(false);
             b.setTextSize(14);
-            b.setMinWidth(0);
-            b.setMinimumWidth(0);
-            b.setMinHeight(0);
-            b.setMinimumHeight(0);
-            b.setPadding(0, 0, 0, 0);
-            b.setStateListAnimator(null);
-            b.setBackground(round(0x55FFFFFF, dp(20), 0, 0));
+            b.setGravity(Gravity.CENTER);
+            b.setClickable(true);
+            b.setBackground(round(0x55FFFFFF, dp(26), 0, 0));
             b.setOnClickListener(new View.OnClickListener() {
                 public void onClick(View v) { setZoom(z); }
             });
-            LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(dp(48), dp(40));
-            lp.setMargins(dp(8), 0, dp(8), dp(6));
+            LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(dp(52), dp(52));
+            lp.setMargins(dp(10), dp(4), dp(10), dp(8));
             zooms.addView(b, lp);
             zoomBtns[i] = b;
         }
@@ -298,7 +303,7 @@ public class AeonCamera extends ComponentActivity {
     private void markZoom(float v) {
         for (int i = 0; i < ZOOMS.length; i++) {
             boolean on = Math.abs(ZOOMS[i] - v) < .15f;
-            zoomBtns[i].setBackground(round(on ? 0xFFF2C14E : 0x55FFFFFF, dp(20), 0, 0));
+            zoomBtns[i].setBackground(round(on ? 0xFFF2C14E : 0x55FFFFFF, dp(26), 0, 0));
             zoomBtns[i].setTextColor(on ? Color.BLACK : Color.WHITE);
         }
         if (camera != null && keyInfo != null) {
@@ -398,54 +403,98 @@ public class AeonCamera extends ComponentActivity {
     }
 
     // ------------------------------------------------------------------ estabilizador / control
+    // Volumen (lo que envían la mayoría de los estabilizadores y controles Bluetooth):
+    //   toque = foto · mantener + = acercar · mantener − = alejar.
+    // Otras teclas: cámara, Enter, OK, reproducir/pausa, auricular, botones de mando = foto;
+    // siguiente/anterior, ← →, zoom = cambiar entre 1×, 2× y 4×; enfoque = enfocar al centro.
+    private boolean held;          // la tecla de volumen se mantuvo (hizo zoom): al soltar, sin foto
+
+    private static boolean isVolume(int k) {
+        return k == KeyEvent.KEYCODE_VOLUME_UP || k == KeyEvent.KEYCODE_VOLUME_DOWN;
+    }
+
+    private static boolean isShutter(int k) {
+        switch (k) {
+            case KeyEvent.KEYCODE_CAMERA: case KeyEvent.KEYCODE_ENTER: case KeyEvent.KEYCODE_NUMPAD_ENTER:
+            case KeyEvent.KEYCODE_DPAD_CENTER: case KeyEvent.KEYCODE_SPACE:
+            case KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE: case KeyEvent.KEYCODE_MEDIA_PLAY:
+            case KeyEvent.KEYCODE_MEDIA_PAUSE: case KeyEvent.KEYCODE_MEDIA_STOP:
+            case KeyEvent.KEYCODE_HEADSETHOOK: case KeyEvent.KEYCODE_MEDIA_RECORD:
+            case KeyEvent.KEYCODE_BUTTON_A: case KeyEvent.KEYCODE_BUTTON_B:
+            case KeyEvent.KEYCODE_BUTTON_X: case KeyEvent.KEYCODE_BUTTON_Y:
+            case KeyEvent.KEYCODE_BUTTON_1: case KeyEvent.KEYCODE_BUTTON_2:
+            case KeyEvent.KEYCODE_BUTTON_R1: case KeyEvent.KEYCODE_BUTTON_L1:
+                return true;
+            default:
+                return false;
+        }
+    }
+
+    private static int presetStep(int k) {
+        switch (k) {
+            case KeyEvent.KEYCODE_MEDIA_NEXT: case KeyEvent.KEYCODE_DPAD_RIGHT:
+            case KeyEvent.KEYCODE_ZOOM_IN: case KeyEvent.KEYCODE_DPAD_UP: case KeyEvent.KEYCODE_PAGE_UP:
+            case KeyEvent.KEYCODE_MEDIA_FAST_FORWARD:
+                return 1;
+            case KeyEvent.KEYCODE_MEDIA_PREVIOUS: case KeyEvent.KEYCODE_DPAD_LEFT:
+            case KeyEvent.KEYCODE_ZOOM_OUT: case KeyEvent.KEYCODE_DPAD_DOWN: case KeyEvent.KEYCODE_PAGE_DOWN:
+            case KeyEvent.KEYCODE_MEDIA_REWIND:
+                return -1;
+            default:
+                return 0;
+        }
+    }
+
+    /** Siguiente / anterior zoom de los botones 1× 2× 4×. */
+    private void zoomPreset(int step) {
+        if (camera == null) return;
+        ZoomState zs = camera.getCameraInfo().getZoomState().getValue();
+        float cur = zs != null ? zs.getZoomRatio() : 1f;
+        int i = 0;
+        for (int j = 0; j < ZOOMS.length; j++) if (Math.abs(ZOOMS[j] - cur) < Math.abs(ZOOMS[i] - cur)) i = j;
+        i = Math.max(0, Math.min(ZOOMS.length - 1, i + step));
+        applyZoom(ZOOMS[i]);
+    }
+
     @Override
     public boolean dispatchKeyEvent(KeyEvent e) {
         int k = e.getKeyCode();
         if (k == KeyEvent.KEYCODE_BACK) return super.dispatchKeyEvent(e);
+        String name = KeyEvent.keyCodeToString(k).replace("KEYCODE_", "");
         if (e.getAction() == KeyEvent.ACTION_DOWN) {
+            if (isVolume(k)) {
+                if (e.getRepeatCount() == 0) {
+                    held = false;
+                } else {                                   // mantenido: zoom continuo
+                    held = true;
+                    zoomStep(k == KeyEvent.KEYCODE_VOLUME_UP ? 1.06f : 1 / 1.06f);
+                }
+                return true;
+            }
             String what = null;
-            switch (k) {
-                case KeyEvent.KEYCODE_VOLUME_UP:
-                case KeyEvent.KEYCODE_ZOOM_IN:
-                case KeyEvent.KEYCODE_DPAD_UP:
-                case KeyEvent.KEYCODE_PAGE_UP:
-                    zoomStep(1.12f); what = "acercar"; break;
-                case KeyEvent.KEYCODE_VOLUME_DOWN:
-                case KeyEvent.KEYCODE_ZOOM_OUT:
-                case KeyEvent.KEYCODE_DPAD_DOWN:
-                case KeyEvent.KEYCODE_PAGE_DOWN:
-                    zoomStep(1 / 1.12f); what = "alejar"; break;
-                case KeyEvent.KEYCODE_FOCUS:
-                    focusAt(preview.getWidth() / 2f, preview.getHeight() / 2f); what = "enfocar"; break;
-                case KeyEvent.KEYCODE_CAMERA:
-                case KeyEvent.KEYCODE_ENTER:
-                case KeyEvent.KEYCODE_DPAD_CENTER:
-                case KeyEvent.KEYCODE_SPACE:
-                case KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE:
-                case KeyEvent.KEYCODE_MEDIA_PLAY:
-                case KeyEvent.KEYCODE_HEADSETHOOK:
-                    if (e.getRepeatCount() == 0) shoot();
-                    what = "foto"; break;
-                default:
-                    break;
+            int step = presetStep(k);
+            if (isShutter(k)) {
+                if (e.getRepeatCount() == 0) shoot();
+                what = "foto";
+            } else if (step != 0) {
+                if (e.getRepeatCount() == 0) zoomPreset(step);
+                what = step > 0 ? "más zoom" : "menos zoom";
+            } else if (k == KeyEvent.KEYCODE_FOCUS) {
+                focusAt(preview.getWidth() / 2f, preview.getHeight() / 2f);
+                what = "enfocar";
             }
-            keyInfo.setText("Botón del control: " + KeyEvent.keyCodeToString(k)
-                    + (what != null ? " → " + what : " (sin uso)"));
+            keyInfo.setText("Botón " + name + (what != null ? " → " + what : " (sin uso)"));
             if (what != null) return true;
-        } else if (e.getAction() == KeyEvent.ACTION_UP && k != KeyEvent.KEYCODE_BACK) {
-            switch (k) {
-                case KeyEvent.KEYCODE_VOLUME_UP: case KeyEvent.KEYCODE_VOLUME_DOWN:
-                case KeyEvent.KEYCODE_ZOOM_IN: case KeyEvent.KEYCODE_ZOOM_OUT:
-                case KeyEvent.KEYCODE_DPAD_UP: case KeyEvent.KEYCODE_DPAD_DOWN:
-                case KeyEvent.KEYCODE_PAGE_UP: case KeyEvent.KEYCODE_PAGE_DOWN:
-                case KeyEvent.KEYCODE_FOCUS: case KeyEvent.KEYCODE_CAMERA:
-                case KeyEvent.KEYCODE_ENTER: case KeyEvent.KEYCODE_DPAD_CENTER:
-                case KeyEvent.KEYCODE_SPACE: case KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE:
-                case KeyEvent.KEYCODE_MEDIA_PLAY: case KeyEvent.KEYCODE_HEADSETHOOK:
-                    return true;
-                default:
-                    break;
+        } else if (e.getAction() == KeyEvent.ACTION_UP) {
+            if (isVolume(k)) {
+                if (!held) {                               // toque corto: foto
+                    shoot();
+                    keyInfo.setText("Botón " + name + " → foto");
+                }
+                held = false;
+                return true;
             }
+            if (isShutter(k) || presetStep(k) != 0 || k == KeyEvent.KEYCODE_FOCUS) return true;
         }
         return super.dispatchKeyEvent(e);
     }
