@@ -1,0 +1,556 @@
+# ui/kv/start.kv · Apertura: cultivos, pantalla de carga, inicio del ensayo y Home con sus pestañas
+# (antes en ui/layout.kv; se carga en segundo plano: ui/kvload.py)
+#:import theme ui.theme
+#:import c ui.theme.c
+#:import dp kivy.metrics.dp
+#:import NoTransition kivy.uix.screenmanager.NoTransition
+
+# ---------------------------------------------------------------------------
+# Pantalla de inicio
+# ---------------------------------------------------------------------------
+# ---------------------------------------------------------------------------
+# Pantalla de cultivos: lo primero al abrir la app (y la cuenta de Google, una para todos)
+# ---------------------------------------------------------------------------
+<FloatCrop>:
+    # Logo de un cultivo «suelto» en la pantalla principal (flota; tocarlo entra al módulo).
+    size_hint: None, None
+    size: root.side, root.side + dp(22)
+    canvas.before:
+        PushMatrix
+        Translate:
+            xy: 0, root.bob
+    canvas.after:
+        PopMatrix
+    Image:
+        source: root.logo
+        fit_mode: "contain"
+        mipmap: True
+        size_hint: None, None
+        size: (root.side * (.9 if root.state == "down" else 1),) * 2
+        pos: root.center_x - self.width / 2, root.top - root.side / 2 - self.height / 2
+    MDLabel:
+        text: root.app_name
+        halign: "center"
+        font_style: "Caption"
+        bold: True
+        theme_text_color: "Custom"
+        text_color: c(root.accent)
+        size_hint: None, None
+        size: root.width, dp(20)
+        pos: root.x, root.y
+
+<AiLauncher>:
+    # IA (brillo neón cian) o IA+ (ki rojo) en la pantalla principal.
+    size_hint: None, None
+    size: root.side, root.side + dp(20)
+    MDLabel:
+        text: root.label
+        halign: "center"
+        font_style: "Caption"
+        bold: True
+        theme_text_color: "Custom"
+        text_color: theme.on_bg("#3A5AE6")
+        size_hint: None, None
+        size: root.width, dp(18)
+        pos: root.x, root.y
+
+<CropScreen>:
+    md_bg_color: 0, 0, 0, 0
+    FloatLayout:
+        id: stage
+        # Tocar el logo de AeonCrop: aparecen IA e IA+ a sus lados (y se ocultan de nuevo).
+        AeonLogo:
+            id: logo
+            source: theme.AEON_LOGO
+            fit_mode: "contain"
+            mipmap: True
+            size_hint: None, None
+            size: (dp(150) * (.94 if self.state == "down" else 1),) * 2
+            pos_hint: {"center_x": .5, "top": .975}
+            on_release: root.toggle_ai()
+            canvas.before:
+                PushMatrix
+                Scale:
+                    origin: self.center
+                    x: self.pulse
+                    y: self.pulse
+            canvas.after:
+                PopMatrix
+        FloatCrop:
+            id: c_frambuesa
+            crop_id: "frambuesa"
+            side: dp(128)
+            pos_hint: {"center_x": .5, "center_y": .6}
+            on_release: app.choose_crop(self.crop_id)
+        FloatCrop:
+            id: c_arandano
+            crop_id: "arandano"
+            side: dp(128)
+            pos_hint: {"center_x": .26, "center_y": .43}
+            on_release: app.choose_crop(self.crop_id)
+        FloatCrop:
+            id: c_cranberry
+            crop_id: "cranberry"
+            side: dp(128)
+            pos_hint: {"center_x": .74, "center_y": .43}
+            on_release: app.choose_crop(self.crop_id)
+        AiLauncher:
+            id: ai
+            label: "Entrenador IA"
+            side: dp(84)
+            opacity: root.ai_shown
+            disabled: root.ai_shown < .5
+            pos_hint: {"center_x": .16, "center_y": .845 - .03 * (1 - root.ai_shown)}
+        AiLauncher:
+            id: aiplus
+            label: "IA+"
+            plus: True
+            side: dp(84)
+            opacity: root.ai_shown
+            disabled: root.ai_shown < .5
+            pos_hint: {"center_x": .84, "center_y": .845 - .03 * (1 - root.ai_shown)}
+        # AeonScout: plagas, malezas y enfermedades (banco de imágenes para la IA).
+        FloatCrop:
+            # Mismo estilo que los Pheno: logo suelto con su anillo y estadios, flotando.
+            id: scout
+            logo: theme.SCOUT_LOGO
+            app_name: "AeonScout"
+            accent: "#1D5E63"
+            side: dp(112)
+            pos_hint: {"center_x": .5, "center_y": .21}
+            on_release: app.open_scout()
+        MDBoxLayout:
+            orientation: "vertical"
+            adaptive_height: True
+            size_hint_x: .9
+            pos_hint: {"center_x": .5, "y": .02}
+            spacing: dp(4)
+            MDLabel:
+                id: account
+                halign: "center"
+                font_style: "Caption"
+                adaptive_height: True
+                theme_text_color: "Custom"
+                text_color: c(theme.MUTED)
+            GoogleButton:
+                id: google_btn
+                on_release: root.connect_google()
+    MDIconButton:
+        id: gear
+        icon: "cog-outline"
+        icon_size: "26sp"
+        theme_icon_color: "Custom"
+        icon_color: c(theme.LEAF_DARK, .8)
+        pos_hint: {"x": .01, "top": .99}
+        on_release: app.open_settings(general_only=True)
+    MDIconButton:
+        id: syncbtn
+        icon: "sync"
+        icon_size: "26sp"
+        theme_icon_color: "Custom"
+        icon_color: c(theme.LEAF_DARK, .8)
+        pos: gear.right - dp(6), gear.y
+        on_release: root.sync_all()
+        canvas.before:
+            PushMatrix
+            Rotate:
+                angle: root.sync_angle
+                origin: self.center
+        canvas.after:
+            PopMatrix
+
+<SplashScreen>:
+    md_bg_color: c(theme.SPLASH_BG)
+    FloatLayout:
+        AnchorLayout:
+            anchor_y: "center"
+            size_hint: 1, None
+            height: root.height * .5
+            pos_hint: {"center_x": .5, "center_y": .6}
+            LogoAnim:
+                id: logo
+                size_hint: .62, .62
+        Image:
+            id: name
+            source: theme.WORDMARK
+            fit_mode: "contain"
+            mipmap: True
+            size_hint: .78, .14
+            pos_hint: {"center_x": .5, "center_y": .36}
+        MDLabel:
+            id: byline
+            text: "By DJuaqo, potenciado con Claude AI"
+            halign: "center"
+            font_style: "Caption"
+            theme_text_color: "Custom"
+            text_color: c(theme.MUTED)
+            size_hint: 1, None
+            height: dp(24)
+            pos_hint: {"center_x": .5, "y": .04}
+
+# ---------------------------------------------------------------------------
+# Inicio: I+D / Predio, Entrenador IA y cuenta de Google
+# ---------------------------------------------------------------------------
+<StartIcon>:
+    orientation: "vertical"
+    size_hint: None, None
+    size: root.diameter + dp(40), root.diameter + dp(40)
+    spacing: dp(4)
+    opacity: root.reveal
+    canvas.before:
+        PushMatrix
+        Translate:
+            xy: 0, -root.lift + root.bob
+    canvas.after:
+        PopMatrix
+    FloatLayout:
+        size_hint: None, None
+        size: root.diameter + dp(40), root.diameter + dp(18)
+        pos_hint: {"center_x": .5}
+        Image:
+            source: root.bubble
+            opacity: 1 if root.bubble else 0
+            size_hint: None, None
+            size: ((root.diameter + dp(62)),) * 2
+            pos_hint: {"center_x": .5, "center_y": .5}
+            fit_mode: "contain"
+            mipmap: True
+            # Latido: escala en el canvas (cambiar el tamaño reacomodaba toda la pantalla en
+            # cada cuadro y la animación iba a tirones).
+            canvas.before:
+                PushMatrix
+                Scale:
+                    origin: self.center
+                    x: root.pulse
+                    y: root.pulse
+            canvas.after:
+                PopMatrix
+        Image:
+            source: root.glow
+            opacity: root.glow_level if root.glow else 0
+            size_hint: None, None
+            size: (root.diameter * (.88 if root.state == "down" else 1),) * 2
+            pos_hint: {"center_x": .5, "center_y": .5}
+            fit_mode: "contain"
+        Image:
+            source: root.source
+            size_hint: None, None
+            size: (root.diameter * (.88 if root.state == "down" else 1),) * 2
+            pos_hint: {"center_x": .5, "center_y": .5}
+            fit_mode: "contain"
+            mipmap: True
+    MDLabel:
+        text: root.label
+        halign: "center"
+        font_style: "Caption"
+        bold: True
+        size_hint_y: None
+        height: dp(18)
+        theme_text_color: "Custom"
+        text_color: root.color
+
+<StatusPill>:
+    size_hint: None, None
+    height: dp(24)
+    width: dp(26) + lbl.texture_size[0]
+    canvas.before:
+        Color:
+            rgba: c(theme.SURFACE, .78)
+        RoundedRectangle:
+            pos: self.pos
+            size: self.size
+            radius: [dp(12)]
+        Color:
+            rgba: root.color
+        Ellipse:
+            pos: self.x + dp(9), self.center_y - dp(3.5)
+            size: dp(7), dp(7)
+    Label:
+        id: lbl
+        text: root.text
+        font_size: "11sp"
+        bold: True
+        color: root.color
+        size_hint: None, None
+        size: self.texture_size
+        pos: root.x + dp(20), root.center_y - self.height / 2
+
+<GoogleButton>:
+    size_hint: 1, None
+    height: dp(54)
+    canvas.before:
+        Color:
+            rgba: 0, 0, 0, .08
+        RoundedRectangle:
+            pos: self.x, self.y - dp(2)
+            size: self.size
+            radius: [self.height / 2]
+        Color:
+            rgba: (.93, .93, .93, 1) if self.state == "down" else (1, 1, 1, 1)
+        RoundedRectangle:
+            pos: self.pos
+            size: self.size
+            radius: [self.height / 2]
+        Color:
+            rgba: .85, .85, .85, 1
+        Line:
+            rounded_rectangle: (self.x, self.y, self.width, self.height, self.height / 2)
+            width: dp(1)
+    BoxLayout:
+        size_hint: None, None
+        size: dp(26) + dp(12) + lbl.texture_size[0], dp(26)
+        pos_hint: {"center_x": .5, "center_y": .5}
+        spacing: dp(12)
+        Image:
+            source: theme.GOOGLE_G
+            size_hint: None, None
+            size: dp(24), dp(24)
+            pos_hint: {"center_y": .5}
+            mipmap: True
+        Label:
+            id: lbl
+            text: root.text
+            font_size: "16sp"
+            bold: True
+            color: .12, .12, .12, 1
+            size_hint: None, None
+            size: self.texture_size
+            pos_hint: {"center_y": .5}
+
+<StartScreen>:
+    md_bg_color: 0, 0, 0, 0
+    canvas.before:
+        Rectangle:
+            source: theme.START_BG
+            pos: self.pos
+            size: self.size
+    MDBoxLayout:
+        orientation: "vertical"
+        padding: dp(22), dp(18), dp(22), dp(20)
+        spacing: dp(6)
+        Image:
+            id: logo
+            source: theme.LOGO
+            fit_mode: "contain"
+            mipmap: True
+            size_hint_y: None
+            height: dp(104)
+        Image:
+            source: theme.WORDMARK
+            fit_mode: "contain"
+            mipmap: True
+            size_hint_y: None
+            height: dp(40)
+        MDLabel:
+            id: greeting
+            halign: "center"
+            font_style: "Subtitle1"
+            bold: True
+            adaptive_height: True
+            theme_text_color: "Custom"
+            text_color: c(theme.LEAF_DARK)
+            on_touch_down: root.ask_name() if self.collide_point(*args[1].pos) else None
+        AnchorLayout:
+            size_hint_y: None
+            height: dp(26)
+            Widget:
+                id: week_chip
+                size_hint: None, None
+                height: dp(24)
+                width: week_lbl.texture_size[0] + dp(24)
+                opacity: 1 if week_lbl.text else 0
+                canvas.before:
+                    Color:
+                        rgba: c(theme.SURFACE, .8)
+                    RoundedRectangle:
+                        pos: self.pos
+                        size: self.size
+                        radius: [dp(12)]
+                    Color:
+                        rgba: c(theme.LEAF_DARK, .25)
+                    Line:
+                        rounded_rectangle: (self.x, self.y, self.width, self.height, dp(12))
+                        width: dp(1)
+                Label:
+                    id: week_lbl
+                    font_size: "11.5sp"
+                    color: c(theme.LEAF_DARK)
+                    size_hint: None, None
+                    size: self.texture_size
+                    pos: week_chip.x + dp(12), week_chip.center_y - self.height / 2
+        AnchorLayout:
+            size_hint_y: None
+            height: dp(8)
+            Widget:
+                id: week_bar
+                size_hint: None, None
+                size: dp(152), dp(5)
+                progress: 0
+                opacity: 1 if week_lbl.text else 0
+                canvas:
+                    Color:
+                        rgba: c(theme.LEAF_DARK, .16)
+                    RoundedRectangle:
+                        pos: self.pos
+                        size: self.size
+                        radius: [dp(3)]
+                    Color:
+                        rgba: c(theme.LEAF)
+                    RoundedRectangle:
+                        pos: self.pos
+                        size: self.width * self.progress, self.height
+                        radius: [dp(3)]
+        Widget:
+        MDBoxLayout:
+            size_hint: None, None
+            size: dp(150) * 2 + dp(16), dp(170)
+            pos_hint: {"center_x": .5}
+            spacing: dp(16)
+            StartIcon:
+                id: ic_id
+                source: theme.START_ID
+                bubble: theme.BLOB_ID
+                label: "I+D"
+                color: theme.on_bg("#AB1D59")
+                diameter: dp(112)
+                on_release: root.open_profile("id")
+            StartIcon:
+                id: ic_predio
+                source: theme.START_PREDIO
+                bubble: theme.BLOB_PREDIO
+                label: "Predio"
+                color: theme.on_bg("#2F5643")
+                diameter: dp(112)
+                on_release: root.open_profile("predio")
+        # La IA y la IA+ están en la pantalla principal de AeonCrop (eligen el cultivo).
+        MDBoxLayout:
+            size_hint: None, None
+            size: dp(150) * 2 + dp(16), dp(170)
+            pos_hint: {"center_x": .5}
+            spacing: dp(16)
+            StartIcon:
+                id: ic_nb
+                source: theme.START_NOTEBOOK
+                bubble: theme.BLOB_NOTEBOOK
+                label: "Cuaderno de campo"
+                color: theme.on_bg("#6B4423")
+                diameter: dp(112)
+                on_release: app.open_notebook()
+            StartIcon:
+                id: ic_yield
+                source: theme.START_YIELD
+                bubble: theme.BLOB_YIELD
+                label: "Rendimiento"
+                color: theme.on_bg("#2F7F92")
+                diameter: dp(112)
+                on_release: app.open_yield()
+        Widget:
+        AnchorLayout:
+            size_hint_y: None
+            height: dp(30)
+            BoxLayout:
+                size_hint: None, None
+                height: dp(30)
+                width: self.minimum_width
+                spacing: dp(8)
+                BoxLayout:
+                    id: pills
+                    size_hint: None, None
+                    height: dp(24)
+                    pos_hint: {"center_y": .5}
+                    spacing: dp(6)
+        Widget:
+            size_hint_y: None
+            height: dp(4)
+        # La cuenta de Google se conecta en la pantalla de cultivos (una para todos).
+        GhostButton:
+            id: crops_btn
+            icon: "home-variant-outline"
+            text: "AeonCrop · todos los cultivos"
+            height: dp(46)
+            on_release: app.open_crops()
+    # Ajustes generales: solo el engranaje, arriba a la izquierda (el post-it va a la derecha)
+    MDIconButton:
+        id: gear
+        icon: "cog-outline"
+        icon_size: "26sp"
+        theme_icon_color: "Custom"
+        icon_color: c(theme.LEAF_DARK, .8)
+        pos_hint: {"x": .01, "top": .99}
+        on_release: app.open_settings(general_only=True)
+    # Sincronizar con Google Drive (trae lo de los otros equipos de la cuenta)
+    MDIconButton:
+        id: syncbtn
+        icon: "sync"
+        icon_size: "26sp"
+        theme_icon_color: "Custom"
+        icon_color: c(theme.LEAF_DARK, .8)
+        pos: gear.right - dp(6), gear.y
+        on_release: root.sync_now()
+        canvas.before:
+            PushMatrix
+            Rotate:
+                angle: root.sync_angle
+                origin: self.center
+        canvas.after:
+            PopMatrix
+    PostIt:
+        id: postit
+        size_hint: None, None
+        # Sin pendientes: tamaño 0 (oculto y desactivado igual tomaría los toques)
+        size: (dp(112), dp(94)) if self.lines else (0, 0)
+        pos_hint: {"right": .96, "top": .975}
+        opacity: 1 if self.lines else 0
+        disabled: not self.lines
+        on_release: root.open_tasks()
+
+# ---------------------------------------------------------------------------
+# Home + pestañas
+# ---------------------------------------------------------------------------
+<HomeScreen>:
+    md_bg_color: 0, 0, 0, 0
+    MDBoxLayout:
+        orientation: "vertical"
+        TopBar:
+            id: bar
+            title: "Muestreo semanal"
+            left_action_items: [["home-outline", lambda x: app.open_start(), "Inicio"]]
+            # El Entrenador de IA se abre desde la pantalla de inicio.
+            right_action_items: [[theme.DRIVE_UP, lambda x: root.drive_quick(), "Google Drive: respaldo y sincronización"], ["cog-outline", lambda x: app.open_settings(), "Ajustes"]]
+        WorkspaceBanner:
+            id: ws_banner
+            on_release: app.open_workspaces(app.workspace["profile"] if app.workspace else None)
+        ScreenManager:
+            id: tabs
+            transition: NoTransition()
+            Screen:
+                name: "sampling"
+                SamplingTab:
+                    id: sampling
+            Screen:
+                name: "reports"
+                ReportsTab:
+                    id: reports
+            Screen:
+                name: "preview"
+                PreviewTab:
+                    id: preview
+        NavBar:
+            NavTile:
+                id: nav_sampling
+                name: "sampling"
+                text: "Muestreo"
+                active: tabs.current == "sampling"
+                on_release: root.on_tab("sampling")
+            NavTile:
+                id: nav_reports
+                name: "reports"
+                text: "Informes"
+                active: tabs.current == "reports"
+                on_release: root.on_tab("reports")
+            NavTile:
+                id: nav_preview
+                name: "preview"
+                text: "Vista previa"
+                active: tabs.current == "preview"
+                on_release: root.on_tab("preview")

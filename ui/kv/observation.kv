@@ -1,0 +1,250 @@
+# ui/kv/observation.kv · Registro fenológico (fotos, BBCH, notas)
+# (antes en ui/layout.kv; se carga en segundo plano: ui/kvload.py)
+#:import theme ui.theme
+#:import c ui.theme.c
+#:import dp kivy.metrics.dp
+#:import NoTransition kivy.uix.screenmanager.NoTransition
+
+# ---------------------------------------------------------------------------
+# Registro fenológico
+# ---------------------------------------------------------------------------
+<PhotoSlot>:
+    orientation: "vertical"
+    padding: dp(10)
+    spacing: dp(6)
+    radius: [dp(16)]
+    size_hint_y: None
+    height: dp(318)
+    md_bg_color: c(theme.GLASS)
+    line_color: c(theme.GLASS_EDGE)
+    MDBoxLayout:
+        adaptive_height: True
+        SectionLabel:
+            text: root.caption
+            shorten: True
+            pos_hint: {"center_y": .5}
+        Tag:
+            text: f"{root.count} FOTO" + ("S" if root.count != 1 else "")
+            opacity: 1 if root.count else 0
+            bg: c(theme.BERRY_SOFT)
+            fg: c(theme.BERRY)
+            pos_hint: {"center_y": .5}
+    MDBoxLayout:
+        id: image_box
+    ScrollView:
+        size_hint_y: None
+        height: dp(46) if root.count > 1 else 0
+        opacity: 1 if root.count > 1 else 0
+        do_scroll_y: False
+        bar_width: 0
+        BoxLayout:
+            id: strip
+            size_hint_x: None
+            width: self.minimum_width
+            spacing: dp(6)
+    Muted:
+        text: root.meta
+        shorten: True
+    MDBoxLayout:
+        adaptive_height: True
+        spacing: dp(2)
+        MDIconButton:
+            icon: "camera-plus-outline"
+            theme_icon_color: "Custom"
+            icon_color: c(theme.BERRY)
+            on_release: root.screen.capture(root.kind, "camera")
+        MDIconButton:
+            icon: "image-multiple-outline"
+            theme_icon_color: "Custom"
+            icon_color: c(theme.LEAF_DARK)
+            on_release: root.screen.capture(root.kind, "gallery")
+        Widget:
+        MDIconButton:
+            icon: "delete-outline"
+            disabled: not root.has_photo
+            theme_icon_color: "Custom"
+            icon_color: c(theme.BERRY)
+            on_release: root.screen.remove_photo(root.kind)
+
+<StripThumb>:
+    size_hint: None, None
+    size: dp(44), dp(44)
+    padding: dp(2)
+    radius: [dp(9)]
+    md_bg_color: c(theme.SURFACE, .6)
+    line_color: c(theme.BERRY) if self.primary else c(theme.GLASS_EDGE)
+
+<ObservationScreen>:
+    md_bg_color: 0, 0, 0, 0
+    MDBoxLayout:
+        orientation: "vertical"
+        TopBar:
+            id: bar
+            title: "Registro"
+            left_action_items: [["arrow-left", lambda x: app.back()]]
+            right_action_items: [["content-save-outline", lambda x: root.save()]]
+        MDScrollView:
+            do_scroll_x: False
+            MDBoxLayout:
+                orientation: "vertical"
+                adaptive_height: True
+                padding: dp(16), dp(12), dp(16), dp(32)
+                spacing: dp(12)
+                Muted:
+                    id: week_caption
+                MDGridLayout:
+                    cols: 2
+                    spacing: dp(10)
+                    adaptive_height: True
+                    PhotoSlot:
+                        id: canopy
+                        kind: "canopy"
+                        caption: "FOTO 1 · CANOPIA"
+                        screen: root
+                    PhotoSlot:
+                        id: detail
+                        kind: "detail"
+                        caption: "FOTO 2 · DETALLE"
+                        screen: root
+                PaperCard:
+                    SectionLabel:
+                        text: "SUGERENCIA AUTOMÁTICA (IA LOCAL)"
+                    MDBoxLayout:
+                        adaptive_height: True
+                        spacing: dp(10)
+                        MDSpinner:
+                            id: spinner
+                            size_hint: None, None
+                            size: dp(22), dp(22)
+                            active: False
+                            opacity: 1 if self.active else 0
+                            color: c(theme.LEAF)
+                            pos_hint: {"center_y": .5}
+                        MDLabel:
+                            id: ai_label
+                            text: "Suba la foto de detalle para obtener una sugerencia."
+                            font_style: "Subtitle1"
+                            bold: True
+                            adaptive_height: True
+                            theme_text_color: "Custom"
+                            text_color: c(theme.INK)
+                    MDBoxLayout:
+                        adaptive_height: True
+                        spacing: dp(10)
+                        MDProgressBar:
+                            id: ai_conf
+                            max: 1
+                            value: 0
+                            color: c(theme.LEAF)
+                            back_color: c(theme.LEAF_SOFT)
+                            size_hint_y: None
+                            height: dp(6)
+                            pos_hint: {"center_y": .5}
+                        Muted:
+                            id: ai_conf_text
+                            size_hint_x: None
+                            width: dp(90)
+                            halign: "right"
+                    Muted:
+                        id: ai_explain
+                    MDBoxLayout:
+                        id: alternatives
+                        adaptive_height: True
+                        spacing: dp(6)
+                    MDBoxLayout:
+                        adaptive_height: True
+                        spacing: dp(8)
+                        PrimaryButton:
+                            id: accept_btn
+                            text: "Aceptar sugerencia"
+                            disabled: True
+                            on_release: root.accept_ai()
+                        GhostButton:
+                            icon: "refresh"
+                            text: "Re-analizar"
+                            on_release: root.analyze()
+                PaperCard:
+                    SectionLabel:
+                        text: "ESTADO FENOLÓGICO Y OBSERVACIONES"
+                    Field:
+                        id: bbch
+                        hint_text: "Estado fenológico (BBCH)"
+                        helper_text: "Toque el ícono para elegir de la escala o escriba libremente"
+                        helper_text_mode: "on_focus"
+                        icon_right: "format-list-bulleted"
+                    GhostButton:
+                        icon: "format-list-numbered"
+                        text: "Elegir de la escala BBCH"
+                        on_release: root.open_scale(self)
+                    Field:
+                        id: notes
+                        hint_text: "Notas y observaciones técnicas"
+                        multiline: True
+                        max_height: dp(180)
+                    Muted:
+                        id: stamp
+                PaperCard:
+                    SectionLabel:
+                        text: "UBICACIÓN DE LA MUESTRA (OPCIONAL)"
+                    MDBoxLayout:
+                        adaptive_height: True
+                        spacing: dp(10)
+                        MDIcon:
+                            id: gps_icon
+                            icon: "map-marker-off-outline"
+                            theme_text_color: "Custom"
+                            text_color: c(theme.MUTED)
+                            size_hint: None, None
+                            size: dp(28), dp(28)
+                            pos_hint: {"center_y": .5}
+                        MDBoxLayout:
+                            orientation: "vertical"
+                            adaptive_height: True
+                            pos_hint: {"center_y": .5}
+                            Body:
+                                id: gps_text
+                                text: "Sin ubicación"
+                                bold: True
+                            Muted:
+                                id: gps_detail
+                    MDBoxLayout:
+                        adaptive_height: True
+                        spacing: dp(8)
+                        GhostButton:
+                            id: gps_btn
+                            icon: "crosshairs-gps"
+                            text: "Mi ubicación"
+                            on_release: root.locate_gps()
+                        GhostButton:
+                            icon: "map-marker-plus-outline"
+                            text: "Marcar en mapa"
+                            on_release: root.pick_on_map()
+                    GhostButton:
+                        id: gps_clear
+                        icon: "map-marker-remove-outline"
+                        text: "Quitar ubicación"
+                        on_release: root.clear_location()
+                PaperCard:
+                    SectionLabel:
+                        text: "FOTOS ADJUNTAS"
+                    Muted:
+                        text: "Otras fotos de esta semana con una descripción (ej.: daño por helada, calibre de fruto, plagas). Aparecen en el informe semanal y en el informe por variedad."
+                    MDBoxLayout:
+                        id: attachments
+                        orientation: "vertical"
+                        adaptive_height: True
+                        spacing: dp(6)
+                    MDBoxLayout:
+                        adaptive_height: True
+                        spacing: dp(8)
+                        GhostButton:
+                            icon: "camera-outline"
+                            text: "Tomar foto"
+                            on_release: root.attach("camera")
+                        GhostButton:
+                            icon: "image-multiple-outline"
+                            text: "Desde galería"
+                            on_release: root.attach("gallery")
+                PrimaryButton:
+                    text: "Guardar registro"
+                    on_release: root.save()

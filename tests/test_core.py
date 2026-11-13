@@ -3915,3 +3915,16 @@ def test_sheet_first_column_treatment_labels_and_export(db):
     db.add_entry(mid, w["id"], t1r1["id"], data={"Arriba 1": "12"})
     rows = measure_rows(db, db.get_measure(mid))
     assert rows[0][3] == "Parcela" and rows[1][3] == "34,5 kg/ha (T1R1)" and "12" in rows[1]
+
+
+def test_crashguard_quiet_logs_once_and_shows_in_full_text(tmp_path, monkeypatch):
+    import crashguard
+    monkeypatch.setattr(crashguard, "_quiet_path", lambda: str(tmp_path / "avisos.log"))
+    monkeypatch.setattr(crashguard, "_quiet_seen", set())
+    for _ in range(3):
+        try:
+            raise KeyError("x")
+        except KeyError as exc:
+            crashguard.quiet(exc, "prueba")
+    assert len(crashguard.quiet_entries()) == 1 and "prueba · KeyError" in crashguard.quiet_entries()[0]
+    assert "=== Avisos" in crashguard.full_text()

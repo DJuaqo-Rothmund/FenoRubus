@@ -61,8 +61,8 @@ def today_tasks() -> list[dict]:
         tasks.append({"key": "notebook", "title": "Escribir el cuaderno", "short": "cuaderno", "done": done,
                       "detail": "Página de hoy lista" if done else "Aún no hay página de hoy",
                       "action": "Escribir", "run": open_today_page})
-    except Exception:  # noqa: BLE001
-        pass
+    except Exception as exc:  # noqa: BLE001
+        _quiet(exc, "pendientes: cuaderno")
     try:
         st = a.drive.status()
         if st["enabled"]:
@@ -71,8 +71,8 @@ def today_tasks() -> list[dict]:
                           "detail": "Todo respaldado" if not todo else
                           f"{todo} archivo{'s' if todo != 1 else ''} por subir",
                           "action": "Subir", "run": backup_now})
-    except Exception:  # noqa: BLE001
-        pass
+    except Exception as exc:  # noqa: BLE001
+        _quiet(exc, "pendientes: respaldo")
     try:
         units = db.pheno_units()
         if units:
@@ -83,8 +83,8 @@ def today_tasks() -> list[dict]:
             tasks.append({"key": "sampling", "title": f"Muestreo semana {ph.week_of_year(a.week)}",
                           "short": "muestreo", "done": n >= len(units),
                           "detail": f"{n} de {len(units)} registrados", "action": "Ir", "run": a.enter_home})
-    except Exception:  # noqa: BLE001
-        pass
+    except Exception as exc:  # noqa: BLE001
+        _quiet(exc, "pendientes: muestreo")
     return tasks
 
 
@@ -262,3 +262,8 @@ def AnchorPad(widget):   # noqa: N802 - centra un widget de tamaño fijo en la f
     box = AnchorLayout(size_hint_x=None, width=widget.width, anchor_y="center")
     box.add_widget(widget)
     return box
+
+
+def _quiet(exc, where):
+    import crashguard
+    crashguard.quiet(exc, where)

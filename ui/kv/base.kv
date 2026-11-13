@@ -1,0 +1,381 @@
+# ui/kv/base.kv · Piezas base (tarjetas, botones, campos) y barra de navegación inferior
+# (antes en ui/layout.kv; se carga en segundo plano: ui/kvload.py)
+#:import theme ui.theme
+#:import c ui.theme.c
+#:import dp kivy.metrics.dp
+#:import NoTransition kivy.uix.screenmanager.NoTransition
+
+# ---------------------------------------------------------------------------
+# Piezas base
+# ---------------------------------------------------------------------------
+<SectionLabel@MDLabel>:
+    font_style: "Overline"
+    bold: True
+    theme_text_color: "Custom"
+    text_color: c(theme.LEAF)
+    adaptive_height: True
+
+<Muted@MDLabel>:
+    font_style: "Caption"
+    theme_text_color: "Custom"
+    text_color: c(theme.MUTED)
+    # Sin adaptive_height: en KivyMD 1.2 un MDLabel vacío conservaría 100 px de alto.
+    size_hint_y: None
+    text_size: self.width, None
+    height: self.texture_size[1] if self.text else 0
+
+<Body@MDLabel>:
+    font_style: "Body2"
+    theme_text_color: "Custom"
+    text_color: c(theme.INK)
+    adaptive_height: True
+
+<GlassCard>:
+    canvas.before:
+        Color:
+            rgba: self.md_bg_color
+        RoundedRectangle:
+            pos: self.pos
+            size: self.size
+            radius: self.radius
+        Color:
+            rgba: self.line_color
+        Line:
+            rounded_rectangle: (self.x, self.y, self.width, self.height, min(self.radius[0], self.width / 2.1, self.height / 2.1) if self.width > 4 and self.height > 4 else 1)
+            width: dp(1)
+
+<GlassButton>:
+    canvas.after:
+        Color:
+            rgba: (1, 1, 1, .35) if self.state == "down" else (1, 1, 1, 0)
+        RoundedRectangle:
+            pos: self.pos
+            size: self.size
+            radius: self.radius
+
+# Acceso rápido a Drive: velo, burbujas translúcidas y etiquetas de estado.
+<DriveDial>:
+    canvas.before:
+        Color:
+            rgba: 0.08, 0.16, 0.12, .16
+        Rectangle:
+            pos: self.pos
+            size: self.size
+
+<DialBubble>:
+    size_hint: None, None
+    size: dp(56), dp(56)
+    canvas.before:
+        Color:
+            rgba: 0, 0, 0, .12
+        Ellipse:
+            pos: self.x, self.y - dp(3)
+            size: self.size
+        Color:
+            rgba: c(theme.SURFACE, .70) if self.state == "down" else c(theme.SURFACE, .86)
+        Ellipse:
+            pos: self.pos
+            size: self.size
+        Color:
+            rgba: c(theme.SURFACE, .95)
+        Line:
+            ellipse: self.x, self.y, self.width, self.height
+            width: dp(1.2)
+    MDIcon:
+        icon: root.icon
+        theme_text_color: "Custom"
+        text_color: root.color
+        font_size: dp(28)
+        halign: "center"
+        pos_hint: {"center_x": .5, "center_y": .5}
+    Label:
+        text: root.badge
+        opacity: 1 if root.badge else 0
+        font_size: dp(10)
+        bold: True
+        color: 1, 1, 1, 1
+        size_hint: None, None
+        size: max(dp(20), self.texture_size[0] + dp(8)), dp(20)
+        pos: root.right - self.width + dp(4), root.top - dp(16)
+        canvas.before:
+            Color:
+                rgba: c(theme.BERRY) if root.badge else (0, 0, 0, 0)
+            RoundedRectangle:
+                pos: self.pos
+                size: self.size
+                radius: [dp(10)]
+
+<DialPill>:
+    size_hint: None, None
+    size: self.texture_size[0] + dp(24), dp(30)
+    font_size: dp(12.5)
+    bold: True
+    color: c(theme.WARN) if self.warn else c(theme.LEAF_DARK)
+    canvas.before:
+        Color:
+            rgba: c(theme.SURFACE, .70) if self.state == "down" else c(theme.SURFACE, .86)
+        RoundedRectangle:
+            pos: self.pos
+            size: self.size
+            radius: [dp(15)]
+
+<PickRow>:
+    orientation: "horizontal"
+    size_hint_y: None
+    height: dp(58)
+    padding: dp(12), dp(6)
+    spacing: dp(12)
+    radius: [dp(14)]
+    md_bg_color: c(theme.SURFACE, .7)
+    line_color: c(theme.LINE)
+    Widget:
+        size_hint: None, None
+        size: dp(12), dp(12)
+        pos_hint: {"center_y": .5}
+        canvas:
+            Color:
+                rgba: root.accent
+            Ellipse:
+                pos: self.pos
+                size: self.size
+            Color:
+                rgba: c(theme.LEAF_DARK, .35)
+            Line:
+                circle: (self.center_x, self.center_y, self.width / 2)
+                width: dp(1)
+    MDBoxLayout:
+        orientation: "vertical"
+        pos_hint: {"center_y": .5}
+        adaptive_height: True
+        MDLabel:
+            text: root.title
+            font_style: "Body2"
+            bold: True
+            adaptive_height: True
+            theme_text_color: "Custom"
+            text_color: c(theme.INK)
+        MDLabel:
+            text: root.subtitle
+            font_style: "Caption"
+            # Sin subtítulo, alto 0 (un MDLabel vacío con adaptive_height descuadra la fila).
+            size_hint_y: None
+            text_size: self.width, None
+            height: self.texture_size[1] if self.text else 0
+            opacity: 1 if root.subtitle else 0
+            theme_text_color: "Custom"
+            text_color: c(theme.MUTED)
+    MDIconButton:
+        icon: "trash-can-outline"
+        theme_icon_color: "Custom"
+        icon_color: c(theme.BERRY)
+        pos_hint: {"center_y": .5}
+        size_hint_x: None
+        width: dp(40) if root.trash else 0
+        opacity: 1 if root.trash else 0
+        disabled: not root.trash
+        on_release: root.trash() if root.trash else None
+
+<ScaleGroup>:
+    orientation: "horizontal"
+    size_hint_y: None
+    height: dp(50)
+    padding: dp(12), dp(4), dp(8), dp(4)
+    spacing: dp(10)
+    radius: [dp(14)]
+    md_bg_color: root.accent if root.expanded else c(theme.SURFACE, .7)
+    line_color: c(theme.LINE)
+    Widget:
+        size_hint: None, None
+        size: dp(14), dp(14)
+        pos_hint: {"center_y": .5}
+        canvas:
+            Color:
+                rgba: root.accent
+            Ellipse:
+                pos: self.pos
+                size: self.size
+            Color:
+                rgba: c(theme.LEAF_DARK, .4)
+            Line:
+                circle: (self.center_x, self.center_y, self.width / 2)
+                width: dp(1)
+    MDLabel:
+        text: root.title
+        font_style: "Subtitle2"
+        bold: True
+        shorten: True
+        pos_hint: {"center_y": .5}
+        theme_text_color: "Custom"
+        text_color: c(theme.INK)
+    MDLabel:
+        text: root.count
+        font_style: "Caption"
+        halign: "right"
+        size_hint_x: None
+        width: dp(64)
+        pos_hint: {"center_y": .5}
+        theme_text_color: "Custom"
+        text_color: c(theme.MUTED)
+    MDIcon:
+        icon: "chevron-up" if root.expanded else "chevron-down"
+        size_hint: None, None
+        size: dp(24), dp(24)
+        pos_hint: {"center_y": .5}
+        theme_text_color: "Custom"
+        text_color: c(theme.LEAF_DARK)
+
+<ScaleRow>:
+    orientation: "horizontal"
+    adaptive_height: True
+    padding: dp(10), dp(10), dp(12), dp(10)
+    spacing: dp(12)
+    radius: [dp(12)]
+    md_bg_color: c(theme.BERRY, .12) if root.current else c(theme.SURFACE, .78)
+    line_color: c(theme.BERRY) if root.current else c(theme.LINE)
+    MDLabel:
+        text: root.code
+        bold: True
+        halign: "center"
+        font_style: "Subtitle1"
+        size_hint: None, None
+        size: dp(48), dp(34)
+        pos_hint: {"center_y": .5}
+        theme_text_color: "Custom"
+        text_color: c(theme.INK)
+        canvas.before:
+            Color:
+                rgba: root.accent
+            RoundedRectangle:
+                pos: self.pos
+                size: self.size
+                radius: [dp(10)]
+    MDLabel:
+        text: root.text
+        markup: True
+        font_style: "Body2"
+        size_hint_y: None
+        pos_hint: {"center_y": .5}
+        text_size: self.width, None
+        height: self.texture_size[1]
+        theme_text_color: "Custom"
+        text_color: c(theme.INK)
+
+<PaperCard@GlassCard>:
+    orientation: "vertical"
+    padding: dp(16)
+    spacing: dp(9)
+    radius: [dp(22)]
+    elevation: 0
+    adaptive_height: True
+    md_bg_color: c(theme.GLASS)
+    line_color: c(theme.GLASS_EDGE)
+
+<Tag>:
+    adaptive_size: True
+    padding: dp(9), dp(3)
+    font_style: "Caption"
+    bold: True
+    theme_text_color: "Custom"
+    text_color: root.fg
+    canvas.before:
+        Color:
+            rgba: root.bg
+        RoundedRectangle:
+            pos: self.pos
+            size: self.size
+            radius: [dp(10)]
+        Color:
+            rgba: c(theme.SURFACE, .7)
+        Line:
+            rounded_rectangle: (self.x, self.y, self.width, self.height, dp(10))
+            width: dp(.8)
+
+<PrimaryButton@MDRaisedButton>:
+    md_bg_color: c(theme.BERRY)
+    elevation: 0
+    # Sin sombra (KivyMD la dibujaba como un rectángulo negro detrás del botón redondo)
+    shadow_color: 0, 0, 0, 0
+    shadow_softness: 0
+    shadow_offset: 0, 0
+    rounded_button: True
+    size_hint_x: 1
+    height: dp(46)
+    font_size: "15sp"
+
+<GhostButton@MDRectangleFlatIconButton>:
+    theme_text_color: "Custom"
+    text_color: c(theme.LEAF_DARK)
+    icon_color: c(theme.LEAF_DARK)
+    line_color: c(theme.LINE)
+    md_bg_color: c(theme.SURFACE, .45)
+    rounded_button: True
+    size_hint_x: 1
+
+<Field@MDTextField>:
+    mode: "rectangle"
+    line_color_normal: c(theme.LINE)
+    line_color_focus: c(theme.BERRY)
+    hint_text_color_focus: c(theme.BERRY)
+    fill_color_normal: c(theme.SURFACE, .5)
+
+<TopBar>:
+    elevation: 0
+    md_bg_color: c(theme.SURFACE, .5)
+
+# ---------------------------------------------------------------------------
+# Barra de navegación inferior (azulejos de vidrio con iconos propios)
+# ---------------------------------------------------------------------------
+<NavTile>:
+    orientation: "vertical"
+    spacing: dp(3)
+    padding: 0, dp(6), 0, dp(2)
+    AnchorLayout:
+        size_hint_y: None
+        height: dp(52)
+        AnchorLayout:
+            size_hint: None, None
+            size: dp(52), dp(52)
+            canvas.before:
+                Color:
+                    rgba: c(theme.BERRY_SOFT, .95) if root.active else c(theme.NAV_TILE, theme.nav_tile_alpha())
+                RoundedRectangle:
+                    pos: self.pos
+                    size: self.size
+                    radius: [dp(16)]
+                Color:
+                    rgba: c(theme.BERRY_LIGHT, .9) if root.active else c(theme.SURFACE, .95)
+                Line:
+                    rounded_rectangle: (self.x, self.y, self.width, self.height, dp(16))
+                    width: dp(1.2)
+            Image:
+                source: theme.nav_icon(root.name, root.active) if root.name else ""
+                size_hint: None, None
+                size: dp(36), dp(36)
+                mipmap: True
+    MDLabel:
+        text: root.text
+        halign: "center"
+        font_style: "Caption"
+        bold: root.active
+        theme_text_color: "Custom"
+        text_color: c(theme.BERRY) if root.active else c(theme.INK_2)
+        size_hint_y: None
+        height: dp(16)
+
+<NavBar@BoxLayout>:
+    size_hint_y: None
+    height: dp(96)
+    padding: dp(18), dp(10), dp(18), dp(14)
+    spacing: dp(6)
+    canvas.before:
+        Color:
+            rgba: c(theme.SURFACE, .62)
+        RoundedRectangle:
+            pos: self.x + dp(10), self.y + dp(8)
+            size: self.width - dp(20), self.height - dp(12)
+            radius: [dp(28)]
+        Color:
+            rgba: c(theme.SURFACE, .95)
+        Line:
+            rounded_rectangle: (self.x + dp(10), self.y + dp(8), self.width - dp(20), self.height - dp(12), dp(28))
+            width: dp(1.1)

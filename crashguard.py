@@ -51,6 +51,42 @@ def record(exc: BaseException, where: str = "") -> str:
     return summary
 
 
+_quiet_seen: set[str] = set()
+
+
+def _quiet_path() -> str:
+    return os.path.join(data_subdir("logs"), "avisos.log")
+
+
+def quiet(exc: BaseException, where: str) -> None:
+    """Error menor que NO detiene nada (se sigue sin esa parte): antes se perdía en silencio;
+    ahora queda en «logs/avisos.log» (una vez por lugar y apertura) y sale en «Copiar todo».
+    Nunca lanza ni avisa en pantalla."""
+    try:
+        key = f"{where}|{type(exc).__name__}"
+        if key in _quiet_seen:
+            return
+        _quiet_seen.add(key)
+        tb = traceback.extract_tb(exc.__traceback__)
+        at = f"{os.path.basename(tb[-1].filename)}:{tb[-1].lineno}" if tb else ""
+        path = _quiet_path()
+        if os.path.exists(path) and os.path.getsize(path) > MAX_BYTES // 2:
+            os.replace(path, path + ".1")
+        with open(path, "a", encoding="utf-8") as f:
+            f.write(f"{_dt.datetime.now():%Y-%m-%d %H:%M:%S} · {where} · {type(exc).__name__}: "
+                    f"{str(exc)[:200]} ({at})\n")
+    except Exception:  # noqa: BLE001 - registrar nunca rompe la app
+        pass
+
+
+def quiet_entries(limit: int = 40) -> list[str]:
+    try:
+        with open(_quiet_path(), encoding="utf-8", errors="replace") as f:
+            return [ln.rstrip("\n") for ln in f.readlines()[-limit:]]
+    except OSError:
+        return []
+
+
 def entries(limit: int = 20) -> list[str]:
     """Últimos errores (más reciente primero), cada uno con su traza abreviada."""
     try:
@@ -87,6 +123,9 @@ def full_text() -> str:
             parts.append("=== Pasos de esta apertura\n" + f.read().strip())
     except OSError:
         pass
+    avisos = quiet_entries()
+    if avisos:
+        parts.append("=== Avisos (errores menores que no detuvieron nada)\n" + "\n".join(avisos))
     try:
         import perf
         parts.append(perf.full_text())
@@ -104,7 +143,7 @@ def export_file() -> str:
 
 
 def clear() -> None:
-    for p in (log_path(), log_path() + ".1"):
+    for p in (log_path(), log_path() + ".1", _quiet_path(), _quiet_path() + ".1"):
         try:
             os.remove(p)
         except OSError:

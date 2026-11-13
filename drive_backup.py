@@ -134,6 +134,14 @@ def explain(error: str) -> str:
     return error
 
 
+def _quiet(exc, where):
+    try:
+        import crashguard
+        crashguard.quiet(exc, where)
+    except Exception:  # noqa: BLE001
+        pass
+
+
 def _detach():
     try:
         from jnius import detach  # type: ignore
@@ -470,8 +478,8 @@ class DriveBackup:
         for cb in list(self.listeners):
             try:
                 cb(self.status())
-            except Exception:  # noqa: BLE001
-                pass
+            except Exception as exc:  # noqa: BLE001
+                _quiet(exc, "drive: aviso de estado")
 
     # ------------------------------------------------------------- cola
     @staticmethod

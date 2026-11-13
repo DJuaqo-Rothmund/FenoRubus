@@ -1,0 +1,482 @@
+# ui/kv/ailab.kv · Laboratorio de IA («Mente del sistema»)
+# (antes en ui/layout.kv; se carga en segundo plano: ui/kvload.py)
+#:import theme ui.theme
+#:import c ui.theme.c
+#:import dp kivy.metrics.dp
+#:import NoTransition kivy.uix.screenmanager.NoTransition
+
+# ---------------------------------------------------------------------------
+# Módulo de calibración IA
+# ---------------------------------------------------------------------------
+<PillButton>:
+    size_hint_y: None
+    height: dp(44)
+    font_size: "15sp"
+    halign: "center"
+    valign: "middle"
+    text_size: self.width - dp(16), None
+    shorten: True
+    color: self.fg_on if self.selected else self.fg_off
+    canvas.before:
+        Color:
+            rgba: self.bg_on if self.selected else self.bg_off
+        RoundedRectangle:
+            pos: self.pos
+            size: self.size
+            radius: [self.height / 2]
+        Color:
+            rgba: self.press_tint if self.state == "down" else (0, 0, 0, 0)
+        RoundedRectangle:
+            pos: self.pos
+            size: self.size
+            radius: [self.height / 2]
+        Color:
+            rgba: (0, 0, 0, 0) if self.selected else self.edge
+        Line:
+            rounded_rectangle: (self.x, self.y, self.width, self.height, self.height / 2)
+            width: dp(1)
+
+<SegButton>:
+    size_hint_x: 1
+
+# ---------------------------------------------------------------------------
+# «Mente del sistema»: estilos oscuros del módulo de IA
+# ---------------------------------------------------------------------------
+<MindCard@GlassCard>:
+    orientation: "vertical"
+    padding: dp(16)
+    spacing: dp(9)
+    radius: [dp(20)]
+    adaptive_height: True
+    md_bg_color: c(theme.MIND_CARD)
+    line_color: c(theme.MIND_EDGE)
+
+<MindSection@MDLabel>:
+    font_style: "Overline"
+    bold: True
+    adaptive_height: True
+    theme_text_color: "Custom"
+    text_color: c(theme.MIND_ACCENT)
+
+<MindText@MDLabel>:
+    font_style: "Body2"
+    adaptive_height: True
+    theme_text_color: "Custom"
+    text_color: c(theme.MIND_TEXT)
+
+<MindMuted@MDLabel>:
+    font_style: "Caption"
+    theme_text_color: "Custom"
+    text_color: c(theme.MIND_MUTED)
+    size_hint_y: None
+    text_size: self.width, None
+    height: self.texture_size[1] if self.text else 0
+
+<MindButton@MDRaisedButton>:
+    md_bg_color: c(theme.MIND_ACCENT)
+    theme_text_color: "Custom"
+    text_color: c(theme.MIND_INK)
+    elevation: 0
+    rounded_button: True
+    size_hint_x: 1
+    height: dp(46)
+    font_size: "15sp"
+
+<MindGhost@MDRectangleFlatIconButton>:
+    theme_text_color: "Custom"
+    text_color: c(theme.MIND_TEXT)
+    icon_color: c(theme.MIND_ACCENT)
+    line_color: c(theme.MIND_EDGE)
+    md_bg_color: 1, 1, 1, .04
+    rounded_button: True
+    size_hint_x: 1
+
+<MindSeg>:
+    size_hint_x: 1
+    height: dp(40)
+    font_size: "14sp"
+    bg_on: c(theme.MIND_ACCENT)
+    bg_off: 1, 1, 1, .06
+    fg_on: c(theme.MIND_INK)
+    fg_off: c(theme.MIND_TEXT)
+    edge: c(theme.MIND_EDGE)
+    press_tint: 1, 1, 1, .12
+
+<MindTopBar>:
+    elevation: 0
+    md_bg_color: .02, .04, .08, .55
+
+<MindRow>:
+    orientation: "horizontal"
+    size_hint_y: None
+    height: dp(60)
+    padding: dp(12), dp(6)
+    spacing: dp(10)
+    radius: [dp(14)]
+    md_bg_color: 1, 1, 1, .05
+    line_color: c(theme.MIND_EDGE)
+    MDBoxLayout:
+        orientation: "vertical"
+        adaptive_height: True
+        pos_hint: {"center_y": .5}
+        MDLabel:
+            text: root.title
+            font_style: "Body2"
+            bold: True
+            adaptive_height: True
+            shorten: True
+            theme_text_color: "Custom"
+            text_color: c(theme.MIND_TEXT)
+        MDLabel:
+            text: root.subtitle
+            font_style: "Caption"
+            adaptive_height: True
+            shorten: True
+            theme_text_color: "Custom"
+            text_color: c(theme.MIND_MUTED)
+    MDLabel:
+        text: root.value
+        font_style: "Subtitle1"
+        bold: True
+        halign: "right"
+        size_hint_x: None
+        width: dp(56)
+        pos_hint: {"center_y": .5}
+        theme_text_color: "Custom"
+        text_color: c(theme.MIND_ACCENT)
+
+<MindOption>:
+    orientation: "vertical"
+    adaptive_height: True
+    spacing: dp(2)
+    padding: dp(12), dp(9)
+    radius: [dp(16)]
+    md_bg_color: (c(theme.MIND_OK, .22) if self.result == "ok" else c(theme.MIND_BAD, .22) if self.result == "bad" else (1, 1, 1, .06))
+    line_color: (c(theme.MIND_OK) if self.result == "ok" else c(theme.MIND_BAD) if self.result == "bad" else c(theme.MIND_EDGE))
+    MDLabel:
+        text: root.title
+        font_style: "Subtitle1"
+        bold: True
+        adaptive_height: True
+        theme_text_color: "Custom"
+        text_color: c(theme.MIND_TEXT)
+    MDLabel:
+        text: root.subtitle
+        font_style: "Caption"
+        adaptive_height: True
+        theme_text_color: "Custom"
+        text_color: c(theme.MIND_MUTED)
+
+<IAPlusButton@KiButton>:
+    # Logo IA+ con «ki» rojo que emana del dibujo (ui/arcade.KiButton)
+    source: theme.IAPLUS
+    size_hint: None, None
+    size: dp(60), dp(60)
+
+<AILabScreen>:
+    md_bg_color: 0, 0, 0, 0
+    canvas.before:
+        Color:
+            rgba: 1, 1, 1, 1
+        Rectangle:
+            source: theme.MIND_BG
+            pos: self.pos
+            size: self.size
+    MindSky:
+        id: sky
+    MDBoxLayout:
+        orientation: "vertical"
+        MindTopBar:
+            title: "Entrenador de IA"
+            left_action_items: [["arrow-left", lambda x: app.back()]]
+            right_action_items: [["lock-outline", lambda x: app.back(), "Salir"]]
+        MDBoxLayout:
+            adaptive_height: True
+            padding: dp(14), dp(10), dp(14), dp(4)
+            spacing: dp(6)
+            MindSeg:
+                text: "Desafío"
+                font_size: "12.5sp"
+                selected: seg.current == "challenge"
+                on_release: root.show("challenge")
+            MindSeg:
+                text: "Modelo y datos"
+                selected: seg.current == "model"
+                on_release: root.show("model")
+            MindSeg:
+                text: "Fotos extra"
+                selected: seg.current == "extra"
+                on_release: root.show("extra")
+        MDScreenManager:
+            id: seg
+            MDScreen:
+                name: "challenge"
+                md_bg_color: 0, 0, 0, 0
+                MDScrollView:
+                    do_scroll_x: False
+                    MDBoxLayout:
+                        orientation: "vertical"
+                        adaptive_height: True
+                        padding: dp(14), dp(8), dp(14), dp(24)
+                        spacing: dp(12)
+                        MindCard:
+                            MDBoxLayout:
+                                size_hint_y: None
+                                height: dp(100)
+                                spacing: dp(14)
+                                FloatLayout:
+                                    size_hint_x: None
+                                    width: dp(96)
+                                    ProgressRing:
+                                        id: ch_ring
+                                        size_hint: None, None
+                                        size: dp(92), dp(92)
+                                        color: c(theme.MIND_ACCENT)
+                                        track: 1, 1, 1, .08
+                                        pos_hint: {"center_x": .5, "center_y": .5}
+                                    MDLabel:
+                                        id: ch_ring_text
+                                        text: "0/5"
+                                        halign: "center"
+                                        font_style: "H6"
+                                        bold: True
+                                        theme_text_color: "Custom"
+                                        text_color: c(theme.MIND_TEXT)
+                                        pos_hint: {"center_x": .5, "center_y": .5}
+                                MDBoxLayout:
+                                    orientation: "vertical"
+                                    spacing: dp(4)
+                                    MindSection:
+                                        text: "DESAFÍO DIARIO"
+                                    MDLabel:
+                                        id: ch_title
+                                        text: "Entrena a la IA"
+                                        font_style: "H6"
+                                        bold: True
+                                        adaptive_height: True
+                                        theme_text_color: "Custom"
+                                        text_color: c(theme.MIND_TEXT)
+                                    MDBoxLayout:
+                                        adaptive_height: True
+                                        spacing: dp(4)
+                                        MDIcon:
+                                            icon: "fire"
+                                            font_size: "18sp"
+                                            size_hint: None, None
+                                            size: dp(20), dp(20)
+                                            theme_text_color: "Custom"
+                                            text_color: c(theme.MIND_FIRE)
+                                        MindText:
+                                            id: streak_text
+                                            size_hint_x: None
+                                            width: dp(86)
+                                        MDIcon:
+                                            icon: "star-four-points"
+                                            font_size: "16sp"
+                                            size_hint: None, None
+                                            size: dp(20), dp(20)
+                                            theme_text_color: "Custom"
+                                            text_color: c(theme.MIND_ACCENT_2)
+                                        MindText:
+                                            id: xp_text
+                                    MDProgressBar:
+                                        id: level_bar
+                                        max: 1
+                                        value: 0
+                                        color: c(theme.MIND_ACCENT_2)
+                                        back_color: 1, 1, 1, .08
+                                        size_hint_y: None
+                                        height: dp(4)
+                        MDBoxLayout:
+                            id: task_box
+                            orientation: "vertical"
+                            adaptive_height: True
+                            spacing: dp(10)
+            MDScreen:
+                name: "model"
+                md_bg_color: 0, 0, 0, 0
+                MDScrollView:
+                    do_scroll_x: False
+                    MDBoxLayout:
+                        orientation: "vertical"
+                        adaptive_height: True
+                        padding: dp(14), dp(8), dp(14), dp(24)
+                        spacing: dp(10)
+                        MindCard:
+                            MindSection:
+                                text: "CLASIFICADOR LOCAL"
+                            MindText:
+                                id: model_text
+                            MindMuted:
+                                id: eval_text
+                            MDProgressBar:
+                                id: train_progress
+                                max: 1
+                                value: 0
+                                color: c(theme.MIND_ACCENT)
+                                back_color: 1, 1, 1, .08
+                                size_hint_y: None
+                                height: dp(4)
+                            MindButton:
+                                text: "Evaluar (validación cruzada)"
+                                on_release: root.evaluate()
+                            MindGhost:
+                                icon: "cog-refresh-outline"
+                                text: "Re-entrenar (recalcular embeddings)"
+                                on_release: root.retrain()
+                        MindCard:
+                            MindSection:
+                                text: "APRENDIZAJE (ESTADO BBCH DE LAS FOTOS)"
+                            MindMuted:
+                                text: "Cada registro guardado con estado y foto de detalle se suma a la memoria de la IA. Para ponerles estado a mano a las fotos que no lo tienen, use el Desafío «Nombrar fotos»."
+                            MDBoxLayout:
+                                adaptive_height: True
+                                MindText:
+                                    text: "Aprendizaje continuo al guardar registros"
+                                    pos_hint: {"center_y": .5}
+                                MDSwitch:
+                                    id: auto_learn
+                                    pos_hint: {"center_y": .5}
+                                    thumb_color_active: c(theme.MIND_ACCENT)
+                                    track_color_active: c(theme.MIND_ACCENT, .4)
+                                    on_active: root.set_auto_learn(self.active)
+                            MindGhost:
+                                icon: "playlist-plus"
+                                text: "Agregar todas las fotos ya etiquetadas"
+                                on_release: root.add_all_labeled()
+                        MindCard:
+                            MindSection:
+                                text: "PROBAR CON UNA FOTO"
+                            MindMuted:
+                                text: "Analiza una imagen de la galería sin guardarla."
+                            MDBoxLayout:
+                                id: try_box
+                                size_hint_y: None
+                                height: dp(0)
+                                opacity: 0
+                            MDBoxLayout:
+                                adaptive_height: True
+                                spacing: dp(10)
+                                MDSpinner:
+                                    id: spinner
+                                    size_hint: None, None
+                                    size: dp(22), dp(22)
+                                    active: False
+                                    opacity: 1 if self.active else 0
+                                    color: c(theme.MIND_ACCENT)
+                                    pos_hint: {"center_y": .5}
+                                MDLabel:
+                                    id: try_label
+                                    text: "Sin análisis todavía."
+                                    font_style: "Subtitle1"
+                                    bold: True
+                                    adaptive_height: True
+                                    theme_text_color: "Custom"
+                                    text_color: c(theme.MIND_TEXT)
+                            MDProgressBar:
+                                id: try_conf
+                                max: 1
+                                value: 0
+                                color: c(theme.MIND_ACCENT)
+                                back_color: 1, 1, 1, .08
+                                size_hint_y: None
+                                height: dp(6)
+                            MindMuted:
+                                id: try_explain
+                            MindGhost:
+                                icon: "image-search-outline"
+                                text: "Elegir foto y analizar"
+                                on_release: root.try_photo()
+                        MindCard:
+                            MindSection:
+                                text: "COMPARTIR CON OTRO TELÉFONO"
+                            MindMuted:
+                                text: "Exporte lo aprendido (fotos etiquetadas, escala BBCH y documentos) y envíelo por WhatsApp, correo o Drive. En el otro teléfono use «Importar»: se suma a lo que ya sabe, sin borrar ni duplicar. Hágalo en ambos sentidos y las dos IA quedan iguales."
+                            MindButton:
+                                text: "Exportar conocimiento"
+                                on_release: root.export_knowledge()
+                            MindGhost:
+                                icon: "database-import-outline"
+                                text: "Importar conocimiento de otro teléfono"
+                                on_release: root.import_knowledge()
+                        MindCard:
+                            MindSection:
+                                text: "MEMORIA POR ESTADO BBCH"
+                            MDBoxLayout:
+                                id: counts
+                                orientation: "vertical"
+                                adaptive_height: True
+                                spacing: dp(4)
+                        MindCard:
+                            MindSection:
+                                text: "BASE DE DATOS DE TEMPORADAS ANTERIORES"
+                            MindText:
+                                text: "Importe registros y fotos de años anteriores para enriquecer la memoria de la IA y los informes."
+                            MindMuted:
+                                text: "Formato: CSV (o ZIP con el CSV y las fotos). Columnas: temporada, fecha o semana, variedad, bbch, foto_canopia, foto_detalle, notas, rendimiento_historico, unidad_rendimiento, canas_basales, laterales."
+                            MDBoxLayout:
+                                adaptive_height: True
+                                MindText:
+                                    text: "Entrenar la IA con las fotos etiquetadas"
+                                    pos_hint: {"center_y": .5}
+                                MDSwitch:
+                                    id: train_import
+                                    active: True
+                                    pos_hint: {"center_y": .5}
+                                    thumb_color_active: c(theme.MIND_ACCENT)
+                                    track_color_active: c(theme.MIND_ACCENT, .4)
+                            MindButton:
+                                id: import_btn
+                                text: "Importar CSV o ZIP"
+                                on_release: root.import_history()
+                            MindGhost:
+                                icon: "file-delimited-outline"
+                                text: "Guardar plantilla CSV"
+                                on_release: root.save_template()
+                            MDProgressBar:
+                                id: import_progress
+                                max: 1
+                                value: 0
+                                color: c(theme.MIND_ACCENT)
+                                back_color: 1, 1, 1, .08
+                                size_hint_y: None
+                                height: dp(4)
+                            MindMuted:
+                                id: import_text
+                        MindCard:
+                            MindSection:
+                                text: "DOCUMENTOS TÉCNICOS"
+                            MindMuted:
+                                text: "PDF o texto con claves fenológicas (p. ej. «BBCH 65: Plena floración…»)."
+                            MindButton:
+                                text: "Cargar documento (PDF / TXT)"
+                                on_release: root.import_document()
+                            MindGhost:
+                                icon: "format-list-numbered"
+                                text: "Ver escala BBCH en uso"
+                                on_release: root.show_scale()
+                            MDBoxLayout:
+                                id: docs
+                                orientation: "vertical"
+                                adaptive_height: True
+                                spacing: dp(6)
+                        MindCard:
+                            MindSection:
+                                text: "SEGURIDAD"
+                            MindGhost:
+                                icon: "form-textbox-password"
+                                text: "Cambiar PIN"
+                                on_release: root.change_pin()
+            MDScreen:
+                name: "extra"
+                md_bg_color: 0, 0, 0, 0
+                MDScrollView:
+                    do_scroll_x: False
+                    MDBoxLayout:
+                        id: extra_box
+                        orientation: "vertical"
+                        adaptive_height: True
+                        padding: dp(14), dp(8), dp(14), dp(24)
+                        spacing: dp(10)
+
+    # IA+ (cajas para el detector): pantalla aparte, junto al candado

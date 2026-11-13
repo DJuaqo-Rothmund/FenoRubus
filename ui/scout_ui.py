@@ -444,8 +444,9 @@ class ScoutCapture(ScoutScreenBase):
                 fail()
         try:
             geo.request_location_permission(granted)
-        except Exception:  # noqa: BLE001
-            pass
+        except Exception as exc:  # noqa: BLE001
+            import crashguard
+            crashguard.quiet(exc, "GPS: pedir permiso")
 
     def _gps_label(self):
         lbl = getattr(self, "_gps_lbl", None)

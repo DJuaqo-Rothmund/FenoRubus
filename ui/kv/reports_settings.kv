@@ -1,0 +1,402 @@
+# ui/kv/reports_settings.kv · Informes y Ajustes del ensayo
+# (antes en ui/layout.kv; se carga en segundo plano: ui/kvload.py)
+#:import theme ui.theme
+#:import c ui.theme.c
+#:import dp kivy.metrics.dp
+#:import NoTransition kivy.uix.screenmanager.NoTransition
+
+<ReportsTab>:
+    md_bg_color: 0, 0, 0, 0
+    MDScrollView:
+        do_scroll_x: False
+        MDBoxLayout:
+            orientation: "vertical"
+            adaptive_height: True
+            padding: dp(16), dp(14), dp(16), dp(24)
+            spacing: dp(12)
+            PaperCard:
+                SectionLabel:
+                    text: "CONFIGURACIÓN DE INFORMES"
+                Muted:
+                    id: cfg_summary
+                    text: ""
+                GhostButton:
+                    icon: "tune-variant"
+                    text: "Configuración de informes"
+                    on_release: root.open_config()
+            PaperCard:
+                SectionLabel:
+                    text: "1 · REPORTE SEMANAL INTER-VARIETAL"
+                Muted:
+                    text: "Todas las variedades lado a lado: canopia, detalle, estado BBCH y notas."
+                GhostButton:
+                    id: week_btn
+                    icon: "calendar-week"
+                    text: "Seleccionar semana"
+                    on_release: root.pick_week(self, "week")
+                PrimaryButton:
+                    text: "Generar PDF"
+                    on_release: root.generate("weekly")
+                GhostButton:
+                    icon: "folder-zip-outline"
+                    text: "Todos los semanales (ZIP)"
+                    on_release: root.generate_all_weekly()
+            PaperCard:
+                SectionLabel:
+                    text: "2 · EVOLUCIÓN MENSUAL / RANGO DE SEMANAS"
+                Muted:
+                    text: "Avance de todas las variedades a lo largo de un mes o rango de semanas."
+                GhostButton:
+                    id: month_btn
+                    icon: "calendar-month"
+                    text: "Elegir mes"
+                    on_release: root.pick_month(self)
+                MDBoxLayout:
+                    adaptive_height: True
+                    spacing: dp(8)
+                    GhostButton:
+                        id: from_btn
+                        icon: "ray-start"
+                        text: "Desde"
+                        on_release: root.pick_week(self, "from")
+                    GhostButton:
+                        id: to_btn
+                        icon: "ray-end"
+                        text: "Hasta"
+                        on_release: root.pick_week(self, "to")
+                PrimaryButton:
+                    text: "Generar PDF"
+                    on_release: root.generate("period")
+            PaperCard:
+                SectionLabel:
+                    id: variety_title
+                    text: "3 · FICHA COMPLETA POR VARIEDAD"
+                Muted:
+                    text: "Timeline de brotación a cosecha con datos biométricos y rendimiento."
+                GhostButton:
+                    id: variety_btn
+                    icon: "fruit-cherries"
+                    text: "Seleccionar variedad"
+                    on_release: root.pick_variety(self)
+                PrimaryButton:
+                    text: "Generar PDF"
+                    on_release: root.generate("variety")
+            PaperCard:
+                SectionLabel:
+                    text: "4 · MATRIZ COMPARATIVA GLOBAL"
+                Muted:
+                    text: "Heatmap BBCH, precocidad relativa, hitos fenológicos y galería paralela de la temporada."
+                PrimaryButton:
+                    text: "Generar PDF"
+                    on_release: root.generate("matrix")
+            PaperCard:
+                id: trial_card
+                SectionLabel:
+                    text: "5 · COMPARACIÓN DE TRATAMIENTOS"
+                Muted:
+                    text: "Promedio de las repeticiones por semana, ANOVA con letras de significancia (LSD), hitos fenológicos y mediciones numéricas por tratamiento."
+                PrimaryButton:
+                    text: "Generar PDF"
+                    on_release: root.generate("treatments")
+            SectionLabel:
+                text: "INFORMES GENERADOS"
+            MDBoxLayout:
+                id: recent
+                orientation: "vertical"
+                adaptive_height: True
+                spacing: dp(6)
+
+<ReportRow>:
+    orientation: "horizontal"
+    padding: dp(14), dp(6), dp(4), dp(6)
+    radius: [dp(10)]
+    elevation: 0
+    size_hint_y: None
+    height: dp(60)
+    md_bg_color: c(theme.GLASS)
+    line_color: c(theme.GLASS_EDGE)
+    MDBoxLayout:
+        orientation: "vertical"
+        adaptive_height: True
+        pos_hint: {"center_y": .5}
+        MDLabel:
+            text: root.title
+            font_style: "Body2"
+            bold: True
+            adaptive_height: True
+            shorten: True
+            theme_text_color: "Custom"
+            text_color: c(theme.INK)
+        MDLabel:
+            text: root.meta
+            font_style: "Caption"
+            adaptive_height: True
+            theme_text_color: "Custom"
+            text_color: c(theme.MUTED)
+    MDIconButton:
+        icon: "open-in-new"
+        pos_hint: {"center_y": .5}
+        on_release: app.open_file(root.path)
+    MDIconButton:
+        icon: "share-variant-outline"
+        pos_hint: {"center_y": .5}
+        on_release: app.report_actions(root.path, title="Enviar o guardar", info=root.title)
+    MDIconButton:
+        icon: "trash-can-outline"
+        theme_icon_color: "Custom"
+        icon_color: c(theme.MUTED)
+        pos_hint: {"center_y": .5}
+        on_release: root.tab.delete_reports([root.path]) if root.tab else None
+
+<ReportGroup>:
+    orientation: "horizontal"
+    padding: dp(14), dp(4), dp(4), dp(4)
+    radius: [dp(12)]
+    elevation: 0
+    size_hint_y: None
+    height: dp(52)
+    md_bg_color: c(theme.GLASS)
+    line_color: c(theme.GLASS_EDGE)
+    MDIcon:
+        icon: "chevron-down" if root.expanded else "chevron-right"
+        size_hint: None, None
+        size: dp(26), dp(26)
+        pos_hint: {"center_y": .5}
+        theme_text_color: "Custom"
+        text_color: c(theme.LEAF_DARK)
+    MDLabel:
+        text: root.title
+        font_style: "Subtitle2"
+        bold: True
+        shorten: True
+        pos_hint: {"center_y": .5}
+        theme_text_color: "Custom"
+        text_color: c(theme.INK)
+    MDLabel:
+        text: root.count
+        font_style: "Caption"
+        halign: "right"
+        size_hint_x: None
+        width: dp(70)
+        pos_hint: {"center_y": .5}
+        theme_text_color: "Custom"
+        text_color: c(theme.MUTED)
+    MDIconButton:
+        icon: "delete-sweep-outline"
+        theme_icon_color: "Custom"
+        icon_color: c(theme.MUTED)
+        pos_hint: {"center_y": .5}
+        on_release: root.tab.delete_reports(root.paths, root.title) if root.tab else None
+
+<SettingsTab>:
+    md_bg_color: 0, 0, 0, 0
+    MDScrollView:
+        do_scroll_x: False
+        MDBoxLayout:
+            orientation: "vertical"
+            adaptive_height: True
+            padding: dp(16), dp(14), dp(16), dp(24)
+            spacing: dp(12)
+            PaperCard:
+                SectionLabel:
+                    text: "ESTILO DE LA APP"
+                Body:
+                    id: style_text
+                GhostButton:
+                    icon: "palette-outline"
+                    text: "Cambiar estilo"
+                    on_release: app.pick_style()
+                Muted:
+                    text: "Vale para todos los cultivos. Al cambiarlo, la app se vuelve a dibujar (los datos no cambian)."
+            PaperCard:
+                id: card_reminder
+                SectionLabel:
+                    text: "RECORDATORIO DE MUESTREO"
+                MDBoxLayout:
+                    adaptive_height: True
+                    Body:
+                        text: "Activar recordatorios"
+                        pos_hint: {"center_y": .5}
+                    MDSwitch:
+                        id: enabled
+                        thumb_color_active: c(theme.BERRY)
+                        track_color_active: c(theme.BERRY_LIGHT, .6)
+                        pos_hint: {"center_y": .5}
+                        on_active: root.on_toggle(self.active)
+                MDBoxLayout:
+                    adaptive_height: True
+                    spacing: dp(8)
+                    GhostButton:
+                        id: day_btn
+                        icon: "calendar-today"
+                        text: "Viernes"
+                        on_release: root.pick_day(self)
+                    GhostButton:
+                        id: time_btn
+                        icon: "clock-outline"
+                        text: "09:00"
+                        on_release: root.pick_time()
+                GhostButton:
+                    id: freq_btn
+                    icon: "repeat"
+                    text: "Semanal"
+                    on_release: root.pick_freq(self)
+                Muted:
+                    id: next_text
+                MDBoxLayout:
+                    id: exact_box
+                    adaptive_height: True
+                    spacing: dp(8)
+            PaperCard:
+                id: card_season
+                SectionLabel:
+                    text: "SEMANA DE INICIO DEL MUESTREO"
+                Body:
+                    id: season_text
+                Body:
+                    id: first_week_text
+                GhostButton:
+                    id: start_btn
+                    icon: "calendar-start"
+                    text: "Fijar la primera semana"
+                    on_release: root.pick_start()
+                GhostButton:
+                    icon: "calendar-refresh"
+                    text: "Automática: la primera semana con datos"
+                    on_release: root.reset_start()
+                Muted:
+                    text: "La temporada va del 1 de abril al 31 de marzo (p. ej. «Temporada 2026-2027»); para ver otra, toque la semana en Muestreo. Las flechas recorren todas las semanas de 2020 a 2050. La matriz y los informes parten en la primera semana con datos, o en la que fije aquí; fijarla no cambia ningún registro ni fecha."
+            PaperCard:
+                SectionLabel:
+                    text: "FOTOS EN EL TELÉFONO"
+                Body:
+                    text: "Las fotos tomadas con la cámara de la app se guardan también en la carpeta «Imágenes › Imágenes de Fenología», con nombres descriptivos (variedad, semana y tipo de foto)."
+                    adaptive_height: True
+                Muted:
+                    text: "Para respaldarlas en Google Fotos: Biblioteca › Fotos del dispositivo › «Imágenes de Fenología» › activar «Copia de seguridad»."
+                GhostButton:
+                    icon: "image-size-select-small"
+                    text: "Optimizar fotos guardadas"
+                    on_release: root.optimize_photos()
+                Muted:
+                    id: photo_text
+                    text: "Las fotos nuevas se guardan livianas (lado mayor 1600 px, ≈300 KB). Este botón aligera también las antiguas en el teléfono, sin cambiar sus nombres ni ubicación; lo que ya está en Drive no se toca."
+            PaperCard:
+                SectionLabel:
+                    text: "RESPALDO EN GOOGLE DRIVE"
+                MDBoxLayout:
+                    adaptive_height: True
+                    spacing: dp(10)
+                    MDIcon:
+                        id: drive_icon
+                        icon: "cloud-off-outline"
+                        theme_text_color: "Custom"
+                        text_color: c(theme.MUTED)
+                        size_hint: None, None
+                        size: dp(28), dp(28)
+                        pos_hint: {"center_y": .5}
+                    MDBoxLayout:
+                        orientation: "vertical"
+                        adaptive_height: True
+                        pos_hint: {"center_y": .5}
+                        Body:
+                            id: drive_title
+                            text: "Sin conectar"
+                            bold: True
+                        Muted:
+                            id: drive_text
+                MDBoxLayout:
+                    id: drive_bar_box
+                    size_hint_y: None
+                    height: dp(4)
+                    MDProgressBar:
+                        id: drive_bar
+                        value: 0
+                        color: c(theme.BERRY)
+                        back_color: c(theme.LINE)
+                PrimaryButton:
+                    id: drive_connect
+                    text: "Conectar Google Drive"
+                    on_release: root.drive_connect()
+                GhostButton:
+                    icon: "stethoscope"
+                    text: "Ver diagnóstico de conexión"
+                    on_release: root.drive_diagnostics()
+                MDBoxLayout:
+                    id: drive_opts
+                    orientation: "vertical"
+                    adaptive_height: True
+                    spacing: dp(8)
+                    MDBoxLayout:
+                        adaptive_height: True
+                        Body:
+                            text: "Subir solo con Wi-Fi"
+                            pos_hint: {"center_y": .5}
+                        MDSwitch:
+                            id: drive_wifi
+                            thumb_color_active: c(theme.BERRY)
+                            track_color_active: c(theme.BERRY_LIGHT, .6)
+                            pos_hint: {"center_y": .5}
+                            on_active: root.drive_wifi(self.active)
+                    MDBoxLayout:
+                        adaptive_height: True
+                        spacing: dp(8)
+                        GhostButton:
+                            icon: "cloud-sync-outline"
+                            text: "Sincronizar"
+                            on_release: root.drive_sync()
+                        GhostButton:
+                            icon: "cloud-upload-outline"
+                            text: "Subir anteriores"
+                            on_release: root.drive_existing()
+                    Muted:
+                        id: sync_text
+                    GhostButton:
+                        icon: "link-variant-off"
+                        text: "Desconectar"
+                        on_release: root.drive_disconnect()
+                Muted:
+                    text: "Cada foto nueva queda en el teléfono y además se sube a «Mi unidad › AeonCrop › (PhenoRubus, PhenoBlue o PhenoCran)», por ensayo y semana. Sin señal, se guarda en cola y se sube sola al volver la conexión."
+            PaperCard:
+                SectionLabel:
+                    text: "INTELIGENCIA ARTIFICIAL (EDGE AI)"
+                Body:
+                    id: ai_text
+                GhostButton:
+                    icon: "lock-outline"
+                    text: "Módulo de calibración (PIN)"
+                    on_release: app.open_ai_lab()
+            PaperCard:
+                SectionLabel:
+                    text: "SI ALGO FALLA"
+                Muted:
+                    text: "Errores y cierres de la app. «Copiar todo» copia el registro completo para pegarlo en un chat; «Enviar» lo manda como archivo."
+                GhostButton:
+                    icon: "bug-outline"
+                    text: "Registro de errores"
+                    on_release: root.show_errors()
+            PaperCard:
+                id: card_data
+                SectionLabel:
+                    text: "TRAZABILIDAD Y DATOS"
+                Muted:
+                    id: data_text
+                GhostButton:
+                    icon: "history"
+                    text: "Ver bitácora de cambios"
+                    on_release: root.show_audit()
+                GhostButton:
+                    icon: "archive-arrow-down-outline"
+                    text: "Copia de seguridad completa (con fotos)"
+                    on_release: root.full_backup()
+                GhostButton:
+                    icon: "backup-restore"
+                    text: "Restaurar copia de seguridad"
+                    on_release: root.restore_backup()
+                GhostButton:
+                    icon: "file-import-outline"
+                    text: "Importar informes semanales"
+                    on_release: root.import_reports()
+                Muted:
+                    id: backup_text
+                    text: "La copia completa se guarda en Descargas › PhenoRubus. «Restaurar» acepta esa copia o el archivo .sqlite3 de «Respaldar base de datos» de versiones anteriores, y recupera las fotos tomadas con la app desde «Imágenes de Fenología» (o «FenoRubus» en las primeras versiones). Los informes semanales (PDF, o .html/.zip de versiones anteriores) completan lo que falte."

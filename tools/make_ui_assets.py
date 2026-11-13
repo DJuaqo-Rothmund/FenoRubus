@@ -284,13 +284,13 @@ def make_presplash():
     que Android no la achique con franjas y se vea una sola pantalla de inicio."""
     w, h = 1080, 2340
     bg = Image.new("RGBA", (w, h), SPLASH_BG + (255,))
-    # Mismas proporciones que <SplashScreen> (layout.kv): logo 62 % del ancho centrado
+    # Mismas proporciones que <SplashScreen> (ui/kv/start.kv): logo 62 % del ancho centrado
     # al 60 % de la altura, nombre al 33,5 % y firma al pie.
     side = int(w * .62)
     logo = load_logo(side)
     cy = int(h * (1 - .60))
     bg.alpha_composite(logo, ((w - side) // 2, cy - side // 2))
-    # Letra «PhenoRubus App»: 78 % del ancho, centrada al 36 % de la altura (= layout.kv).
+    # Letra «PhenoRubus App»: 78 % del ancho, centrada al 36 % de la altura (= ui/kv/start.kv).
     wm = Image.open(os.path.join(OUT, "wordmark.png")).convert("RGBA")
     ww = int(w * .78)
     wm = wm.resize((ww, round(wm.height * ww / wm.width)), Image.LANCZOS)

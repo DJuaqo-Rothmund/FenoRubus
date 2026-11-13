@@ -234,7 +234,7 @@ def app_logo(n=420):
 
 def presplash(w=1080, h=2340, bg=(242, 244, 238)):
     """Pantalla de carga de Android al abrir la app: los tres frutos y «App Fenología»,
-    igual que LaunchScreen (ui/layout.kv): logo al 56 % de alto, nombre al 36 %."""
+    igual que LaunchScreen (ui/launch.kv): logo al 56 % de alto, nombre al 36 %."""
     im = Image.new("RGB", (w, h), bg)
     side = int(min(.6 * w, .3 * h))
     logo = app_logo(side)

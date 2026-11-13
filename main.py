@@ -90,6 +90,7 @@ from ui.screens import (AILabScreen, CropScreen, HomeScreen, LaunchScreen,  # no
                         VarietyScreen,
                         WorkspacesScreen, form_dialog)
 from workspaces import Workspaces  # noqa: E402
+import crashguard  # noqa: E402
 from crashguard import PAUSED, step as _step  # noqa: E402
 
 MIME = {".html": "text/html", ".zip": "application/zip", ".sqlite3": "application/x-sqlite3",
@@ -139,7 +140,7 @@ class FenoRubusApp(MDApp):
         # mientras se ve su animación (antes, ~4 s con la pantalla de carga quieta).
         from ui import kvload
         Builder.load_file(resource_path("ui", "launch.kv"))
-        kvload.start(resource_path("ui", "layout.kv"))
+        kvload.start(kvload.design_files(resource_path("ui", "kv")))
         # Fundido corto: con pantallas translúcidas un deslizamiento superpondría contenidos.
         # Cambio de pantalla instantáneo: un fundido dibuja las DOS pantallas en texturas
         # intermedias en cada cuadro, lo más costoso para GPUs modestas.
@@ -1117,8 +1118,8 @@ class FenoRubusApp(MDApp):
         try:
             self.scout_backup()            # AeonScout también
             self.yield_backup()            # y las estimaciones de rendimiento del cultivo abierto
-        except Exception:  # noqa: BLE001
-            pass
+        except Exception as exc:  # noqa: BLE001
+            crashguard.quiet(exc, "sync: respaldo AeonScout / rendimiento")
 
         def work():
             import crops

@@ -121,7 +121,7 @@ def main(src: str):
 
 def presplash(w=1080, h=2340, bg=(242, 244, 238)):
     """Pantalla de carga de Android = primer cuadro de la animación de AeonCrop, en el mismo
-    lugar que LaunchScreen (ui/layout.kv): cuadro de min(62 % ancho, 34 % alto), centro al 55 %."""
+    lugar que LaunchScreen (ui/launch.kv): cuadro de min(62 % ancho, 34 % alto), centro al 55 %."""
     im = Image.new("RGB", (w, h), bg)
     f0 = Image.open(os.path.join(ROOT, "assets", "aeon_anim", "f000.png")).convert("RGBA")
     side = int(min(.62 * w, .34 * h))
