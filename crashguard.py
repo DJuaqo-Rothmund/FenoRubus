@@ -162,9 +162,11 @@ def step(name: str) -> None:
         import time
         import perf
         now = time.perf_counter()
-        if _last_step[0]:
-            perf.record(f"paso.{_last_step[0]}", (now - _last_step[1]) * 1000)
-        _last_step[0], _last_step[1] = (None if name in (DONE, PAUSED) else name), now
+        # Solo los pasos de la apertura (en orden, hasta que termina): los de después corren
+        # en segundo plano y se cruzan entre sí, así que su «duración» no significaría nada.
+        if _last_step[0] and _trail is not None:
+            perf.record(f"apertura.{_last_step[0]}", (now - _last_step[1]) * 1000)
+        _last_step[0], _last_step[1] = (None if name in (DONE, PAUSED) or _trail is None else name), now
     except Exception:  # noqa: BLE001
         pass
     if _trail is None:

@@ -1331,7 +1331,9 @@ class FenoRubusApp(MDApp):
     def _drive_daily(self):
         _step("respaldo diario")
         try:
-            if self.drive.backup_database() is None:
+            with perf.timed("drive.respaldo diario de la base"):
+                done = self.drive.backup_database()
+            if done is None:
                 self.drive.flush_async()
         except Exception as exc:  # noqa: BLE001
             print("drive daily backup:", exc)

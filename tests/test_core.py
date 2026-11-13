@@ -1849,15 +1849,18 @@ class FakeDrive:
         import re
         import urllib.parse
         q = urllib.parse.parse_qs(urllib.parse.urlsplit(url).query)
+        self.ticks = getattr(self, "ticks", 0) + 1
         if method == "GET" and "alt=media" in url:
             fid = url.split("/files/")[1].split("?")[0]
+            self.downloads = getattr(self, "downloads", []) + [self.files[fid]["name"]]
             return 200, self.files[fid]["data"]
         if method == "GET":
             query = q["q"][0]
             parent = re.search(r"'([^']+)' in parents", query)
             names = re.findall(r"name='([^']+)'", query)      # una o varias («… or …»)
             self.queries = getattr(self, "queries", 0) + 1
-            hits = [{"id": k, "name": f["name"]} for k, f in sorted(self.files.items())
+            hits = [{"id": k, "name": f["name"], "modifiedTime": f"t{f.get('mod', 0):08d}"}
+                    for k, f in sorted(self.files.items())
                     if (not parent or parent.group(1) in f["parents"])
                     and (not names or f["name"] in names)
                     and ("mimeType=" not in query or f["folder"])]
@@ -1867,10 +1870,11 @@ class FakeDrive:
             if method == "PATCH":
                 fid = url.split("/files/")[1].split("?")[0]
                 self.files[fid]["data"] = content
+                self.files[fid]["mod"] = self.ticks
                 return 200, json.dumps({"id": fid}).encode()
             fid = f"f{next(self.ids)}"
             self.files[fid] = {"name": meta["name"], "parents": meta.get("parents", []),
-                               "data": content, "folder": False}
+                               "data": content, "folder": False, "mod": self.ticks}
             return 200, json.dumps({"id": fid}).encode()
         meta = json.loads(body)                                   # carpeta nueva
         fid = f"d{next(self.ids)}"
@@ -3287,10 +3291,55 @@ def test_backup_photos_keeps_tidying_when_a_step_fails(tmp_path, monkeypatch):
     monkeypatch.setattr(DriveBackup, "flush", lambda self: calls.append("flush") or 0)
     s._backup_photos(db, manual=True)
     assert calls == ["relocate", ("reorganize", True), "tidy", "flush"]
-    db.set_setting("layout_checked_at", __import__("time").time())
     calls.clear()
-    s._backup_photos(db, manual=True)                    # recién ordenado: no se repite
-    assert calls == ["relocate", ("reorganize", False), "flush"]
+    s._backup_photos(db, manual=True)                    # nada cambió: no se vuelve a ordenar
+    assert calls == ["relocate", "flush"]
+    calls.clear()
+    s._backup_photos(db, manual=False)                   # tampoco en la automática
+    assert calls == ["relocate", "flush"]
+
+
+def test_drive_ordering_only_when_something_changed_and_not_repeated_after_errors(tmp_path, monkeypatch):
+    """Ordenar Drive (cientos de pedidos) solo si cambió algo en el ensayo; si falla a medias,
+    queda anotado igual y no se repite en cada sincronización."""
+    import time as _t
+    import sync_drive
+    from drive_backup import DriveBackup
+    s, ws, open_db, data = _device(tmp_path, "A", FakeDrive())
+    db = open_db(ws.by_code("NV"))
+    db.set_setting("drive_enabled", True)
+    calls = []
+    monkeypatch.setattr(DriveBackup, "relocate_weeks", lambda self: 0)
+
+    def reorg(self, force=False):
+        calls.append("reorganize")
+        raise RuntimeError("Drive se cortó a medias")
+    monkeypatch.setattr(DriveBackup, "reorganize", reorg)
+    monkeypatch.setattr(DriveBackup, "tidy", lambda self: calls.append("tidy") or
+                        {"merged": 0, "renamed": 0, "moved": 0, "dupes": 0, "folders": 0})
+    monkeypatch.setattr(DriveBackup, "flush", lambda self: 0)
+    s._backup_photos(db)
+    assert calls == ["reorganize", "tidy"]                # primera vez: todo
+    calls.clear()
+    s._backup_photos(db)
+    assert calls == []                                    # el error no lo hace repetir
+    v = db.list_varieties()[0]
+    w = db.week_for_date(dt.date(2026, 10, 12))
+    o = db.get_or_create_observation(v["id"], w["id"])
+    photo = str(tmp_path / "x.jpg")
+    open(photo, "wb").write(b"jpg")
+    db.add_photo(o["id"], "detail", photo)                # foto nueva…
+    s._backup_photos(db)
+    assert calls == []                                    # …pero hace menos de 1 h del orden anterior
+    db.set_setting("layout_checked_at", _t.time() - sync_drive.REORDER_EVERY - 5)
+    db.set_setting("layout_tidied_at", _t.time() - sync_drive.REORDER_EVERY - 5)
+    db.set_setting("layout_sig", "otra")
+    s._backup_photos(db)
+    assert calls == ["reorganize", "tidy"]                # cambió algo y pasó la hora: se ordena
+    calls.clear()
+    db.set_setting("layout_checked_at", _t.time() - sync_drive.FULL_CHECK_EVERY - 5)
+    s._backup_photos(db)
+    assert calls == ["reorganize"]                        # sin cambios: una vez por semana igual
 
 
 def test_yield_estimate_counts_boxes_and_drive_folder(tmp_path):
@@ -3762,3 +3811,40 @@ def test_perf_times_and_counters(db):
     perf.flush()
     perf.reset()
     assert "prueba.bloque" in perf.full_text()          # lo último queda en el archivo
+
+
+def test_sync_does_not_download_unchanged_lists_again(tmp_path):
+    """La lista de ensayos de otro equipo y las plantillas de informes: se bajan solo si
+    cambiaron en Drive (antes, en cada sincronización)."""
+    import report_config as rc
+    fake = FakeDrive()
+    cel, cws, copen, _ = _device(tmp_path, "cel", fake)
+    pc, pws, popen, _ = _device(tmp_path, "pc", fake)
+    cws.create("predio", "predio", "San José", "SJ")
+    cel.run()
+    pc.run()
+    assert pws.by_code("SJ") is not None
+    fake.downloads = []
+    pc.run()
+    assert not [n for n in fake.downloads if n.startswith("ensayos-") or n == rc.DRIVE_FILE]
+    cws.create("predio", "predio", "Los Robles", "LR")       # cambia la lista del celular
+    cel.run()
+    fake.downloads = []
+    pc.run()
+    assert pws.by_code("LR") is not None
+    assert [n for n in fake.downloads if n.startswith("ensayos-")] == ["ensayos-" + __import__("sync").device_id(cws.shared) + ".json"]
+
+
+def test_database_batch_commits_once_and_rolls_back_on_error(db):
+    import pytest
+    with db.batch():
+        db.set_setting("lote_a", 1)
+        db.set_setting("lote_b", 2)
+    assert db.get_setting("lote_a") == 1 and db.get_setting("lote_b") == 2
+    with pytest.raises(RuntimeError):
+        with db.batch():
+            db.set_setting("lote_c", 3)
+            raise RuntimeError("falla a medias")
+    assert db.get_setting("lote_c") is None                 # el lote completo se deshizo
+    db.set_setting("lote_d", 4)                             # fuera del lote: se guarda al tiro
+    assert db.get_setting("lote_d") == 4

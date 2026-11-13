@@ -628,11 +628,33 @@ def text_dialog(title: str, lines: list[str], highlight: str = "", actions=(), s
     def run(cb):
         return lambda *_: (dialog.dismiss(), cb())
 
-    buttons = [MDFlatButton(text=t.upper(), on_release=run(cb)) for t, cb in actions]
-    buttons.append(MDFlatButton(text="CERRAR", on_release=lambda *_: dialog.dismiss()))
-    dialog = MDDialog(title=title, type="custom", content_cls=sv, md_bg_color=DIALOG_BG,
+    content = sv
+    if len(actions) > 1:
+        # Varias acciones: arriba del texto, en filas que se acomodan al ancho (abajo, en
+        # una sola fila, no cabían y quedaban cortadas: «…TODO ENVIAR TIEMPOS…»).
+        from kivy.uix.stacklayout import StackLayout
+        from kivymd.uix.button import MDRectangleFlatButton
+        row = StackLayout(size_hint_y=None, spacing=dp(6), padding=(0, 0, 0, dp(8)))
+        row.bind(minimum_height=row.setter("height"))
+        for t, cb in actions:
+            row.add_widget(MDRectangleFlatButton(text=t, on_release=run(cb), theme_text_color="Custom",
+                                                 text_color=c(theme.LEAF_DARK), line_color=c(theme.LEAF_DARK, .4)))
+        content = MDBoxLayout(orientation="vertical", adaptive_height=True, spacing=dp(2))
+        content.add_widget(row)
+        content.add_widget(sv)
+        buttons = [MDFlatButton(text="CERRAR", on_release=lambda *_: dialog.dismiss())]
+    else:
+        buttons = [MDFlatButton(text=t.upper(), on_release=run(cb)) for t, cb in actions]
+        buttons.append(MDFlatButton(text="CERRAR", on_release=lambda *_: dialog.dismiss()))
+    dialog = MDDialog(title=title, type="custom", content_cls=content, md_bg_color=DIALOG_BG,
                       buttons=buttons)
     dialog.open()
+    if content is not sv:
+        def fit(*_):
+            dialog.update_height()
+            Clock.schedule_once(lambda *_: setattr(dialog, "height", dialog.ids.container.height), 0)
+        content.bind(height=fit)
+        Clock.schedule_once(fit, .05)
     return dialog
 
 
@@ -1947,6 +1969,9 @@ class SettingsScreen(MDScreen):
         """Solo «General»: la fila de pestañas se SACA (oculta y desactivada seguía tomando
         los toques junto a la flecha de volver)."""
         row = self.ids.tabs
+        # Referencia fuerte a la fila: `ids` solo guarda referencias débiles, y al sacarla de
+        # la pantalla Kivy la borraba de la memoria (ReferenceError al volver a Ajustes).
+        self._tabs_row = row
         if only and row.parent:
             self._tabs_box = row.parent
             row.parent.remove_widget(row)

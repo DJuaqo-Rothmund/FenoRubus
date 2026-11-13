@@ -31,6 +31,7 @@ import threading
 from typing import Any, Iterable
 
 import phenology as ph
+import contextlib
 import time
 
 import perf
@@ -320,11 +321,33 @@ class Database:
         with self._lock:
             self.conn.close()
 
+    _batch = 0      # > 0: dentro de batch(), se guarda a disco una sola vez al final
+
+    @contextlib.contextmanager
+    def batch(self):
+        """Muchas escrituras seguidas (aplicar un paquete de sincronización) en UNA transacción:
+        en el teléfono, guardar a disco tras cada fila era lo más lento. Si algo falla, se
+        deshace todo el lote (y se reintenta en la próxima sincronización)."""
+        with self._lock:
+            self._batch += 1
+            try:
+                yield self
+            except BaseException:
+                if self._batch == 1:
+                    self.conn.rollback()
+                raise
+            else:
+                if self._batch == 1:
+                    self.conn.commit()
+            finally:
+                self._batch -= 1
+
     def execute(self, sql: str, params: Iterable[Any] = ()) -> sqlite3.Cursor:
         t0 = time.perf_counter()
         with self._lock:
             cur = self.conn.execute(sql, tuple(params))
-            self.conn.commit()
+            if not self._batch:
+                self.conn.commit()
         perf.add("sql.escrituras")
         perf.add("sql.escrituras ms", (time.perf_counter() - t0) * 1000)
         return cur

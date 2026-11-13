@@ -22,6 +22,7 @@ import datetime as _dt
 import hashlib
 import json
 import os
+import time
 import urllib.parse
 import uuid
 from concurrent.futures import ThreadPoolExecutor
@@ -37,6 +38,25 @@ THREADS = 4                 # descargas simultáneas
 WS_FIELDS = ("profile", "kind", "name", "code")
 REORDER_EVERY = 3600        # s: orden completo de Drive al sincronizar a mano, como mucho cada hora
 GIVE_UP_TRIES = 15          # foto que el otro equipo nunca subió: deja de contarse como pendiente
+
+
+FULL_CHECK_EVERY = 7 * 24 * 3600   # s: sin cambios en el ensayo, el orden completo de Drive una vez por semana
+
+
+def _layout_sig(db) -> str:
+    """Huella de lo que se ordena en Drive en este ensayo: si no cambió, no hay nada que ordenar."""
+    parts = []
+    for sql in ("SELECT COUNT(*) AS n, COALESCE(MAX(id), 0) AS m, COALESCE(SUM(LENGTH(path)), 0) AS l FROM photos",
+                "SELECT COUNT(*) AS n, COALESCE(MAX(id), 0) AS m, 0 AS l FROM variety_attachments",
+                "SELECT COUNT(*) AS n, COALESCE(MAX(id), 0) AS m, 0 AS l FROM measure_entries WHERE path IS NOT NULL",
+                "SELECT COUNT(*) AS n, COALESCE(MAX(id), 0) AS m, 0 AS l FROM drive_queue WHERE status != 'done'"):
+        try:
+            r = db.query_one(sql) or {}
+            parts.append(f"{r.get('n')}.{r.get('m')}.{r.get('l')}")
+        except Exception:  # noqa: BLE001 (tabla que no existe en esta base)
+            parts.append("-")
+    parts.append(str(bool(db.get_setting("week_moves_drive"))))
+    return "|".join(parts)
 
 
 def _older(backup, key: str, seconds: float) -> bool:
@@ -68,7 +88,7 @@ class DriveSync:
         out, token = [], None
         while True:
             params = {"q": f"'{folder}' in parents and trashed=false",
-                      "fields": "nextPageToken, files(id, name)", "orderBy": "name",
+                      "fields": "nextPageToken, files(id, name, modifiedTime)", "orderBy": "name",
                       "pageSize": "1000", "spaces": "drive"}
             if token:
                 params["pageToken"] = token
@@ -130,11 +150,25 @@ class DriveSync:
         la cuenta en Drive (las de la web y de otros teléfonos). Devuelve cuántas hay."""
         import crops
         import report_config as rc
-        self.drive.root_id()                                   # crea «AeonCrop» si falta
-        top = self.drive._find_folder(crops.DRIVE_TOP, None)
+        shared = self.workspaces.shared
+        top = shared.get_setting("tpl_top_id")
         if not top:
-            return 0
-        found = [f for f in self._list(top) if f["name"] == rc.DRIVE_FILE]
+            self.drive.root_id()                               # crea «AeonCrop» si falta
+            top = self.drive._find_folder(crops.DRIVE_TOP, None)
+            if not top:
+                return 0
+            shared.set_setting("tpl_top_id", top)
+        try:
+            found = [f for f in self._list(top) if f["name"] == rc.DRIVE_FILE]
+        except Exception:  # noqa: BLE001 (carpeta borrada o movida: se busca de nuevo la próxima vez)
+            shared.set_setting("tpl_top_id", None)
+            raise
+        local = rc.account_items()
+        state = shared.get_setting("tpl_seen") or {}
+        stamp = found[0].get("modifiedTime", "") if found else ""
+        mine = hashlib.sha1(json.dumps(local, sort_keys=True).encode()).hexdigest()
+        if found and stamp and state.get("stamp") == stamp and state.get("local") == mine:
+            return len(rc.visible(local))                     # nada cambió aquí ni en Drive
         remote = []
         if found:
             try:
@@ -145,6 +179,10 @@ class DriveSync:
         if push or not found:
             raw = json.dumps({"version": 1, "templates": merged}, ensure_ascii=False, indent=1).encode("utf-8")
             self._put(top, rc.DRIVE_FILE, raw, found[0]["id"] if found else None)
+            found = [f for f in self._list(top) if f["name"] == rc.DRIVE_FILE] or found
+            stamp = found[0].get("modifiedTime", "") if found else ""
+        shared.set_setting("tpl_seen", {"stamp": stamp,
+                                        "local": hashlib.sha1(json.dumps(rc.account_items(), sort_keys=True).encode()).hexdigest()})
         return len(rc.visible(merged))
 
     # ------------------------------------------------------------ ensayos
@@ -153,18 +191,26 @@ class DriveSync:
         created = 0
         mine = f"ensayos-{device}.json"
         codes = self.workspaces.codes()
+        shared = self.workspaces.shared
+        seen = shared.get_setting("sync_ws_seen") or {}         # archivo -> modifiedTime ya leído
+        fresh = dict(seen)
         for f in files:
             if not f["name"].startswith("ensayos-") or f["name"] == mine:
                 continue
+            stamp = f.get("modifiedTime") or ""
+            if stamp and seen.get(f["id"]) == stamp:
+                continue            # sin cambios desde la última vez: no se vuelve a bajar
+            fresh[f["id"]] = stamp
             for ws in json.loads(self._get(f["id"]).decode("utf-8")):
                 if ws["code"] not in codes:
                     self.workspaces.create(ws["profile"], ws["kind"], ws["name"], ws["code"])
                     codes.add(ws["code"])
                     created += 1
+        if fresh != seen:
+            shared.set_setting("sync_ws_seen", fresh)
         local = [{k: w[k] for k in WS_FIELDS} for w in self.workspaces.list()]
         raw = json.dumps(local, ensure_ascii=False, sort_keys=True).encode("utf-8")
         digest = hashlib.sha1(raw).hexdigest()
-        shared = self.workspaces.shared
         if shared.get_setting("sync_ws_sent") != digest:
             existing = next((f for f in files if f["name"] == mine), None)
             self._put(root, mine, raw, existing["id"] if existing else None)
@@ -183,13 +229,14 @@ class DriveSync:
         for f, raw in zip(new, self._parallel(lambda f: self._get(f["id"]), new)):
             name = f["name"]
             bundle = sync.loads(raw)
-            res = sync.apply_changes(db, bundle, self.data_dir, week_for_date=db.week_for_date)
+            with db.batch():          # todo el paquete en una transacción (y «visto» con él)
+                res = sync.apply_changes(db, bundle, self.data_dir, week_for_date=db.week_for_date)
+                for path in res["missing_files"]:
+                    db.execute("INSERT OR IGNORE INTO sync_missing(path) VALUES (?)", (path,))
+                db.execute("INSERT OR IGNORE INTO sync_seen(name) VALUES (?)", (name,))
             stats["received"] += 1
             stats["applied"] += res["applied"]
             stats["missing_files"] += res["missing_files"]
-            for path in res["missing_files"]:
-                db.execute("INSERT OR IGNORE INTO sync_missing(path) VALUES (?)", (path,))
-            db.execute("INSERT OR IGNORE INTO sync_seen(name) VALUES (?)", (name,))
         bundle = sync.export_changes(db, self.data_dir)
         settings_hash = hashlib.sha1(json.dumps(bundle["settings"], sort_keys=True).encode()).hexdigest()
         sent_hash = db.query_one("SELECT value FROM sync_state WHERE key='settings_sent'")
@@ -343,26 +390,47 @@ class DriveSync:
                                      metered=self.drive.metered, crop=self.drive.crop)
             moved = 0
             if backup.enabled:
+                # Ordenar Drive revisa TODAS las fotos del ensayo (cientos de pedidos): solo si
+                # algo cambió en este ensayo desde la última vez (fotos, adjuntas, mediciones o
+                # semanas movidas), o una vez por semana por si se tocó Drive a mano. Queda
+                # anotado aunque falle a medias: antes, un error lo hacía repetir en cada
+                # sincronización (AUF demoraba ~1 min sin subir nada).
+                sig = _layout_sig(db)
+                changed = sig != db.get_setting("layout_sig")
+                code = getattr(db, "code", "")
                 # Cada paso por separado: si uno falla (red, permiso), los demás igual corren y
                 # el error queda en el diagnóstico del respaldo.
                 for step in ("relocate", "reorganize", "tidy"):
                     try:
                         if step == "relocate":
-                            moved += backup.relocate_weeks()
+                            with perf.timed("sync.fotos · semanas movidas", code):
+                                moved += backup.relocate_weeks()
                         elif step == "reorganize":
-                            # Revisar todas las fotos en Drive demora: a mano, como mucho cada
-                            # hora (lo nuevo ya sube directo a su carpeta); solo, cada 6 h.
-                            moved += backup.reorganize(force=manual and _older(backup, "layout_checked_at", REORDER_EVERY))
-                        elif moved or _older(backup, "layout_tidied_at", REORDER_EVERY if manual else 6 * 3600):
+                            due = (changed and _older(backup, "layout_checked_at", REORDER_EVERY)) or \
+                                _older(backup, "layout_checked_at", FULL_CHECK_EVERY)
+                            if due:
+                                with perf.timed("sync.fotos · ordenar", code):
+                                    try:
+                                        moved += backup.reorganize(force=True)
+                                    finally:
+                                        db.set_setting("layout_checked_at", time.time())
+                        elif moved or (changed and _older(backup, "layout_tidied_at", REORDER_EVERY)) or \
+                                _older(backup, "layout_tidied_at", FULL_CHECK_EVERY):
                             if progress:
                                 progress(0, "ordenando Drive")
-                            t = backup.tidy()      # repetidas, fechas viejas, copias y carpetas vacías
+                            with perf.timed("sync.fotos · limpiar Drive", code):
+                                try:
+                                    t = backup.tidy()      # repetidas, fechas viejas, copias y carpetas vacías
+                                finally:
+                                    db.set_setting("layout_tidied_at", time.time())
                             moved += t["moved"] + t["renamed"]
                     except Exception as exc:  # noqa: BLE001
                         backup.log(f"Ordenar Drive ({step}): {exc}", error=True)
+                db.set_setting("layout_sig", _layout_sig(db))
             backup.progress_cb = progress
             try:
-                up = backup.flush()
+                with perf.timed("sync.fotos · subir pendientes", getattr(db, "code", "")):
+                    up = backup.flush()
             finally:
                 backup.progress_cb = None
             return up, moved
