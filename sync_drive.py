@@ -369,6 +369,8 @@ class DriveSync:
             folder = folders.get(ws["code"]) or self.drive._folder(ws["code"], root)
             with perf.timed("sync.registros", lambda: f"{code}: +{res['received']} recibidos, {res['sent']} enviados"):
                 res = self.sync_db(db, folder, db.get_setting("share_sync") or None)
+            if db.get_setting("share_folder"):
+                self._accept_transfers(db)
             p(base + step * .3, f"{name}: fotos")
             with perf.timed("sync.subir fotos", lambda: f"{code}: {up} subidas, {mv} movidas"):
                 up, mv = self._backup_photos(db, manual, lambda f, t="", b=base, s=step, n=name:
@@ -405,7 +407,14 @@ class DriveSync:
                 backup = DriveBackup(db, authorizer=self.drive.authorizer, transport=self.drive.transport,
                                      metered=self.drive.metered, crop=self.drive.crop)
             moved = 0
-            if backup.enabled and not quick:
+            member = False
+            if db.get_setting("share_folder"):
+                try:
+                    import sharing
+                    member = sharing.i_am_member(backup)
+                except Exception:  # noqa: BLE001
+                    member = True
+            if backup.enabled and not quick and not member:
                 # Ordenar Drive revisa TODAS las fotos del ensayo (cientos de pedidos): solo si
                 # algo cambió en este ensayo desde la última vez (fotos, adjuntas, mediciones o
                 # semanas movidas), o una vez por semana por si se tocó Drive a mano. Queda
@@ -453,6 +462,21 @@ class DriveSync:
         except Exception as exc:  # noqa: BLE001 (lo que falte se reintenta en la próxima)
             print("respaldo de fotos:", exc)
             return 0, 0
+
+    def _accept_transfers(self, db) -> int:
+        """Dueño de un ensayo compartido: acepta la propiedad de las fotos que subió la otra
+        persona (quedan en este Drive). Nunca frena la sincronización."""
+        try:
+            import sharing
+            from drive_backup import DriveBackup
+            backup = self.drive if db is getattr(self.drive, "db", None) else DriveBackup(
+                db, authorizer=self.drive.authorizer, transport=self.drive.transport,
+                metered=self.drive.metered, crop=self.drive.crop)
+            with perf.timed("sync.compartido · aceptar fotos", getattr(db, "code", "")):
+                return sharing.accept_transfers(backup)
+        except Exception as exc:  # noqa: BLE001
+            print("compartido: aceptar traspasos:", exc)
+            return 0
 
     def photos_allowed(self) -> bool:
         """Las fotos se bajan con Wi-Fi si así está el respaldo («Subir solo con Wi-Fi»)."""

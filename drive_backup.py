@@ -1634,6 +1634,17 @@ class DriveBackup:
         with ThreadPoolExecutor(UPLOAD_THREADS) as ex:
             return list(ex.map(one, jobs))
 
+    def _after_upload(self, file_id: str, path: str, remote: str) -> None:
+        """Ensayo compartido por otra persona: la foto se le traspasa (queda en su Drive) y se
+        deja en cola una copia para el Drive propio (sharing.after_upload)."""
+        if not remote.startswith(SHARE_SEG):
+            return
+        try:
+            import sharing
+            sharing.after_upload(self, file_id, path, remote)
+        except Exception as exc:  # noqa: BLE001 - nunca frena la subida
+            _quiet(exc, "compartido: traspasar foto al dueño")
+
     def flush(self) -> int:
         """Sube lo pendiente. Devuelve cuántas fotos se subieron."""
         if not self.enabled:
@@ -1651,6 +1662,12 @@ class DriveBackup:
                 raise Offline("Esperando Wi-Fi (datos móviles desactivados para el respaldo)")
             self._sync_account_queue()
             self._skip_missing()
+            if self.db.get_setting("xfer_todo"):      # traspasos al dueño que fallaron antes
+                try:
+                    import sharing
+                    sharing.retry_transfers(self)
+                except Exception as exc:  # noqa: BLE001
+                    _quiet(exc, "compartido: reintentar traspasos")
             # Primero mover lo de versiones anteriores (rápido: unas pocas carpetas)…
             self.relocate_legacy()  # lo subido antes de los ensayos -> «I+D/Nuevas variedades»
             self.relocate_moved()   # ensayo traspasado a un predio: carpeta y nombres en Drive
@@ -1664,6 +1681,7 @@ class DriveBackup:
                 # De a UPLOAD_THREADS fotos a la vez: carpetas y nombres se calculan antes (base
                 # de datos, en este hilo) y solo el envío corre en paralelo.
                 step = UPLOAD_THREADS * 2
+                names: dict = {}
                 for start in range(0, len(rows), step):
                     chunk, jobs = rows[start:start + step], []
                     i = start + 1
@@ -1683,6 +1701,7 @@ class DriveBackup:
                             # también para lo que quedó en cola con el esquema anterior).
                             name = (self._remote_name(r["photo_id"], r["path"]) if r["photo_id"]
                                     else r["name"])
+                            names[r["id"]] = name
                             jobs.append((r, *self._parent_of(name)))
                         except (Offline, NeedsConsent):
                             raise
@@ -1706,6 +1725,7 @@ class DriveBackup:
                         self.db.execute("UPDATE drive_queue SET status='done', drive_id=?, error='', "
                                         "uploaded_at=? WHERE id=?", (res, _now(), r["id"]))
                         uploaded += 1
+                        self._after_upload(res, r["path"], names.get(r["id"], ""))
                 if not self._again:
                     left = self.db.query_one(
                         "SELECT COUNT(*) AS n FROM drive_queue WHERE status='pending' AND attempts=0")
