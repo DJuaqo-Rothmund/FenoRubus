@@ -186,7 +186,8 @@ def fetch_photos(items: list, progress=None, done=None):
                 if progress:
                     Clock.schedule_once(lambda *_, g=got, n=len(todo): progress(g, n))
         except Exception as exc:  # noqa: BLE001
-            Clock.schedule_once(lambda *_: a.toast(f"No se pudieron bajar las fotos: {exc}"))
+            msg = f"No se pudieron bajar las fotos: {exc}"     # exc deja de existir al salir del except
+            Clock.schedule_once(lambda *_: a.toast(msg))
         if done:
             Clock.schedule_once(lambda *_: done(got, missing))
 

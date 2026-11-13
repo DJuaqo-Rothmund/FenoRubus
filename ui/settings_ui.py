@@ -17,8 +17,8 @@ from notifications import FREQUENCIES, can_schedule_exact, request_exact_alarm_p
 from platform_utils import IS_ANDROID, app_version
 from ui import theme
 from ui.theme import c
-from ui.common import (_crop, app, confirm, fast_clear, list_dialog, pick_dialog, show_error_log,
-    text_dialog)
+from ui.common import (_crop, app, confirm, fast_clear, form_dialog, list_dialog, pick_dialog,
+    show_error_log, text_dialog)
 
 
 # ===========================================================================

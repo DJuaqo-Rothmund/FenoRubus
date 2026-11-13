@@ -4204,3 +4204,21 @@ def test_shared_workspace_photos_end_up_owned_by_the_owner_with_copy(tmp_path):
     yo.run()                                                 # mi app acepta: queda a mi nombre
     assert fake.files[common[0]]["owner"] == "juaquin@x.cl"
     assert fake.files[copy[0]]["owner"] == "coni@x.cl"       # su copia sigue siendo de ella
+
+
+def test_no_undefined_names_in_app_code():
+    """Un nombre sin importar (p. ej. form_dialog tras dividir pantallas) solo falla al tocar el
+    botón en el teléfono: aquí se detecta antes."""
+    import glob
+    pyflakes = pytest.importorskip("pyflakes.api")
+    from pyflakes import reporter as rep
+    import io
+    root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    bad = []
+    for path in glob.glob(os.path.join(root, "*.py")) + glob.glob(os.path.join(root, "ui", "*.py")):
+        if os.path.basename(path) == "screens.py":
+            continue                       # solo reúne los módulos con «import *»
+        out = io.StringIO()
+        pyflakes.checkPath(path, rep.Reporter(out, out))
+        bad += [ln for ln in out.getvalue().splitlines() if "undefined name" in ln]
+    assert not bad, "\n".join(bad)
