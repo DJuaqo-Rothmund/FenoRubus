@@ -2118,10 +2118,23 @@ class Database:
     # ---------------------------------------------------------- aggregations
     def week_overview(self, week_id: int, include_archived: bool = False) -> list[dict]:
         """Una fila por variedad con su observación y fotos para la semana indicada."""
+        # Dos consultas para toda la semana (antes, dos por variedad: con 30 variedades eran
+        # 60 consultas en cada refresco del muestreo). Mismo resultado que get_photos.
+        obs_by = {o["variety_id"]: o for o in self.query("SELECT * FROM observations WHERE week_id=?", (week_id,))}
+        photos_by: dict[int, list] = {}
+        if obs_by:
+            for r in self.query("SELECT p.* FROM photos p JOIN observations o ON o.id = p.observation_id "
+                                "WHERE o.week_id=? ORDER BY p.is_primary DESC, p.captured_at DESC, p.id DESC",
+                                (week_id,)):
+                photos_by.setdefault(r["observation_id"], []).append(r)
         out = []
         for v in self.pheno_units(include_archived=include_archived):
-            obs = self.get_observation(v["id"], week_id)
-            photos = self.get_photos(obs["id"]) if obs else {}
+            obs = obs_by.get(v["id"])
+            photos: dict[str, dict] = {}
+            for r in photos_by.get(obs["id"], []) if obs else []:
+                cur = photos.get(r["kind"])
+                if cur is None or (not os.path.exists(cur["path"] or "") and os.path.exists(r["path"] or "")):
+                    photos[r["kind"]] = r
             out.append({"variety": v, "observation": obs, "photos": photos})
         return out
 

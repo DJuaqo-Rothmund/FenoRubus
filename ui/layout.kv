@@ -532,19 +532,6 @@
         canvas.after:
             PopMatrix
 
-<LaunchScreen>:
-    md_bg_color: c(theme.SPLASH_BG)
-    # Apertura de AeonCrop: la huella se dibuja y la planta crece (cuadros de
-    # tools/aeon_anim.js); el primer cuadro es la pantalla de carga de Android.
-    Image:
-        id: anim
-        source: theme.AEON_FRAMES[0]
-        fit_mode: "contain"
-        mipmap: True
-        size_hint: None, None
-        size: (min(root.width * .62, root.height * .34),) * 2
-        pos_hint: {"center_x": .5, "center_y": .55}
-
 <SplashScreen>:
     md_bg_color: c(theme.SPLASH_BG)
     FloatLayout:

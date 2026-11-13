@@ -135,7 +135,11 @@ class FenoRubusApp(MDApp):
         self._file_manager = None
 
         crashguard.step("interfaz")
-        Builder.load_file(resource_path("ui", "layout.kv"))
+        # Solo la pantalla de apertura ahora; el resto del diseño se compila en segundo plano
+        # mientras se ve su animación (antes, ~4 s con la pantalla de carga quieta).
+        from ui import kvload
+        Builder.load_file(resource_path("ui", "launch.kv"))
+        kvload.start(resource_path("ui", "layout.kv"))
         # Fundido corto: con pantallas translúcidas un deslizamiento superpondría contenidos.
         # Cambio de pantalla instantáneo: un fundido dibuja las DOS pantallas en texturas
         # intermedias en cada cuadro, lo más costoso para GPUs modestas.
@@ -743,12 +747,24 @@ class FenoRubusApp(MDApp):
         self.workers.submit(self._preload_modules)
         self._preloaded = False
         self._preload = self._preload_steps()
-        self.sm.add_widget(CropScreen(name="crops"))
+        self._crops_ready = False
+        Clock.schedule_once(self._add_crops, 0)
         # La pantalla de carga de Android es el primer cuadro de la animación de AeonCrop:
         # se quita y sigue la animación (la huella se dibuja, la planta crece).
         Clock.schedule_once(lambda *_: splash_native.remove(), 0)
         self._frame = 0
         self._anim_ev = Clock.schedule_interval(self._launch_frame, 1 / 20)
+
+    def _add_crops(self, *_):
+        """La pantalla de cultivos, apenas el diseño terminó de compilarse."""
+        from ui import kvload
+        if not kvload.ready():
+            Clock.schedule_once(self._add_crops, 1 / 20)
+            return
+        kvload.apply()
+        if not self.sm.has_screen("crops"):
+            self.sm.add_widget(CropScreen(name="crops"))
+        self._crops_ready = True
 
     def _launch_frame(self, *_):
         if not self.sm.has_screen("launch"):
@@ -761,8 +777,8 @@ class FenoRubusApp(MDApp):
             img = self.sm.get_screen("launch").ids.anim
             img.texture = CoreImage(theme.AEON_FRAMES[self._frame], nocache=True).texture
             return
-        if self._frame >= len(theme.AEON_FRAMES) + 6:   # el logo completo un momento
-            self._anim_ev.cancel()
+        if self._frame >= len(theme.AEON_FRAMES) + 6 and getattr(self, "_crops_ready", True):
+            self._anim_ev.cancel()      # el logo completo un momento (y el diseño ya listo)
             self._show_crops()
 
     def _show_crops(self, *_):

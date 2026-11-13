@@ -3848,3 +3848,17 @@ def test_database_batch_commits_once_and_rolls_back_on_error(db):
     assert db.get_setting("lote_c") is None                 # el lote completo se deshizo
     db.set_setting("lote_d", 4)                             # fuera del lote: se guarda al tiro
     assert db.get_setting("lote_d") == 4
+
+
+def test_week_overview_same_as_one_by_one_with_few_queries(db, tmp_path):
+    import perf
+    pairs = _fill_week(db, tmp_path)
+    week_id = pairs[-1][1]["id"]
+    expected = []
+    for v in db.pheno_units():
+        obs = db.get_observation(v["id"], week_id)
+        expected.append({"variety": v, "observation": obs, "photos": db.get_photos(obs["id"]) if obs else {}})
+    before = perf.counts().get("sql.consultas", 0)
+    got = db.week_overview(week_id)
+    assert got == expected
+    assert perf.counts()["sql.consultas"] - before <= 4          # antes: 2 por variedad
