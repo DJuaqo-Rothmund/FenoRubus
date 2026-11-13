@@ -250,7 +250,12 @@ STYLES = {
     "bosque": ("Bosque", "Verdes oscuros lisos y bordes simples; íconos y logos con su color"),
     "lino": ("Lino", "Claro y cálido, como papel de cuaderno, con detalles verde oliva"),
     "noche": ("Noche de huerto", "Azul noche y ciruela, con la fruta encendida como neón"),
+    "aurora": ("Aurora", "Oscuro y tecnológico: luces de aurora, vidrio y datos al frente"),
+    "cristal": ("Cristal", "Claro y minimalista: tarjetas blancas, números grandes y negro"),
 }
+# Estilos «tecnológicos»: el inicio muestra tarjetas con datos (ui/start_tech.py) y el fruto
+# del logo sin la órbita de estados.
+TECH_STYLES = ("aurora", "cristal")
 DEFAULT_STYLE = "pastel"
 
 # Color de la fruta (acento): frambuesa, arándano azul, cranberry carmesí.
@@ -287,17 +292,34 @@ STYLE_COLORS = {
         "GLASS": "#1E2240D9", "GLASS_STRONG": "#232849F0", "GLASS_EDGE": "#FFFFFF26",
         "LINE": "#FFFFFF22", "SURFACE": "#262B4E", "SPLASH_BG": "#15172B",
         "FILL_DARK": "#0D0F1F", "NAV_TILE": "#D9DCF2", "ON_BERRY": "#12142A"},
+    "aurora": {
+        "LEAF_DARK": "#DDFBEF", "LEAF": "#3DF0B4", "LEAF_LIGHT": "#22B98A", "LEAF_SOFT": "#12302F",
+        "INK": "#E8F1FF", "INK_2": "#B9C8E0", "MUTED": "#8498B8", "WARN": "#FFC062",
+        "GLASS": "#151C2CE0", "GLASS_STRONG": "#182033F5", "GLASS_EDGE": "#FFFFFF2B",
+        "LINE": "#FFFFFF1F", "SURFACE": "#1A2236", "SPLASH_BG": "#070B14",
+        "FILL_DARK": "#05080F", "NAV_TILE": "#DCE6F7", "ON_BERRY": "#0A0E18"},
+    "cristal": {
+        "LEAF_DARK": "#10131A", "LEAF": "#1E7A4F", "LEAF_LIGHT": "#58B98A", "LEAF_SOFT": "#E6F4EC",
+        "INK": "#10131A", "INK_2": "#3B4252", "MUTED": "#6B7385", "WARN": "#B7791F",
+        "GLASS": "#FFFFFFF5", "GLASS_STRONG": "#FFFFFFFF", "GLASS_EDGE": "#E3E7EF",
+        "LINE": "#10131A1F", "SURFACE": "#FFFFFF", "SPLASH_BG": "#F4F6FA", "FILL_DARK": "#10131A"},
 }
-DARK_STYLES = ("bosque", "noche")
-FRUIT_SOFT_DARK = {"noche": {"frambuesa": "#42223A", "arandano": "#252F58", "cranberry": "#45202C"}}
+DARK_STYLES = ("bosque", "noche", "aurora")
+FRUIT_SOFT_DARK = {"noche": {"frambuesa": "#42223A", "arandano": "#252F58", "cranberry": "#45202C"},
+                   "aurora": {"frambuesa": "#3A1830", "arandano": "#1B2750", "cranberry": "#3D1722"}}
 
 crop_id = "frambuesa"
 style = DEFAULT_STYLE
+FRUIT_SIMPLE = resource_path("assets", "crops", "frambuesa", "fruit_simple.png")
 
 
 def _crop_asset(name: str, crop: str) -> str:
     path = resource_path("assets", "crops", crop, name)
     return path if crop != "frambuesa" and os.path.exists(path) else resource_path("assets", "ui", name)
+
+
+def is_tech() -> bool:
+    return style in TECH_STYLES
 
 
 def is_dark() -> bool:
@@ -306,7 +328,7 @@ def is_dark() -> bool:
 
 def configure(crop: str | None = None, style_name: str | None = None) -> None:
     """Colores e imágenes del cultivo y del estilo (antes de construir las pantallas)."""
-    global crop_id, style, BACKGROUND, START_BG, BLOB_ID, LOGO, WORDMARK
+    global crop_id, style, BACKGROUND, START_BG, BLOB_ID, LOGO, WORDMARK, FRUIT_SIMPLE
     crop_id = crop or crop_id
     style = style_name if style_name in STYLES else (style if style_name is None else DEFAULT_STYLE)
     g = globals()
@@ -315,10 +337,11 @@ def configure(crop: str | None = None, style_name: str | None = None) -> None:
     g.update(STYLE_COLORS[style])
     if style in DARK_STYLES:
         glow = FRUIT_GLOW.get(crop_id, FRUIT_GLOW["frambuesa"])
-        g.update(glow if style == "noche" else {k: glow[k] for k in ("BERRY", "BERRY_DARK")})
-        if style == "noche":
-            g["BERRY_SOFT"] = FRUIT_SOFT_DARK["noche"].get(crop_id, "#42223A")
+        g.update(glow if style in FRUIT_SOFT_DARK else {k: glow[k] for k in ("BERRY", "BERRY_DARK")})
+        if style in FRUIT_SOFT_DARK:
+            g["BERRY_SOFT"] = FRUIT_SOFT_DARK[style].get(crop_id, "#42223A")
     LOGO = _crop_asset("logo.png", crop_id)
+    FRUIT_SIMPLE = resource_path("assets", "crops", crop_id, "fruit_simple.png")   # sin la órbita
     # Nombre del módulo sin «App», misma letra para los tres (tools/make_crop_splash.py).
     WORDMARK = resource_path("assets", "crops", crop_id, "name.png")
     if style == "pastel":

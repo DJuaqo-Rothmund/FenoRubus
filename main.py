@@ -619,6 +619,9 @@ class FenoRubusApp(MDApp):
 
     @property
     def start(self):
+        if theme.is_tech():                 # Aurora y Cristal: inicio con tarjetas de datos
+            from ui.start_tech import StartTech
+            return self._screen(StartTech, "start")
         return self._screen(StartScreen, "start")
 
     def open_start(self):

@@ -1055,8 +1055,10 @@ class CropScreen(MDScreen):
         self.refresh_account()
 
 
-class StartScreen(MDScreen):
-    """Lo primero que se ve al abrir la app: I+D, Predio, Entrenador IA y la cuenta de Google."""
+class StartBase(MDScreen):
+    """Lo primero que se ve al abrir un cultivo: I+D, Predio, Cuaderno, Rendimiento, pendientes
+    de hoy y el estado de Drive. La lógica es una sola; el dibujo depende del estilo:
+    StartScreen (íconos flotantes) o ui/start_tech.StartTech (tarjetas con datos)."""
     _animated = False
     sync_angle = NumericProperty(0)    # giro del botón sincronizar mientras trabaja
 
@@ -1082,8 +1084,8 @@ class StartScreen(MDScreen):
         self.refresh()
 
     def on_pre_enter(self, *_):
-        if not StartScreen._animated:      # animación de entrada: solo la primera vez
-            StartScreen._animated = True
+        if not StartBase._animated:        # animación de entrada: solo la primera vez
+            StartBase._animated = True
             self._prepare_intro()
         # La pantalla aparece al instante; los textos (consultas a la base) justo después.
         Clock.schedule_once(lambda *_: self.refresh(), 0)
@@ -1155,14 +1157,24 @@ class StartScreen(MDScreen):
             what = {"predio": "sectores", "tratamientos": "parcelas"}.get(
                 (ws or {}).get("kind") if (ws or {}).get("kind") == "tratamientos" else (ws or {}).get("profile"),
                 "registros")
-            self.ids.week_lbl.text = (f"Semana {ph.week_of_year(a.week)} · {done} de {len(units)} "
-                                      f"{what} · {Workspaces.title(ws)}" if ws and units else
-                                      (f"Último usado: {Workspaces.title(ws)} ({ws['code']})" if ws else ""))
-            self.ids.week_bar.progress = done / len(units) if units else 0
+            self._show_week({"week": ph.week_of_year(a.week), "done": done, "total": len(units), "what": what,
+                             "title": Workspaces.title(ws) if ws else "", "code": (ws or {}).get("code", ""),
+                             "ws": ws})
         except Exception:  # noqa: BLE001 - nunca bloquear el inicio
-            self.ids.week_lbl.text = ""
+            self._show_week(None)
         self._pills()
         self._postit()
+
+    def _show_week(self, info: dict | None) -> None:
+        """Avance del muestreo de la semana en el ensayo o predio en uso."""
+        if not info:
+            self.ids.week_lbl.text = ""
+            return
+        ws = info["ws"]
+        self.ids.week_lbl.text = (f"Semana {info['week']} · {info['done']} de {info['total']} "
+                                  f"{info['what']} · {info['title']}" if ws and info["total"] else
+                                  (f"Último usado: {info['title']} ({info['code']})" if ws else ""))
+        self.ids.week_bar.progress = info["done"] / info["total"] if info["total"] else 0
 
     def _pills(self):
         a = app()
@@ -1231,6 +1243,10 @@ class StartScreen(MDScreen):
 
     def open_ai(self):
         app().open_ai_lab()
+
+
+class StartScreen(StartBase):
+    """Inicio de los estilos de siempre: íconos ilustrados que flotan y el post-it."""
 
 
 class SectorRow(GlassButton):
