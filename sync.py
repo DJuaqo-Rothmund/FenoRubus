@@ -191,12 +191,14 @@ def _uid_lookup(db):
 
 
 # ---------------------------------------------------------------------- aplicar
-def apply_changes(db, bundle: dict, data_dir: str, week_for_date=None) -> dict:
+def apply_changes(db, bundle: dict, data_dir: str, week_for_date=None, keep_newer: bool = False) -> dict:
     """Aplica un paquete de otro equipo. Si aquí hay un cambio pendiente MÁS NUEVO del mismo
-    registro, se conserva el de aquí. Devuelve {"applied", "skipped", "missing_files"}."""
+    registro, se conserva el de aquí. keep_newer (combinar datos de otra persona): además, un
+    registro de aquí con `updated_at` más reciente tampoco se pisa.
+    Devuelve {"applied", "skipped", "kept", "missing_files"}."""
     if bundle.get("device") == device_id(db):
-        return {"applied": 0, "skipped": 0, "missing_files": []}
-    stats = {"applied": 0, "skipped": 0, "missing_files": []}
+        return {"applied": 0, "skipped": 0, "kept": 0, "missing_files": []}
+    stats = {"applied": 0, "skipped": 0, "kept": 0, "missing_files": [], "keep_newer": keep_newer}
     rank = {t: i for i, t in enumerate(ORDER)}
     # Altas y cambios: primero los registros que otros referencian; borrados: al revés.
     changes = sorted(bundle.get("changes", []), key=lambda c: (
@@ -233,6 +235,7 @@ def apply_changes(db, bundle: dict, data_dir: str, week_for_date=None) -> dict:
             stats["applied"] += 1
     finally:
         db.execute("UPDATE sync_state SET value='0' WHERE key='applying'")
+    stats.pop("keep_newer", None)
     return stats
 
 
@@ -279,6 +282,11 @@ def _upsert(db, table, ch, data_dir, week_for_date, stats) -> bool:
             db.execute(f"DELETE FROM sync_dirty WHERE entity=? AND uid=(SELECT uid FROM {table} "
                        f"WHERE {pk}=?)", (table, current))
             db.execute(f"UPDATE {table} SET uid=? WHERE {pk}=?", (ch["uid"], current))
+    if current is not None and stats.get("keep_newer") and data.get("updated_at"):
+        mine = db.query_one(f"SELECT * FROM {table} WHERE {pk}=?", (current,)) or {}
+        if mine.get("updated_at") and str(mine["updated_at"]) > str(data["updated_at"]):
+            stats["kept"] += 1             # lo de aquí es más nuevo: se conserva
+            return True
     if current is None:
         names = list(data) + ["uid"]
         db.execute(f"INSERT INTO {table}({', '.join(names)}) VALUES ({', '.join('?' * len(names))})",

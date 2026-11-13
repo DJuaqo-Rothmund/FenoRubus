@@ -394,9 +394,13 @@
                     text: "Restaurar copia de seguridad"
                     on_release: root.restore_backup()
                 GhostButton:
+                    icon: "account-multiple-plus-outline"
+                    text: "Combinar datos de otro teléfono"
+                    on_release: root.merge_backup()
+                GhostButton:
                     icon: "file-import-outline"
                     text: "Importar informes semanales"
                     on_release: root.import_reports()
                 Muted:
                     id: backup_text
-                    text: "La copia completa se guarda en Descargas › PhenoRubus. «Restaurar» acepta esa copia o el archivo .sqlite3 de «Respaldar base de datos» de versiones anteriores, y recupera las fotos tomadas con la app desde «Imágenes de Fenología» (o «FenoRubus» en las primeras versiones). Los informes semanales (PDF, o .html/.zip de versiones anteriores) completan lo que falte."
+                    text: "La copia completa se guarda en Descargas › PhenoRubus. «Restaurar» acepta esa copia o el archivo .sqlite3 de «Respaldar base de datos» de versiones anteriores, y recupera las fotos tomadas con la app desde «Imágenes de Fenología» (o «FenoRubus» en las primeras versiones). «Restaurar» REEMPLAZA los datos de este teléfono. Para sumar los de otra persona (su «Copia de seguridad completa» de PhenoRubus o AeonCrop) use «Combinar»: une los ensayos sin borrar nada de aquí. Los informes semanales (PDF, o .html/.zip de versiones anteriores) completan lo que falte."

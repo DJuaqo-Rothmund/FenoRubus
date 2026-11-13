@@ -272,6 +272,157 @@ def _restore_into(db, src: str, zf, full: dict, progress=None, migrate_ai: bool 
     return res
 
 
+# -------------------------------------------------- combinar datos de otro teléfono
+@dataclass
+class MergeResult:
+    created: list = field(default_factory=list)     # ensayos nuevos aquí (códigos)
+    merged: list = field(default_factory=list)      # ensayos que ya existían y se unieron
+    applied: int = 0          # registros agregados o actualizados
+    kept: int = 0             # de aquí eran más nuevos: se conservaron
+    skipped: int = 0
+    photos: int = 0           # fotos copiadas del respaldo
+
+    def summary(self) -> str:
+        parts = []
+        if self.created:
+            parts.append(f"ensayos nuevos: {', '.join(self.created)}")
+        if self.merged:
+            parts.append(f"unidos: {', '.join(self.merged)}")
+        parts.append(f"{self.applied} registros agregados o actualizados")
+        if self.kept:
+            parts.append(f"{self.kept} se mantuvieron (los de este teléfono eran más nuevos)")
+        parts.append(f"{self.photos} foto(s) copiada(s)")
+        text = " · ".join(parts)
+        return text[:1].upper() + text[1:]
+
+
+def _merge_sources(zf) -> list[tuple[str, dict, dict]]:
+    """[(prefijo en el ZIP, ensayo {code, name, profile, kind}, manifiesto)] del respaldo."""
+    names = set(zf.namelist())
+    top = json.loads(zf.read("manifest.json")) if "manifest.json" in names else {}
+    out = []
+    if top.get("kind") == "multi":
+        for ws in top.get("workspaces", []):
+            prefix = f"ensayos/{ws['code']}/"
+            if prefix + DB_NAME in names:
+                man = json.loads(zf.read(prefix + "manifest.json")) if prefix + "manifest.json" in names else {}
+                out.append((prefix, ws, man))
+    elif DB_NAME in names:
+        code = (top.get("code") or "NV").upper()
+        out.append(("", {"code": code, "name": code, "profile": "id", "kind": "variedades"}, top))
+    if not out:
+        raise ValueError("El archivo no es un respaldo completo de PhenoRubus o AeonCrop.")
+    return out
+
+
+def _mark_all_pending(src) -> None:
+    """Todos los registros del respaldo como «por enviar», con la fecha de su último cambio."""
+    import sync
+    src.execute("DELETE FROM sync_dirty")
+    for table in sync.TABLES:
+        cols = {r["name"] for r in src.query(f"PRAGMA table_info({table})")}
+        if not cols or "uid" not in cols:
+            continue
+        when = [c for c in ("updated_at", "created_at", "captured_at") if c in cols]
+        ts = f"COALESCE({', '.join(when)}, '2000-01-01')" if when else "'2000-01-01'"
+        src.execute(f"INSERT OR REPLACE INTO sync_dirty(entity, uid, ts, deleted) "
+                    f"SELECT '{table}', uid, {ts}, 0 FROM {table} WHERE uid IS NOT NULL")
+
+
+def _merge_photos(src, zf, man: dict, code: str, data_dir: str) -> int:
+    """Copia las fotos del ZIP a este teléfono y deja sus rutas en la base del respaldo."""
+    n = 0
+    plan = [("photos", man.get("photos", {}))] + [(t, man.get(k, {})) for t, k, _f in _EXTRA_IMAGES]
+    folder = os.path.join(data_dir, "photos", "combinadas", code)
+    os.makedirs(folder, exist_ok=True)
+    for table, arcs in plan:
+        cols = {r["name"] for r in src.query(f"PRAGMA table_info({table})")}
+        if "path" not in cols:
+            continue
+        for r in src.query(f"SELECT id, path FROM {table} WHERE path IS NOT NULL"):
+            arc = arcs.get(str(r["id"]))
+            if not arc or arc not in zf.namelist():
+                continue
+            dest = os.path.join(folder, os.path.basename(r["path"]) or os.path.basename(arc))
+            info = zf.getinfo(arc)
+            if os.path.exists(dest) and os.path.getsize(dest) != info.file_size:
+                base, ext = os.path.splitext(dest)
+                dest = f"{base}-{r['id']}{ext}"
+            if not os.path.exists(dest):
+                with zf.open(arc) as fin, open(dest, "wb") as fout:
+                    shutil.copyfileobj(fin, fout)
+                n += 1
+            src.execute(f"UPDATE {table} SET path=? WHERE id=?", (dest, r["id"]))
+    return n
+
+
+def merge_backup(path: str, workspaces, open_db, data_dir: str, progress=None) -> MergeResult:
+    """Suma a este teléfono los datos del respaldo completo de OTRO teléfono (p. ej. el de una
+    compañera), sin borrar nada de aquí:
+
+    * ensayos que aquí no existen se crean; los que existen (mismo código) se unen;
+    * las mismas parcelas, semanas y registros quedan unificados (como al sincronizar);
+    * si los dos cambiaron un registro, queda el más reciente;
+    * sus fotos se copian a «photos/combinadas/<código>»;
+    * lo combinado queda pendiente de enviar: llega a los otros equipos de esta cuenta.
+
+    Se puede repetir con un respaldo más nuevo: solo cambia lo que cambió."""
+    import sync
+    from database import Database
+    res = MergeResult()
+    with zipfile.ZipFile(path) as zf:
+        sources = _merge_sources(zf)
+        for i, (prefix, info, man) in enumerate(sources):
+            code = info["code"].upper()
+            if progress:
+                progress(i, len(sources), code)
+            tmp = os.path.join(data_subdir("tmp", "combinar"), f"{code}.sqlite3")
+            for ext in ("", "-wal", "-shm"):
+                if os.path.exists(tmp + ext):
+                    os.remove(tmp + ext)
+            with open(tmp, "wb") as f:
+                f.write(zf.read(prefix + DB_NAME))
+            _validate(tmp)
+            src = Database(tmp, seed=False, code=code)
+            try:
+                with src.batch():
+                    res.photos += _merge_photos(src, zf, man, code, data_dir)
+                    _mark_all_pending(src)
+                bundle = sync.export_changes(src, data_dir)
+            finally:
+                src.close()
+            ws = workspaces.by_code(code)
+            if ws is None:
+                ws = workspaces.create(info.get("profile") or "id", info.get("kind") or "variedades",
+                                       info.get("name") or code, code)
+                res.created.append(code)
+            else:
+                res.merged.append(code)
+            target = open_db(ws)
+            # Ajustes del ensayo (semana 1, tratamientos…): solo los que aquí no están.
+            have = {r["key"] for r in target.query("SELECT key FROM settings")}
+            bundle["settings"] = {k: v for k, v in (bundle.get("settings") or {}).items() if k not in have}
+            bundle["device"] = "combinar-" + bundle.get("device", "")
+            with target.batch():
+                st = sync.apply_changes(target, bundle, data_dir, week_for_date=target.week_for_date,
+                                        keep_newer=True)
+                # Lo combinado viaja a los demás equipos de esta cuenta (y a su respaldo).
+                for ch in bundle["changes"]:
+                    if not ch["deleted"] and ch["entity"] in sync.TABLES:
+                        target.execute(
+                            "INSERT OR REPLACE INTO sync_dirty(entity, uid, ts, deleted) "
+                            f"SELECT ?, uid, strftime('%Y-%m-%dT%H:%M:%f', 'now'), 0 FROM {ch['entity']} "
+                            "WHERE uid=?", (ch["entity"], ch["uid"]))
+            res.applied += st["applied"]
+            res.kept += st["kept"]
+            res.skipped += st["skipped"]
+            target.log("merge", "backup", None, f"{os.path.basename(path)} · {code}: {st['applied']} "
+                                                f"registros, {st['kept']} conservados")
+    if progress:
+        progress(len(sources), len(sources), "")
+    return res
+
+
 def _set_path(db, photo_id: int, path: str) -> None:
     db.execute("UPDATE photos SET path=? WHERE id=?", (path, photo_id))
     db.ai_db.execute("UPDATE ai_references SET image_path=? WHERE photo_id=? "

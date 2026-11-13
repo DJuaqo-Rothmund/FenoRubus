@@ -406,6 +406,72 @@ class SettingsTab(MDScreen):
                 text += f"\n… y {len(res.missing) - 12} más"
         confirm("Datos restaurados", text, [])
 
+    def merge_backup(self):
+        """Suma los datos de la copia completa de OTRO teléfono (p. ej. de una compañera)."""
+        a = app()
+
+        def picked(path, name):
+            if not path:
+                return
+            if not path.lower().endswith(".zip"):
+                a.toast("Elija la «Copia de seguridad completa» (.zip) del otro teléfono")
+                return
+            confirm("Combinar datos de otro teléfono",
+                    f"Se sumarán a este teléfono los ensayos de «{name or os.path.basename(path)}»:\n\n"
+                    "• Los ensayos que aquí no existen se crean; los que existen (mismo código) se unen.\n"
+                    "• No se borra nada de aquí. Si los dos cambiaron un mismo registro, queda el más reciente.\n"
+                    "• Sus fotos se copian a este teléfono y se respaldan en su Drive.\n\n"
+                    "Puede repetirlo con copias más nuevas: solo cambia lo nuevo.",
+                    [("Combinar", lambda: self._do_merge(path))])
+
+        a.media.pick_document(picked, exts=(".zip",))
+
+    def _do_merge(self, path):
+        a = app()
+        self._busy("Combinando… no cierre la app.")
+
+        def progress(i, n, code):
+            Clock.schedule_once(lambda *_: self._busy(
+                f"Combinando {code} ({i + 1} de {n})…" if code else "Terminando…"))
+
+        def work():
+            try:
+                from data_transfer import merge_backup
+                from platform_utils import get_data_dir
+                res = merge_backup(path, a.workspaces, a.open_db, get_data_dir(), progress=progress)
+                Clock.schedule_once(lambda *_: self._merged(res, None))
+            except Exception as exc:  # noqa: BLE001
+                error = exc
+                Clock.schedule_once(lambda *_: self._merged(None, error))
+
+        request_runtime_permissions(lambda _ok: a.workers.submit(work))
+
+    def _merged(self, res, error):
+        a = app()
+        if error:
+            self._busy(f"No se pudo combinar: {error}")
+            return
+        a.reload_data()
+        self.refresh()
+        self._busy("Combinado: " + res.summary())
+        if a.db.get_setting("drive_enabled", False):
+            try:                          # sus fotos también quedan respaldadas en mi Drive
+                from drive_backup import DriveBackup
+                for ws in a.workspaces.list():
+                    if ws["code"] in res.created + res.merged:
+                        db = a.open_db(ws)
+                        d = DriveBackup(db)
+                        for r in db.query("SELECT p.id, p.path FROM photos p WHERE NOT EXISTS (SELECT 1 "
+                                          "FROM drive_queue q WHERE q.photo_id = p.id AND q.path = p.path)"):
+                            if os.path.exists(r["path"]):
+                                d.enqueue(r["id"], r["path"], flush=False)   # se suben al sincronizar
+                a.run_sync()
+            except Exception as exc:  # noqa: BLE001
+                import crashguard
+                crashguard.quiet(exc, "combinar: encolar fotos en Drive")
+        confirm("Datos combinados", res.summary() + "\n\nLos ensayos combinados ya están en la lista "
+                "de ensayos. Al sincronizar, lo combinado también llega a sus otros equipos.", [])
+
     def import_reports(self):
         a = app()
 

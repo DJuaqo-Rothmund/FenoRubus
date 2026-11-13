@@ -3928,3 +3928,58 @@ def test_crashguard_quiet_logs_once_and_shows_in_full_text(tmp_path, monkeypatch
             crashguard.quiet(exc, "prueba")
     assert len(crashguard.quiet_entries()) == 1 and "prueba · KeyError" in crashguard.quiet_entries()[0]
     assert "=== Avisos" in crashguard.full_text()
+
+
+def test_merge_backup_from_another_phone_keeps_mine_and_adds_hers(tmp_path):
+    import datetime as dt
+    from data_transfer import full_backup, merge_backup
+    from workspaces import Workspaces
+    # Teléfono de Coni: ensayo AUF (también lo tengo yo) y uno que yo no tengo (PO).
+    coni = Workspaces(str(tmp_path / "coni"))
+    auf = coni.create("id", "tratamientos", "Aplicación de Urea Foliar", "AUF")
+    cdb = coni.open(auf)
+    cdb.setup_trial(2, 2)
+    week = cdb.current_week(dt.date(2026, 11, 10))
+    v1 = next(v for v in cdb.list_varieties() if v["name"] == "T1R1")
+    v2 = next(v for v in cdb.list_varieties() if v["name"] == "T2R1")
+    o1 = cdb.get_or_create_observation(v1["id"], week["id"])
+    cdb.update_observation(o1["id"], bbch_code=61, notes="de Coni (más vieja)")
+    cdb.execute("UPDATE observations SET updated_at='2026-11-10T09:00:00' WHERE id=?", (o1["id"],))
+    o2 = cdb.get_or_create_observation(v2["id"], week["id"])
+    cdb.update_observation(o2["id"], bbch_code=65, notes="solo Coni")
+    photo = synthetic_photo(65, "detail", str(tmp_path / "coni_foto.jpg"), 1)
+    cdb.add_photo(o2["id"], "detail", photo)
+    po = coni.create("id", "variedades", "Poda", "PO")
+    pdb = coni.open(po)
+    pdb.add_variety("Meeker")
+    zpath = full_backup(cdb, dest_dir=str(tmp_path), workspaces=coni)
+
+    # Mi teléfono: también AUF, con T1R1 registrada DESPUÉS que Coni.
+    mine = Workspaces(str(tmp_path / "mio"))
+    myws = mine.create("id", "tratamientos", "Urea Foliar", "AUF")
+    mdb = mine.open(myws)
+    mdb.setup_trial(2, 2)
+    mweek = mdb.current_week(dt.date(2026, 11, 10))
+    m1 = next(v for v in mdb.list_varieties() if v["name"] == "T1R1")
+    mo1 = mdb.get_or_create_observation(m1["id"], mweek["id"])
+    mdb.update_observation(mo1["id"], bbch_code=67, notes="mía (más nueva)")
+    mdb.execute("UPDATE observations SET updated_at='2026-11-11T09:00:00' WHERE id=?", (mo1["id"],))
+    mdb.close()
+
+    res = merge_backup(zpath, mine, mine.open, str(tmp_path / "mio"))
+    assert res.created == ["PO"] and "AUF" in res.merged and res.photos == 1 and res.kept >= 1
+    mdb = mine.open(mine.by_code("AUF"))
+    obs = {o["variety_id"]: o for o in mdb.query("SELECT * FROM observations")}
+    names = {v["id"]: v["name"] for v in mdb.list_varieties()}
+    by_name = {names[k]: o for k, o in obs.items()}
+    assert by_name["T1R1"]["notes"] == "mía (más nueva)" and by_name["T1R1"]["bbch_code"] == 67
+    assert by_name["T2R1"]["notes"] == "solo Coni"
+    assert len([v for v in mdb.list_varieties() if v["name"] == "T1R1"]) == 1     # sin duplicados
+    p = mdb.query_one("SELECT path FROM photos")["path"]
+    assert os.path.exists(p) and "combinadas" in p
+    assert mdb.query_one("SELECT COUNT(*) AS n FROM sync_dirty")["n"] > 0         # viaja a mis otros equipos
+    assert [v["name"] for v in mine.open(mine.by_code("PO")).list_varieties()] == ["Meeker"]
+    # Repetir con el mismo respaldo no duplica nada.
+    again = merge_backup(zpath, mine, mine.open, str(tmp_path / "mio"))
+    assert again.created == [] and again.photos == 0
+    assert mdb.query_one("SELECT COUNT(*) AS n FROM observations")["n"] == 2
