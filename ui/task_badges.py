@@ -85,17 +85,34 @@ KV = """
 """
 
 
-def remaining(started: float, frac: float, now: float | None = None) -> str:
-    """«quedan ~3 min»: lo que falta a este ritmo (vacío al principio, cuando aún no se sabe)."""
+def remaining(started: float, frac: float, now: float | None = None, samples: list | None = None) -> str:
+    """«quedan ~3 min»: lo que falta al ritmo RECIENTE (vacío al principio, cuando aún no se sabe).
+
+    samples: [(hora, fracción)] de los últimos avances. Con ellos se mide el ritmo de los
+    últimos minutos; así una pausa larga (teléfono dormido, sin señal un rato) no infla el
+    cálculo, como pasaba al dividir por todo el tiempo desde que se empezó."""
     now = time.time() if now is None else now
     spent = now - started
     if not started or frac < .05 or spent < 3:
         return "calculando el tiempo restante…"
     left = spent * (1 - frac) / frac
+    if samples and now - samples[-1][0] > STALL_S:
+        return "sin avance hace un rato (¿sin señal?)"
+    if samples and len(samples) >= 2:
+        t0, f0 = samples[0]
+        t1, f1 = samples[-1]
+        if f1 - f0 > .004 and t1 - t0 >= 3:
+            left = (t1 - t0) * (1 - f1) / (f1 - f0)
+        elif len(samples) < 3:
+            return "calculando el tiempo restante…"
     if left < 45:
         return "queda menos de 1 min"
     mins = round(left / 60)
     return f"quedan ~{mins} min" if mins < 60 else f"quedan ~{mins // 60} h {mins % 60:02d} min"
+
+
+WINDOW_S = 180        # el ritmo se mide con los avances de los últimos 3 min
+STALL_S = 150         # sin avances en este tiempo: se avisa en vez de inventar una hora
 
 
 def _color(frac: float) -> str:
@@ -126,7 +143,7 @@ class TaskBadge(ButtonBehavior, FloatLayout):
         app = MDApp.get_running_app()
         name = KINDS[self.kind][1]
         if self.state_ == "run":
-            eta = remaining(self.started, self.frac)
+            eta = remaining(self.started, self.frac, samples=getattr(self, "samples", None))
             app.toast(f"{name}: {int(self.frac * 100)} %" + (f" · {self.text}" if self.text else "")
                       + (f" · {eta}" if eta else ""))
             return
@@ -166,6 +183,7 @@ def start(kind: str, text: str = "") -> None:
         Window.add_widget(b)
     b.state_, b.frac, b.label, b.ring, b.text, b.angle = "run", 0, "0%", RED, text, 0
     b.started = time.time()
+    b.samples = [(b.started, 0.0)]
     b.icon = KINDS[kind][0]
     _place()
 
@@ -181,6 +199,13 @@ def update(kind: str, frac: float, text: str = "") -> None:
     if b is None or b.state_ != "run":
         return
     frac = max(b.frac, min(.99, float(frac)))      # no retrocede; 100 % solo al terminar
+    now = time.time()
+    sm = getattr(b, "samples", None) or []
+    if sm and now - sm[-1][0] > STALL_S:           # hubo una pausa: el ritmo se mide desde ahora
+        sm = []
+    if not sm or frac > sm[-1][1]:
+        sm.append((now, frac))
+    b.samples = [x for x in sm if now - x[0] <= WINDOW_S][-40:] or sm[-1:]
     b.frac, b.label, b.ring = frac, f"{int(frac * 100)}%", _color(frac)
     if text:
         b.text = text

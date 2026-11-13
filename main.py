@@ -490,6 +490,7 @@ class FenoRubusApp(MDApp):
                         if wait is None:
                             msg = f"No se pudo sincronizar: {explain(str(exc))} · se reintenta en 10 min"
                             break
+                        progress(0, f"Sin conexión: reintentando en {wait} s…")
                         time.sleep(wait)
             except Exception as exc:  # noqa: BLE001 (sin permiso…: se reintenta luego)
                 msg = f"No se pudo sincronizar: {explain(str(exc))}"
