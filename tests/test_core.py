@@ -3862,3 +3862,34 @@ def test_week_overview_same_as_one_by_one_with_few_queries(db, tmp_path):
     got = db.week_overview(week_id)
     assert got == expected
     assert perf.counts()["sql.consultas"] - before <= 4          # antes: 2 por variedad
+
+
+def test_report_photos_reused_from_cache(db, tmp_path):
+    import perf
+    import photo_cache
+    from PIL import Image
+    pairs = _fill_week(db, tmp_path)
+    week = pairs[-1][1]
+    rep = ReportGenerator(db, str(tmp_path / "out"))
+    first = rep.weekly(week["id"], "pdf")
+    c0 = perf.counts()
+    second = rep.weekly(week["id"], "pdf")
+    d = perf.since(c0)
+    assert d.get("informes.fotos desde caché", 0) > 0 and not d.get("informes.fotos reducidas")
+    assert open(first.path, "rb").read().count(b"/DCTDecode") == open(second.path, "rb").read().count(b"/DCTDecode")
+    # Foto cambiada (otra fecha/tamaño): se vuelve a reducir.
+    p = db.query("SELECT p.path FROM photos p JOIN observations o ON o.id = p.observation_id "
+                 "WHERE o.week_id=?", (week["id"],))[0]["path"]
+    Image.new("RGB", (900, 700), "red").save(p, "JPEG")
+    os.utime(p, (1, 1))
+    c0 = perf.counts()
+    rep.weekly(week["id"], "pdf")
+    assert perf.since(c0).get("informes.fotos reducidas", 0) >= 1
+    # Tope: al pasarlo se borran las más viejas.
+    photo_cache.MAX_BYTES, old = 1, photo_cache.MAX_BYTES
+    try:
+        photo_cache._pruned = False
+        photo_cache._maybe_prune()
+        assert sum(len(f) for _r, _d, f in os.walk(photo_cache._dir)) == 0
+    finally:
+        photo_cache.MAX_BYTES = old

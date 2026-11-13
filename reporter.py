@@ -21,6 +21,7 @@ Empaquetado
 from __future__ import annotations
 
 import base64
+import sys
 from html import escape
 import datetime as _dt
 import io
@@ -78,13 +79,8 @@ class ImageStore:
         self.missing: set[str] = set()   # fotos pedidas que no están en el teléfono
 
     def _encode(self, path: str, max_side: int) -> bytes:
-        img = Image.open(path)
-        img.draft("RGB", (max_side, max_side))  # decodificación JPEG reducida
-        img = ImageOps.exif_transpose(img).convert("RGB")
-        img.thumbnail((max_side, max_side), Image.LANCZOS)
-        buf = io.BytesIO()
-        img.save(buf, "JPEG", quality=self.quality, optimize=True, progressive=True)
-        return buf.getvalue()
+        import photo_cache
+        return photo_cache.reduced(path, max_side, quality=self.quality, progressive=True)[0]
 
     def src(self, path: str | None, max_side: int | None = None) -> str | None:
         if path and not os.path.exists(path):
@@ -337,6 +333,9 @@ class ReportGenerator:
         self.preview_dir = preview_dir or os.path.join(os.path.dirname(out_dir), "preview")
         os.makedirs(out_dir, exist_ok=True)
         os.makedirs(os.path.join(self.preview_dir, "img"), exist_ok=True)
+        if sys.platform != "emscripten":     # web: la memoria es poca, sin caché en disco
+            import photo_cache
+            photo_cache.set_dir(os.path.join(self.preview_dir, "fotos"))
         self.env = Environment(loader=FileSystemLoader(resource_path("templates")),
                                autoescape=select_autoescape(["html"]))
         self.env.filters["bbch"] = lambda c: ph.bbch_label(c, self.db.bbch_names())

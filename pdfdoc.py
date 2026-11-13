@@ -230,20 +230,15 @@ class PDFDoc:
             w, h, _ = self.images[n]
             return n, w, h
         try:
-            from PIL import Image, ImageOps
-            img = Image.open(src if isinstance(src, str) else io.BytesIO(src))
-            img.draft("RGB", (max_px, max_px))          # decodificación JPEG reducida
-            img = ImageOps.exif_transpose(img).convert("RGB")
-            img.thumbnail((max_px, max_px), Image.LANCZOS)
-            buf = io.BytesIO()
-            img.save(buf, "JPEG", quality=78, optimize=True)   # base (no progresiva)
+            import photo_cache
+            data, iw, ih = photo_cache.reduced(src, max_px, quality=78)   # base (no progresiva)
         except Exception:  # noqa: BLE001 - foto dañada o inexistente: se omite
             return None
         n = name or f"Im{len(self.images) + 1}"
-        self.images[n] = (img.width, img.height, buf.getvalue())
+        self.images[n] = (iw, ih, data)
         if name is None:
             self._img_cache[key] = n
-        return n, img.width, img.height
+        return n, iw, ih
 
     def image(self, src, x, y, w, h, mode: str = "cover", radius: float = 0, max_px: int | None = None,
               name: str | None = None, bg="#ece7d8") -> bool:
