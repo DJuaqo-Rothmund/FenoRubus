@@ -49,6 +49,15 @@ jobs:
           restore-keys: buildozer-sdk-${{ runner.os }}-
       # Firma estable: Google Drive (OAuth) reconoce la app por su huella SHA-1,
       # así que todas las compilaciones usan la misma clave de depuración del repo.
+      # Una compilación cortada pudo dejar en la caché un SDK incompleto (p. ej. «Android SDK
+      # Platform 34: archive is not a ZIP archive»): si falta android.jar, se borra esa
+      # plataforma y buildozer la vuelve a bajar.
+      - name: Revisar SDK de la caché
+        run: |
+          P=~/.buildozer/android/platform/android-sdk/platforms/android-34
+          if [ -d "$P" ] && [ ! -s "$P/android.jar" ]; then
+            echo "SDK de la caché incompleto: se vuelve a bajar android-34"; rm -rf "$P"
+          fi
       - name: Clave de firma estable
         run: |
           mkdir -p ~/.android
@@ -102,7 +111,7 @@ jobs:
           grep -qi "SHA-1 digest: edb0585ce094df75d479d547c10cc0810ef04038" /tmp/certs.txt
           "$BT/aapt" dump badging "$APK" | head -1 || true
       - name: Guardar caché de SDK/NDK
-        if: always()
+        if: success()
         uses: actions/cache/save@v4
         with:
           path: ~/.buildozer
