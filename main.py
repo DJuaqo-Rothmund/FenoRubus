@@ -176,8 +176,9 @@ class FenoRubusApp(MDApp):
         from sync_drive import DriveSync   # celular <-> PC por Google Drive
         return DriveSync(self.drive, self.workspaces, self.open_db, get_data_dir())
 
-    def run_sync(self, manual: bool = False) -> None:
-        """Recibe los cambios del otro equipo y envía los de aquí (en segundo plano)."""
+    def run_sync(self, manual: bool = False, only: list | None = None) -> None:
+        """Recibe los cambios del otro equipo y envía los de aquí (en segundo plano).
+        only: códigos de ensayos compartidos (vuelta rápida, ver _share_tick)."""
         if not (self.db.get_setting("drive_enabled", False) and self.drive.available):
             if manual:
                 self.toast("Conecte Google Drive (Ajustes) para sincronizar con su PC.")
@@ -196,10 +197,11 @@ class FenoRubusApp(MDApp):
                 for wait in (4, 12, 30, None):
                     try:
                         _step("sincroniza")
-                        res = self.sync.run(manual=manual)
+                        res = self.sync.run(manual=manual, only=only)
                         msg = summary(res)
-                        _step("cuaderno → PDF")
-                        self._export_notebooks()
+                        if not only:
+                            _step("cuaderno → PDF")
+                            self._export_notebooks()
                         _step("sincronizado")
                         break
                     except Offline as exc:
@@ -215,6 +217,27 @@ class FenoRubusApp(MDApp):
             self.workspaces.shared.set_setting("sync_last", f"{stamp} · {msg}")
             Clock.schedule_once(lambda *_: self._after_sync(res, msg, manual))
         self.workers.submit(work)
+
+    SHARE_POLL_S = 120      # con la app abierta, se mira si la otra persona subió algo
+    SHARE_PUSH_S = 20       # lo guardado aquí se sube como mucho ~20 s después
+
+    def _share_tick(self, *_):
+        """Ensayo compartido abierto: sube lo guardado (a los ~20 s) y revisa lo de la otra
+        persona cada 2 min. Vuelta rápida: solo ese ensayo."""
+        db = self.db
+        if db is None or getattr(self, "_syncing", False) or not db.get_setting("share_folder"):
+            return
+        now = time.monotonic()
+        last = getattr(self, "_share_last", 0.0)
+        try:
+            dirty = db.query_one("SELECT COUNT(*) AS n FROM sync_dirty")["n"]
+        except Exception:  # noqa: BLE001
+            dirty = 0
+        if (dirty and now - last >= self.SHARE_PUSH_S) or now - last >= self.SHARE_POLL_S:
+            self._share_last = now
+            if "drive" in self.__dict__:
+                self.drive.flush_async()       # fotos pendientes de este ensayo
+            self.run_sync(only=[db.code])
 
     def _export_notebooks(self) -> None:
         """Páginas del cuaderno que cambiaron (aquí o en otro equipo) → PDF en Drive, carpeta
@@ -549,6 +572,8 @@ class FenoRubusApp(MDApp):
         # Sincronización con el PC: al abrir y luego cada 10 minutos.
         Clock.schedule_once(lambda *_: self.run_sync(), 10)
         Clock.schedule_interval(lambda *_: self.run_sync(), 600)
+        # Ensayos compartidos con otra cuenta: casi en tiempo real (ver _share_tick).
+        Clock.schedule_interval(self._share_tick, 20)
         # La apertura termina cuando acabó la primera sincronización (o a los 45 s).
         Clock.schedule_once(lambda *_: self._finish_start(), 45)
 

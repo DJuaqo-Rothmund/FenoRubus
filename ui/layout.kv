@@ -1827,6 +1827,20 @@
                     on_release: app.open_ai_lab()
             PaperCard:
                 SectionLabel:
+                    text: "COMPARTIR ESTE ENSAYO CON OTRA CUENTA"
+                Muted:
+                    id: share_text
+                    text: "Trabaje este ensayo junto a otra persona (otra cuenta de Google): lo que registra cada uno le llega al otro en 1 a 3 minutos y queda respaldado en el Drive de quien lo tomó."
+                GhostButton:
+                    icon: "account-plus-outline"
+                    text: "Compartir con…"
+                    on_release: root.share_workspace()
+                GhostButton:
+                    icon: "folder-account-outline"
+                    text: "Ensayos compartidos conmigo"
+                    on_release: root.shared_with_me()
+            PaperCard:
+                SectionLabel:
                     text: "TRAZABILIDAD Y DATOS"
                 Muted:
                     id: data_text

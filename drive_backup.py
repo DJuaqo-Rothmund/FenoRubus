@@ -27,6 +27,39 @@ import phenology as ph
 from platform_utils import IS_ANDROID
 
 SCOPE = "https://www.googleapis.com/auth/drive.file"
+# Ensayos compartidos entre cuentas (sharing.py): ver las carpetas que otra persona comparte
+# con uno. Se pide solo al compartir o unirse a un ensayo (antes, la app sigue solo con SCOPE).
+SHARE_SCOPE = "https://www.googleapis.com/auth/drive"
+SHARE_FLAG = "drive_share_scope"          # ajuste global: ya se aceptó SHARE_SCOPE
+# Ensayo compartido: su carpeta en Drive es la carpeta común (de quien lo compartió). En las
+# rutas se escribe «⇄<id>» y _folder / _find_path la devuelven tal cual (sin buscar ni crear).
+SHARE_SEG = "\u21c4"
+
+
+def share_scope_on() -> bool:
+    try:
+        from platform_utils import global_get
+        return bool(global_get(SHARE_FLAG, False))
+    except Exception:  # noqa: BLE001
+        return False
+
+
+def scopes() -> list[str]:
+    return [SCOPE, SHARE_SCOPE] if share_scope_on() else [SCOPE]
+
+
+def enable_share_scope(drive) -> None:
+    """Pide (una vez) el permiso amplio de Drive para compartir ensayos: abre la ventana de
+    Google si hace falta. Si la persona no acepta, todo sigue como antes."""
+    from platform_utils import global_set
+    global_set(SHARE_FLAG, True)
+    drive._token = None
+    try:
+        drive._token = (drive.authorizer.get_token(interactive=True), time.monotonic() + drive.TOKEN_TTL)
+    except Exception:
+        global_set(SHARE_FLAG, False)
+        drive._token = None
+        raise
 ROOT_FOLDER = "PhenoRubus · Imágenes de Fenología"
 FOLDER_MIME = "application/vnd.google-apps.folder"
 API = "https://www.googleapis.com/drive/v3/files"
@@ -167,7 +200,8 @@ class AndroidAuthorizer:
     def _request(self):
         from jnius import autoclass  # type: ignore
         scopes = autoclass("java.util.ArrayList")()
-        scopes.add(autoclass("com.google.android.gms.common.api.Scope")(SCOPE))
+        for name in globals()["scopes"]():
+            scopes.add(autoclass("com.google.android.gms.common.api.Scope")(name))
         builder = autoclass("com.google.android.gms.auth.api.identity.AuthorizationRequest") \
             .builder().setRequestedScopes(scopes)
         if self.account:   # cuenta elegida por el usuario (si no, Google usa la última autorizada)
@@ -441,6 +475,9 @@ class DriveBackup:
         ws = getattr(self.db, "workspace", None) or {}
         if not ws:
             return ""
+        shared = self.db.get_setting("share_folder")
+        if shared:                         # ensayo compartido: la carpeta común
+            return f"{SHARE_SEG}{shared}/"
         from workspaces import Workspaces
         return Workspaces.drive_prefix(ws) + "/"
 
@@ -682,6 +719,8 @@ class DriveBackup:
         raise NeedsConsent("Google rechazó el acceso")
 
     def _folder(self, name: str, parent: str | None) -> str:
+        if name.startswith(SHARE_SEG):
+            return name[len(SHARE_SEG):]
         cache = self.db.get_setting("drive_folders") or {}
         key = f"{parent or 'root'}/{name}"
         if key in cache:
@@ -690,6 +729,8 @@ class DriveBackup:
         q = f"name='{esc}' and mimeType='{FOLDER_MIME}' and trashed=false"
         if parent:
             q += f" and '{parent}' in parents"
+        else:
+            q += " and 'me' in owners"      # con el permiso amplio también se ven las de otros
         found = self._call("GET", f"{API}?" + urllib.parse.urlencode(
             {"q": q, "fields": "files(id)", "spaces": "drive"})).get("files", [])
         if found:
@@ -731,6 +772,8 @@ class DriveBackup:
         q = f"name='{esc}' and mimeType='{FOLDER_MIME}' and trashed=false"
         if parent:
             q += f" and '{parent}' in parents"
+        else:
+            q += " and 'me' in owners"      # con el permiso amplio también se ven las de otros
         found = self._call("GET", f"{API}?" + urllib.parse.urlencode(
             {"q": q, "fields": "files(id)", "spaces": "drive"})).get("files", [])
         return found[0]["id"] if found else None
@@ -815,6 +858,9 @@ class DriveBackup:
         """Id de la carpeta «PhenoRubus/<path>» en Drive, o None si no existe (no la crea)."""
         parent = self.root_id()
         for part in path.strip("/").split("/"):
+            if part.startswith(SHARE_SEG):
+                parent = part[len(SHARE_SEG):]
+                continue
             esc = part.replace("\\", "\\\\").replace("'", "\\'")
             q = (f"name='{esc}' and mimeType='{FOLDER_MIME}' and trashed=false "
                  f"and '{parent}' in parents")

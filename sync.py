@@ -60,7 +60,7 @@ ORDER = ["varieties", "sampling_weeks", "treatments", "measures", "observations"
 PATH_COLUMNS = {"photos": "path", "variety_attachments": "path", "measure_entries": "path",
                 "notebook_photos": "path"}
 # Ajustes del ensayo que también viajan (semana de referencia, primera semana fijada…).
-SETTING_PREFIXES = ("season_start:", "first_week:", "treatment_", "trial_")
+SETTING_PREFIXES = ("season_start:", "first_week:", "treatment_", "trial_", "reportcfg", "share_")
 
 _NOW = "strftime('%Y-%m-%dT%H:%M:%f', 'now')"
 
@@ -170,6 +170,30 @@ def export_changes(db, data_dir: str, settings: dict | None = None) -> dict:
             "created": _now(), "upto": upto, "changes": changes, "settings": settings}
 
 
+def export_all(db, data_dir: str) -> dict:
+    """Paquete con TODOS los registros (sin tocar los pendientes): para quien se une a un
+    ensayo compartido y no tiene su historia. ts = último cambio de cada registro."""
+    uid_of = _uid_lookup(db)
+    changes = []
+    for table in ORDER:
+        cols = {r["name"] for r in db.query(f"PRAGMA table_info({table})")}
+        if not cols or "uid" not in cols:
+            continue
+        for row in db.query(f"SELECT * FROM {table} WHERE uid IS NOT NULL"):
+            data = {k: v for k, v in row.items() if k not in ("id", "uid")}
+            for col, ref in TABLES[table]["fk"].items():
+                data[col] = uid_of(ref, data.get(col))
+            if table in PATH_COLUMNS:
+                col = PATH_COLUMNS[table]
+                data[col] = _rel_path(data.get(col), data_dir)
+            ts = str(row.get("updated_at") or row.get("created_at") or row.get("captured_at") or "2000-01-01")
+            changes.append({"entity": table, "uid": row["uid"], "ts": ts, "deleted": 0, "data": data})
+    settings = {r["key"]: r["value"] for r in db.query("SELECT key, value FROM settings")
+                if r["key"].startswith(SETTING_PREFIXES)}
+    return {"format": FORMAT, "device": device_id(db), "workspace": getattr(db, "code", ""),
+            "created": _now(), "upto": None, "changes": changes, "settings": settings, "full": True}
+
+
 def mark_exported(db, bundle: dict) -> None:
     """Tras subir el paquete: quita de pendientes lo enviado (lo que cambió después sigue)."""
     if bundle.get("upto"):
@@ -191,12 +215,14 @@ def _uid_lookup(db):
 
 
 # ---------------------------------------------------------------------- aplicar
-def apply_changes(db, bundle: dict, data_dir: str, week_for_date=None) -> dict:
+def apply_changes(db, bundle: dict, data_dir: str, week_for_date=None, keep_newer: bool = False) -> dict:
     """Aplica un paquete de otro equipo. Si aquí hay un cambio pendiente MÁS NUEVO del mismo
-    registro, se conserva el de aquí. Devuelve {"applied", "skipped", "missing_files"}."""
+    registro, se conserva el de aquí. keep_newer (combinar datos de otra persona): además, un
+    registro de aquí con `updated_at` más reciente tampoco se pisa.
+    Devuelve {"applied", "skipped", "kept", "missing_files"}."""
     if bundle.get("device") == device_id(db):
-        return {"applied": 0, "skipped": 0, "missing_files": []}
-    stats = {"applied": 0, "skipped": 0, "missing_files": []}
+        return {"applied": 0, "skipped": 0, "kept": 0, "missing_files": []}
+    stats = {"applied": 0, "skipped": 0, "kept": 0, "missing_files": [], "keep_newer": keep_newer}
     rank = {t: i for i, t in enumerate(ORDER)}
     # Altas y cambios: primero los registros que otros referencian; borrados: al revés.
     changes = sorted(bundle.get("changes", []), key=lambda c: (
@@ -233,6 +259,7 @@ def apply_changes(db, bundle: dict, data_dir: str, week_for_date=None) -> dict:
             stats["applied"] += 1
     finally:
         db.execute("UPDATE sync_state SET value='0' WHERE key='applying'")
+    stats.pop("keep_newer", None)
     return stats
 
 
@@ -279,11 +306,25 @@ def _upsert(db, table, ch, data_dir, week_for_date, stats) -> bool:
             db.execute(f"DELETE FROM sync_dirty WHERE entity=? AND uid=(SELECT uid FROM {table} "
                        f"WHERE {pk}=?)", (table, current))
             db.execute(f"UPDATE {table} SET uid=? WHERE {pk}=?", (ch["uid"], current))
+    if current is not None and stats.get("keep_newer") and data.get("updated_at"):
+        mine = db.query_one(f"SELECT * FROM {table} WHERE {pk}=?", (current,)) or {}
+        if mine.get("updated_at") and str(mine["updated_at"]) > str(data["updated_at"]):
+            stats["kept"] += 1             # lo de aquí es más nuevo: se conserva
+            return True
     if current is None:
         names = list(data) + ["uid"]
         db.execute(f"INSERT INTO {table}({', '.join(names)}) VALUES ({', '.join('?' * len(names))})",
                    (*data.values(), ch["uid"]))
     else:
+        if table == "observations":
+            # Registro movido a otra semana (Mover datos de semana): si allá ya hay uno de la
+            # misma parcela, se reemplaza solo si está vacío; si tiene datos, se conserva.
+            other = db.query_one("SELECT id FROM observations WHERE variety_id=? AND week_id=? AND id!=?",
+                                 (data.get("variety_id"), data.get("week_id"), current))
+            if other:
+                if not hasattr(db, "observation_is_empty") or not db.observation_is_empty(other["id"]):
+                    return False
+                db.execute("DELETE FROM observations WHERE id=?", (other["id"],))
         sets = ", ".join(f"{k}=?" for k in data if k != "num")
         vals = [v for k, v in data.items() if k != "num"]
         if sets:

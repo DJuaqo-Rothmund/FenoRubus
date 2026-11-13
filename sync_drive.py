@@ -136,18 +136,25 @@ class DriveSync:
         return created
 
     # ------------------------------------------------------------ un ensayo
-    def sync_db(self, db, folder: str) -> dict:
+    def sync_db(self, db, folder: str, shared: str | None = None) -> dict:
+        """Recibe y envía los cambios del ensayo. shared: carpeta «Sincronización» del ensayo
+        compartido con otras cuentas (sharing.py; se lee y se escribe además de la propia; ahí,
+        si dos personas cambiaron un registro, queda el cambio más reciente)."""
         device = sync.device_id(db)
         stats = {"received": 0, "sent": 0, "applied": 0, "missing_files": []}
         seen = {r["name"] for r in db.query("SELECT name FROM sync_seen")}
-        new = [f for f in self._list(folder) if f["name"].endswith(".json")
-               and not f["name"].endswith(f"-{device}.json") and f["name"] not in seen]
+        folders = [folder] + ([shared] if shared else [])
+        new = []
+        for fo in folders:
+            new += [dict(f, shared=fo == shared) for f in self._list(fo) if f["name"].endswith(".json")
+                    and not f["name"].endswith(f"-{device}.json") and f["name"] not in seen]
         new.sort(key=lambda f: f["name"])
         # Se bajan en paralelo y se aplican en orden (el más reciente gana igual).
         for f, raw in zip(new, self._parallel(lambda f: self._get(f["id"]), new)):
             name = f["name"]
             bundle = sync.loads(raw)
-            res = sync.apply_changes(db, bundle, self.data_dir, week_for_date=db.week_for_date)
+            res = sync.apply_changes(db, bundle, self.data_dir, week_for_date=db.week_for_date,
+                                     keep_newer=f["shared"] or bool(bundle.get("full")))
             stats["received"] += 1
             stats["applied"] += res["applied"]
             stats["missing_files"] += res["missing_files"]
@@ -157,8 +164,13 @@ class DriveSync:
         bundle = sync.export_changes(db, self.data_dir)
         settings_hash = hashlib.sha1(json.dumps(bundle["settings"], sort_keys=True).encode()).hexdigest()
         sent_hash = db.query_one("SELECT value FROM sync_state WHERE key='settings_sent'")
+        if shared and not db.get_setting(f"fullsent_share:{shared}"):
+            # Recién compartido o recién unido: toda la historia de este teléfono, una vez.
+            self._put(shared, f"{_stamp()}-full-{device}.json", sync.dumps(sync.export_all(db, self.data_dir)))
+            db.set_setting(f"fullsent_share:{shared}", True)
         if bundle["changes"] or (sent_hash or {}).get("value") != settings_hash:
-            self._put(folder, f"{_stamp()}-{device}.json", sync.dumps(bundle))
+            for fo in folders:
+                self._put(fo, f"{_stamp()}-{device}.json", sync.dumps(bundle))
             sync.mark_exported(db, bundle)
             db.execute("INSERT OR REPLACE INTO sync_state(key, value) VALUES ('settings_sent', ?)",
                        (settings_hash,))
@@ -211,20 +223,22 @@ class DriveSync:
         db.execute("DELETE FROM sync_missing WHERE path=?", (path,))
 
     # ------------------------------------------------------------ todo
-    def run(self, manual: bool = False) -> dict:
+    def run(self, manual: bool = False, only: list | None = None) -> dict:
         """Sincroniza todos los ensayos y predios. Devuelve un resumen para la pantalla.
-        manual=True (botón «Sincronizar»): baja todas las fotos pendientes."""
+        manual=True (botón «Sincronizar»): baja todas las fotos pendientes.
+        only: códigos de ensayos compartidos (vuelta rápida cada 2 min): solo esos."""
         root = self._root()
         files = self._list(root)
         device = sync.device_id(self.workspaces.shared)
         total = {"workspaces": 0, "created": 0, "received": 0, "sent": 0, "applied": 0,
                  "missing_files": [], "downloaded": 0, "pending_photos": 0, "when": _dt.datetime.now().isoformat(timespec="seconds")}
-        total["created"] = self._sync_workspaces(root, device, files)
+        if not only:
+            total["created"] = self._sync_workspaces(root, device, files)
         folders = {f["name"]: f["id"] for f in files}
-        for ws in self.workspaces.list():
+        for ws in [w for w in self.workspaces.list() if not only or w["code"] in only]:
             db = self.open_db(ws)
             folder = folders.get(ws["code"]) or self.drive._folder(ws["code"], root)
-            res = self.sync_db(db, folder)
+            res = self.sync_db(db, folder, db.get_setting("share_sync") or None)
             total["workspaces"] += 1
             for k in ("received", "sent", "applied"):
                 total[k] += res[k]
