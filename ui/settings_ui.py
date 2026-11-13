@@ -37,7 +37,7 @@ class SettingsTab(MDScreen):
     def refresh(self):
         a = app()
         home = getattr(a, "_settings_return", None) == "crops"
-        for key in ("card_reminder", "card_season", "card_data"):
+        for key in ("card_reminder", "card_season", "card_data", "card_share"):
             self._card(key, not home)
         name, desc = theme.STYLES[theme.style]
         self.ids.style_text.text = f"[b]{name}[/b] · {desc}"
@@ -63,6 +63,7 @@ class SettingsTab(MDScreen):
         self.ids.season_text.text = (f"{ph.season_title(a.season)} · semana en curso: "
                                      f"{ph.week_title(a.week)} ({a.week['label']})")
         self.ids.first_week_text.text = self._first_week_text(a)
+        self._share_status()
         n = sum(a.db.reference_counts().values())
         # Sin instanciar el clasificador (evita cargar numpy solo por abrir Ajustes).
         ext = a.__dict__.get("classifier")
@@ -405,6 +406,125 @@ class SettingsTab(MDScreen):
             if len(res.missing) > 12:
                 text += f"\n… y {len(res.missing) - 12} más"
         confirm("Datos restaurados", text, [])
+
+    # --------------------------------------------- compartir con otra cuenta
+    SHARE_INFO = ("Trabaje este ensayo junto a otra persona (otra cuenta de Google): lo que registra "
+                  "cada uno le llega al otro en 1 a 3 minutos y queda respaldado en el Drive de quien lo tomó.")
+
+    def _share_status(self, members=None):
+        a = app()
+        if not a.db.get_setting("share_folder"):
+            self.ids.share_text.text = self.SHARE_INFO
+            return
+        who = ", ".join(m["email"] for m in members or []) if members else ""
+        self.ids.share_text.text = ("Compartido" + (f" con: {who}" if who else "") + ". Se sincroniza solo "
+                                    "cada 2 minutos con la app abierta y al guardar.")
+        if members is None and not getattr(self, "_members_loading", False):
+            self._members_loading = True
+
+            def work():
+                try:
+                    import sharing
+                    ms = [m for m in sharing.members(a.drive, a.db.get_setting("share_folder"))
+                          if m["email"] != (a.drive.account or "").lower()]
+                except Exception:  # noqa: BLE001 (sin red: queda el texto sin nombres)
+                    ms = []
+                self._members_loading = False
+                Clock.schedule_once(lambda *_: self._share_status(ms) if ms else None)
+            a.workers.submit(work)
+
+    def _with_share_scope(self, then):
+        """Pide el permiso de Drive para compartir (la primera vez abre la ventana de Google)."""
+        a = app()
+        if not a.drive.available or not a.db.get_setting("drive_enabled", False):
+            a.toast("Primero conecte su cuenta de Google (Respaldo en Drive)")
+            return
+        self._busy("Conectando con Google Drive…")
+
+        def work():
+            try:
+                from drive_backup import enable_share_scope, share_scope_on
+                if not share_scope_on():
+                    enable_share_scope(a.drive)
+                then()
+            except Exception as exc:  # noqa: BLE001
+                error = exc
+                Clock.schedule_once(lambda *_: (self._busy(f"No se pudo: {error}"),
+                                                a.toast(f"Google Drive: {error}")))
+
+        a.workers.submit(work)
+
+    def share_workspace(self):
+        a = app()
+        from kivy.factory import Factory
+        from kivymd.uix.boxlayout import MDBoxLayout
+        from kivy.metrics import dp
+        form = MDBoxLayout(orientation="vertical", adaptive_height=True, padding=(0, dp(8), 0, 0))
+        form.add_widget(Factory.Field(hint_text="Correo de Google de la otra persona"))
+        ws = a.db.workspace or {}
+
+        def ok(f):
+            email = f.children[0].text.strip()
+
+            def go():
+                import sharing
+                from drive_backup import DriveBackup
+                d = a.drive if a.drive.db is a.db else DriveBackup(
+                    a.db, authorizer=a.drive.authorizer, transport=a.drive.transport,
+                    metered=a.drive.metered, crop=a.drive.crop)
+                res = sharing.share(d, email,
+                                    f"Te comparto el ensayo «{ws.get('name', '')}» en PhenoRubus / AeonCrop. "
+                                    "Ábrelo en la app: Ajustes › Ensayos compartidos conmigo › Unirse.")
+                Clock.schedule_once(lambda *_: (
+                    self._busy(f"Compartido con {res['email']}"), self._share_status(),
+                    confirm("Ensayo compartido",
+                            f"{res['email']} recibió un correo de Google. En su app: Ajustes › «Ensayos "
+                            "compartidos conmigo» › Unirse.\n\nDesde ahora este ensayo se sincroniza "
+                            "solo con el de esa persona (cada uno sube sus fotos a su propio Drive).", []),
+                    a.run_sync()))
+            self._with_share_scope(go)
+
+        form_dialog(f"Compartir «{ws.get('name') or ws.get('code', '')}»", form, ok, "COMPARTIR")
+
+    def shared_with_me(self):
+        a = app()
+
+        def go():
+            import sharing
+            invs = sharing.invitations(a.drive)
+            joined = sharing.joined_folders(a.workspaces, a.open_db)
+            Clock.schedule_once(lambda *_: self._show_invitations(invs, joined))
+        self._with_share_scope(go)
+
+    def _show_invitations(self, invs, joined):
+        a = app()
+        self._busy("")
+        if not invs:
+            confirm("Ensayos compartidos conmigo", "Nadie le ha compartido ensayos todavía (o la otra persona "
+                    "aún no lo hace). Pídale que use «Compartir con…» con su correo de Google.", [])
+            return
+
+        def join(inv):
+            def work():
+                try:
+                    import sharing
+                    ws = sharing.join(a.drive, a.workspaces, a.open_db, inv)
+                    Clock.schedule_once(lambda *_: (a.open_workspace(ws["id"]), a.run_sync(),
+                                                    a.toast(f"Unido a «{inv['name']}»: sincronizando…")))
+                except Exception as exc:  # noqa: BLE001
+                    error = exc
+                    Clock.schedule_once(lambda *_: a.toast(f"No se pudo unir: {error}"))
+            a.workers.submit(work)
+
+        items = []
+        for inv in invs:
+            code = joined.get(inv["folder"])
+            sub = f"{inv['code']} · de {inv['owner']}" + (" · ya unido" if code else "")
+            items.append((inv["name"] or inv["code"], sub,
+                          (lambda inv=inv: a.toast("Ya está unido a ese ensayo")) if code
+                          else (lambda inv=inv: join(inv))))
+        pick_dialog("Ensayos compartidos conmigo", items,
+                    subtitle="Toque uno para unirse: queda en su lista de ensayos y se sincroniza solo.")
 
     def merge_backup(self):
         """Suma los datos de la copia completa de OTRO teléfono (p. ej. de una compañera)."""

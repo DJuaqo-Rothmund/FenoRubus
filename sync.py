@@ -60,7 +60,7 @@ ORDER = ["varieties", "sampling_weeks", "treatments", "measures", "observations"
 PATH_COLUMNS = {"photos": "path", "variety_attachments": "path", "measure_entries": "path",
                 "notebook_photos": "path"}
 # Ajustes del ensayo que también viajan (semana de referencia, primera semana fijada…).
-SETTING_PREFIXES = ("season_start:", "first_week:", "treatment_", "trial_", "reportcfg")
+SETTING_PREFIXES = ("season_start:", "first_week:", "treatment_", "trial_", "reportcfg", "share_")
 
 _NOW = "strftime('%Y-%m-%dT%H:%M:%f', 'now')"
 
@@ -168,6 +168,30 @@ def export_changes(db, data_dir: str, settings: dict | None = None) -> dict:
     upto = pending[-1]["ts"] if pending else None
     return {"format": FORMAT, "device": device_id(db), "workspace": getattr(db, "code", ""),
             "created": _now(), "upto": upto, "changes": changes, "settings": settings}
+
+
+def export_all(db, data_dir: str) -> dict:
+    """Paquete con TODOS los registros (sin tocar los pendientes): para quien se une a un
+    ensayo compartido y no tiene su historia. ts = último cambio de cada registro."""
+    uid_of = _uid_lookup(db)
+    changes = []
+    for table in ORDER:
+        cols = {r["name"] for r in db.query(f"PRAGMA table_info({table})")}
+        if not cols or "uid" not in cols:
+            continue
+        for row in db.query(f"SELECT * FROM {table} WHERE uid IS NOT NULL"):
+            data = {k: v for k, v in row.items() if k not in ("id", "uid")}
+            for col, ref in TABLES[table]["fk"].items():
+                data[col] = uid_of(ref, data.get(col))
+            if table in PATH_COLUMNS:
+                col = PATH_COLUMNS[table]
+                data[col] = _rel_path(data.get(col), data_dir)
+            ts = str(row.get("updated_at") or row.get("created_at") or row.get("captured_at") or "2000-01-01")
+            changes.append({"entity": table, "uid": row["uid"], "ts": ts, "deleted": 0, "data": data})
+    settings = {r["key"]: r["value"] for r in db.query("SELECT key, value FROM settings")
+                if r["key"].startswith(SETTING_PREFIXES)}
+    return {"format": FORMAT, "device": device_id(db), "workspace": getattr(db, "code", ""),
+            "created": _now(), "upto": None, "changes": changes, "settings": settings, "full": True}
 
 
 def mark_exported(db, bundle: dict) -> None:

@@ -218,19 +218,26 @@ class DriveSync:
         return created
 
     # ------------------------------------------------------------ un ensayo
-    def sync_db(self, db, folder: str) -> dict:
+    def sync_db(self, db, folder: str, shared: str | None = None) -> dict:
+        """Recibe y envía los cambios del ensayo. shared: carpeta «Sincronización» del ensayo
+        compartido con otras cuentas (se lee y se escribe además de la propia; ahí, si dos
+        personas cambiaron un registro, queda el cambio más reciente)."""
         device = sync.device_id(db)
         stats = {"received": 0, "sent": 0, "applied": 0, "missing_files": []}
         seen = {r["name"] for r in db.query("SELECT name FROM sync_seen")}
-        new = [f for f in self._list(folder) if f["name"].endswith(".json")
-               and not f["name"].endswith(f"-{device}.json") and f["name"] not in seen]
+        folders = [folder] + ([shared] if shared else [])
+        new = []
+        for fo in folders:
+            new += [dict(f, shared=fo == shared) for f in self._list(fo) if f["name"].endswith(".json")
+                    and not f["name"].endswith(f"-{device}.json") and f["name"] not in seen]
         new.sort(key=lambda f: f["name"])
         # Se bajan en paralelo y se aplican en orden (el más reciente gana igual).
         for f, raw in zip(new, self._parallel(lambda f: self._get(f["id"]), new)):
             name = f["name"]
             bundle = sync.loads(raw)
             with db.batch():          # todo el paquete en una transacción (y «visto» con él)
-                res = sync.apply_changes(db, bundle, self.data_dir, week_for_date=db.week_for_date)
+                res = sync.apply_changes(db, bundle, self.data_dir, week_for_date=db.week_for_date,
+                                         keep_newer=f["shared"] or bool(bundle.get("full")))
                 for path in res["missing_files"]:
                     db.execute("INSERT OR IGNORE INTO sync_missing(path) VALUES (?)", (path,))
                 db.execute("INSERT OR IGNORE INTO sync_seen(name) VALUES (?)", (name,))
@@ -240,8 +247,13 @@ class DriveSync:
         bundle = sync.export_changes(db, self.data_dir)
         settings_hash = hashlib.sha1(json.dumps(bundle["settings"], sort_keys=True).encode()).hexdigest()
         sent_hash = db.query_one("SELECT value FROM sync_state WHERE key='settings_sent'")
+        if shared and not db.get_setting(f"fullsent_share:{shared}"):
+            # Recién compartido o recién unido: toda la historia de este teléfono, una vez.
+            self._put(shared, f"{_stamp()}-full-{device}.json", sync.dumps(sync.export_all(db, self.data_dir)))
+            db.set_setting(f"fullsent_share:{shared}", True)
         if bundle["changes"] or (sent_hash or {}).get("value") != settings_hash:
-            self._put(folder, f"{_stamp()}-{device}.json", sync.dumps(bundle))
+            for fo in folders:
+                self._put(fo, f"{_stamp()}-{device}.json", sync.dumps(bundle))
             sync.mark_exported(db, bundle)
             db.execute("INSERT OR REPLACE INTO sync_state(key, value) VALUES ('settings_sent', ?)",
                        (settings_hash,))
@@ -313,7 +325,7 @@ class DriveSync:
         db.execute("DELETE FROM sync_missing WHERE path=?", (path,))
 
     # ------------------------------------------------------------ todo
-    def run(self, manual: bool = False, progress=None) -> dict:
+    def run(self, manual: bool = False, progress=None, only: list | None = None) -> dict:
         """Sincroniza todos los ensayos y predios. Devuelve un resumen para la pantalla.
         manual=True (botón «Sincronizar»): baja todas las fotos pendientes.
         progress(fracción 0-1, texto): avance (insignia flotante)."""
@@ -322,9 +334,11 @@ class DriveSync:
                 progress(f, text)
         from drive_backup import interactive_auth
         with interactive_auth(manual):
-            return self._run(manual, p)
+            return self._run(manual, p, only)
 
-    def _run(self, manual, p) -> dict:
+    def _run(self, manual, p, only=None) -> dict:
+        """only: códigos de ensayo (sincronización rápida de los compartidos, cada 2 min): solo
+        sus registros, subir sus fotos pendientes y bajar las nuevas (sin ordenar Drive)."""
         p(.01, "Leyendo Drive")
         before = perf.counts()
         with perf.timed("sync.leer carpeta raíz"):
@@ -333,16 +347,17 @@ class DriveSync:
         device = sync.device_id(self.workspaces.shared)
         total = {"workspaces": 0, "created": 0, "received": 0, "sent": 0, "applied": 0,
                  "missing_files": [], "downloaded": 0, "pending_photos": 0, "when": _dt.datetime.now().isoformat(timespec="seconds")}
-        with perf.timed("sync.lista de ensayos"):
-            total["created"] = self._sync_workspaces(root, device, files)
-        try:        # plantillas de informes de la cuenta (todos los cultivos y equipos)
-            with perf.timed("sync.plantillas de informes"):
-                self.sync_report_templates()
-        except Exception as exc:  # noqa: BLE001 (no detiene la sincronización)
-            print("plantillas de informes:", exc)
+        if not only:
+            with perf.timed("sync.lista de ensayos"):
+                total["created"] = self._sync_workspaces(root, device, files)
+            try:        # plantillas de informes de la cuenta (todos los cultivos y equipos)
+                with perf.timed("sync.plantillas de informes"):
+                    self.sync_report_templates()
+            except Exception as exc:  # noqa: BLE001 (no detiene la sincronización)
+                print("plantillas de informes:", exc)
         total["uploaded"] = total["moved"] = 0
         folders = {f["name"]: f["id"] for f in files}
-        wss = self.workspaces.list()
+        wss = [w for w in self.workspaces.list() if not only or w["code"] in only]
         for idx, ws in enumerate(wss):
             base, step = .03 + .95 * idx / max(1, len(wss)), .95 / max(1, len(wss))
             name = ws.get("name") or ws["code"]
@@ -353,11 +368,12 @@ class DriveSync:
                 db = self.open_db(ws)
             folder = folders.get(ws["code"]) or self.drive._folder(ws["code"], root)
             with perf.timed("sync.registros", lambda: f"{code}: +{res['received']} recibidos, {res['sent']} enviados"):
-                res = self.sync_db(db, folder)
+                res = self.sync_db(db, folder, db.get_setting("share_sync") or None)
             p(base + step * .3, f"{name}: fotos")
             with perf.timed("sync.subir fotos", lambda: f"{code}: {up} subidas, {mv} movidas"):
                 up, mv = self._backup_photos(db, manual, lambda f, t="", b=base, s=step, n=name:
-                                             p(b + s * (.3 + .5 * f), f"{n}: {t or 'fotos'}"))
+                                             p(b + s * (.3 + .5 * f), f"{n}: {t or 'fotos'}"),
+                                             quick=bool(only))
             total["uploaded"] += up
             total["moved"] += mv
             p(base + step * .8, f"{name}: bajando fotos")
@@ -377,7 +393,7 @@ class DriveSync:
         perf.flush()
         return total
 
-    def _backup_photos(self, db, manual: bool = False, progress=None) -> tuple[int, int]:
+    def _backup_photos(self, db, manual: bool = False, progress=None, quick: bool = False) -> tuple[int, int]:
         """Respaldo de las fotos de ESTE ensayo o predio (no solo del abierto): ordena en Drive
         lo que no esté en su carpeta (lo haya subido quien sea), sube lo pendiente y ordena
         lo movido de semana (carpeta y nombre)."""
@@ -389,7 +405,7 @@ class DriveSync:
                 backup = DriveBackup(db, authorizer=self.drive.authorizer, transport=self.drive.transport,
                                      metered=self.drive.metered, crop=self.drive.crop)
             moved = 0
-            if backup.enabled:
+            if backup.enabled and not quick:
                 # Ordenar Drive revisa TODAS las fotos del ensayo (cientos de pedidos): solo si
                 # algo cambió en este ensayo desde la última vez (fotos, adjuntas, mediciones o
                 # semanas movidas), o una vez por semana por si se tocó Drive a mano. Queda

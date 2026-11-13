@@ -3983,3 +3983,144 @@ def test_merge_backup_from_another_phone_keeps_mine_and_adds_hers(tmp_path):
     again = merge_backup(zpath, mine, mine.open, str(tmp_path / "mio"))
     assert again.created == [] and again.photos == 0
     assert mdb.query_one("SELECT COUNT(*) AS n FROM observations")["n"] == 2
+
+
+class SharedFakeDrive(FakeDrive):
+    """FakeDrive con dueños: cada cuenta ve lo suyo y lo que está dentro de carpetas que le
+    compartieron (permisos, propiedades, «sharedWithMe»)."""
+
+    def as_user(self, email):
+        def transport(method, url, headers, body):
+            return self.call(email, method, url, headers, body)
+        return transport
+
+    def _visible(self, fid, user):
+        f = self.files.get(fid)
+        while f is not None:
+            if f.get("owner", user) == user or user in f.get("shared", ()):
+                return True
+            f = self.files.get(f["parents"][0]) if f["parents"] else None
+        return False
+
+    def call(self, user, method, url, headers, body):
+        import json
+        import re
+        import urllib.parse
+        path = urllib.parse.urlsplit(url).path
+        q = urllib.parse.parse_qs(urllib.parse.urlsplit(url).query)
+        if "/permissions" in path:
+            fid = path.split("/files/")[1].split("/")[0]
+            if method == "POST":
+                self.files[fid].setdefault("shared", set()).add(json.loads(body)["emailAddress"])
+                return 200, b'{"id": "p1"}'
+            perms = [{"id": e, "emailAddress": e, "role": "writer", "type": "user"}
+                     for e in self.files[fid].get("shared", ())]
+            return 200, json.dumps({"permissions": perms}).encode()
+        if method == "PATCH" and "uploadType" not in url and b"properties" in (body or b""):
+            fid = path.split("/files/")[1]
+            self.files[fid]["props"] = json.loads(body)["properties"]
+            return 200, json.dumps({"id": fid}).encode()
+        if method == "GET" and "q" in q:
+            query = q["q"][0]
+            if "sharedWithMe" in query:
+                hits = [{"id": k, "name": f["name"], "properties": f.get("props", {}),
+                         "owners": [{"emailAddress": f.get("owner")}]}
+                        for k, f in self.files.items()
+                        if f.get("props", {}).get("aeoncrop_shared") == "1" and user in f.get("shared", ())]
+                return 200, json.dumps({"files": hits}).encode()
+            status, data = FakeDrive.__call__(self, method, url, headers, body)
+            res = json.loads(data)
+            res["files"] = [h for h in res["files"] if self._visible(h["id"], user)
+                            and ("'me' in owners" not in query or self.files[h["id"]].get("owner") == user)]
+            return status, json.dumps(res).encode()
+        before = set(self.files)
+        status, data = FakeDrive.__call__(self, method, url, headers, body)
+        for fid in set(self.files) - before:
+            self.files[fid]["owner"] = user
+        return status, data
+
+
+def _account(tmp_path, name, fake, email):
+    sync_, ws, open_db, data = _device(tmp_path, name, fake.as_user(email))
+    return sync_, ws, open_db, data
+
+
+def test_shared_workspace_between_two_accounts(tmp_path):
+    import sharing
+    from drive_backup import DriveBackup
+    fake = SharedFakeDrive()
+    yo, yws, yopen, ydir = _account(tmp_path, "yo", fake, "juaquin@x.cl")
+    coni, cws, copen, cdir = _account(tmp_path, "coni", fake, "coni@x.cl")
+    # Yo: ensayo AUF con un registro, y lo comparto con Coni.
+    auf = yws.create("id", "tratamientos", "Urea Foliar", "AUF")
+    ydb = yopen(auf)
+    ydb.setup_trial(2, 1)
+    w = ydb.week_for_date(dt.date(2026, 11, 10))
+    t1 = next(v for v in ydb.list_varieties() if v["name"] == "T1R1")
+    ydb.update_observation(ydb.get_or_create_observation(t1["id"], w["id"])["id"], bbch_code=61, notes="mía")
+    yo.run()                                         # historia previa en mi carpeta personal
+    mine = DriveBackup(ydb, authorizer=yo.drive.authorizer, transport=yo.drive.transport,
+                       metered=lambda: False)
+    with pytest.raises(ValueError):
+        sharing.share(mine, "no-es-correo")
+    sharing.share(mine, "coni@x.cl")
+    yo.run()                                         # sube la historia completa a la carpeta común
+    # Coni (otra cuenta) no ve mi Drive personal, pero sí la invitación.
+    cdrive = coni.drive
+    invs = sharing.invitations(cdrive)
+    assert [(i["code"], i["name"]) for i in invs] == [("AUF", "Urea Foliar")]
+    sharing.join(cdrive, cws, copen, invs[0])
+    coni.run()
+    cdb = copen(cws.by_code("AUF"))
+    ct1 = next(v for v in cdb.list_varieties() if v["name"] == "T1R1")
+    cw = cdb.query_one("SELECT * FROM sampling_weeks WHERE start_date=?", (w["start_date"],))
+    assert cdb.get_observation(ct1["id"], cw["id"])["notes"] == "mía"
+    # Coni registra T2R1: me llega a mí.
+    t2 = next(v for v in cdb.list_varieties() if v["name"] == "T2R1")
+    cdb.update_observation(cdb.get_or_create_observation(t2["id"], cw["id"])["id"], bbch_code=65, notes="de Coni")
+    coni.run()
+    yo.run()
+    yt2 = next(v for v in ydb.list_varieties() if v["name"] == "T2R1")
+    assert ydb.get_observation(yt2["id"], w["id"])["notes"] == "de Coni"
+    assert len([v for v in ydb.list_varieties() if v["name"] == "T2R1"]) == 1
+    assert sharing.joined_folders(cws, copen) == {ydb.get_setting("share_folder"): "AUF"}
+    assert [m["email"] for m in sharing.members(mine, ydb.get_setting("share_folder"))] == ["coni@x.cl"]
+
+
+def test_shared_workspace_photos_go_to_common_folder(tmp_path):
+    import sharing
+    from drive_backup import DriveBackup
+    fake = SharedFakeDrive()
+    yo, yws, yopen, ydir = _account(tmp_path, "yo", fake, "juaquin@x.cl")
+    coni, cws, copen, cdir = _account(tmp_path, "coni", fake, "coni@x.cl")
+    for ws_ in (yws, cws):
+        ws_.shared.set_setting("drive_enabled", True)
+    ydb = yopen(yws.create("id", "tratamientos", "Urea Foliar", "AUF"))
+    ydb.setup_trial(1, 1)
+    sharing.share(DriveBackup(ydb, authorizer=yo.drive.authorizer, transport=yo.drive.transport,
+                              metered=lambda: False), "coni@x.cl")
+    folder = ydb.get_setting("share_folder")
+    yo.run()
+    sharing.join(coni.drive, cws, copen, sharing.invitations(coni.drive)[0])
+    coni.run()
+    cdb = copen(cws.by_code("AUF"))
+    v = next(x for x in cdb.list_varieties() if x["name"] == "T1R1")
+    w = cdb.week_for_date(dt.date(2026, 11, 10))
+    oid = cdb.get_or_create_observation(v["id"], w["id"])["id"]
+    photo = os.path.join(cdir, "photos", "T2026", "S10", "20261110-AUF-T1R1D.jpg")
+    os.makedirs(os.path.dirname(photo))
+    open(photo, "wb").write(b"FOTO DE CONI")
+    pid = cdb.add_photo(oid, "detail", photo)
+    DriveBackup(cdb, authorizer=coni.drive.authorizer, transport=coni.drive.transport,
+                metered=lambda: False).enqueue(pid, photo, flush=False)
+    coni.run()
+    up = [k for k, f in fake.files.items() if f["name"] == "20261110-AUF-T1R1D.jpg"]
+    assert len(up) == 1 and fake.files[up[0]]["owner"] == "coni@x.cl"     # en el Drive de Coni…
+    f, inside = fake.files[up[0]], False
+    while f["parents"]:                                                     # …dentro de la carpeta común
+        inside = inside or f["parents"][0] == folder
+        f = fake.files[f["parents"][0]]
+    assert inside
+    r = yo.run()
+    local = os.path.join(ydir, "photos", "T2026", "S10", "20261110-AUF-T1R1D.jpg")
+    assert r["downloaded"] == 1 and open(local, "rb").read() == b"FOTO DE CONI"
