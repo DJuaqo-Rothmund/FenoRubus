@@ -7,6 +7,8 @@ import datetime as _dt
 import math
 import os
 import re
+
+import perf
 import threading
 import time
 
@@ -657,7 +659,22 @@ def show_error_log():
         except Exception as exc:  # noqa: BLE001
             app().toast(f"No se pudo enviar: {exc}")
 
-    actions = [("Copiar todo", copy_all), ("Enviar", send_file)]
+    def times():
+        # Tiempos de la app (para optimizar): resumen de esta apertura, con copiar.
+        import perf
+        perf.flush()
+
+        def copy_times():
+            from kivy.core.clipboard import Clipboard
+            try:
+                Clipboard.copy(f"{app().title or 'AeonCrop'} {app_version()}\n" + perf.full_text())
+                app().toast("Tiempos copiados: péguelos en el chat")
+            except Exception as exc:  # noqa: BLE001
+                app().toast(f"No se pudo copiar: {exc}")
+        text_dialog("Tiempos de la app", perf.summary()[:40] or ["Aún sin mediciones."],
+                    actions=[("Copiar tiempos", copy_times), ("Enviar", send_file)], small=True)
+
+    actions = [("Copiar todo", copy_all), ("Enviar", send_file), ("Tiempos", times)]
     if lines:
         actions.append(("Borrar", lambda: confirm(
             "Borrar registro", "Se borran los errores guardados en el teléfono.",
@@ -1142,6 +1159,7 @@ class StartBase(MDScreen):
         h = _dt.datetime.now().hour
         return "Buenos días" if 5 <= h < 12 else "Buenas tardes" if 12 <= h < 20 else "Buenas noches"
 
+    @perf.timed("inicio.refrescar")
     def refresh(self):
         a = app()
         from workspaces import Workspaces
@@ -2029,6 +2047,7 @@ class SamplingTab(MDBoxLayout):
     def pick_season(self):
         season_dialog(self.refresh)
 
+    @perf.timed("muestreo.refrescar lista")
     def refresh(self):
         a = app()
         week = a.week
@@ -3365,6 +3384,7 @@ class ObservationScreen(MDScreen):
     week_id = NumericProperty(0)
     suggestion = ObjectProperty(None, allownone=True)
 
+    @perf.timed("registro.cargar")
     def load(self, variety_id: int, week_id: int):
         a = app()
         self.variety_id, self.week_id = variety_id, week_id
@@ -3756,6 +3776,7 @@ class ObservationScreen(MDScreen):
                     current=ph.parse_bbch_code(self.ids.bbch.text or ""))
 
     # -------------------------------------------------------------- guardar
+    @perf.timed("registro.guardar")
     def save(self):
         a = app()
         text = self.ids.bbch.text.strip()

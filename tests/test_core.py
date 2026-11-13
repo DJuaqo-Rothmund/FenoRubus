@@ -3740,3 +3740,25 @@ def test_rename_one_pheno_point_keeps_its_name(tmp_path):
         db.rename_pheno_unit(db.list_varieties()[0]["id"], "x")                      # una parcela: no
     assert db.rename_pheno_unit(p["id"], "")["name"] == "T3 · Planta 2"                # vacío: automático
     assert db.unit_labels() == {}
+
+
+def test_perf_times_and_counters(db):
+    import perf
+    perf.reset()
+    with perf.timed("prueba.bloque", lambda: "extra"):
+        sum(range(200000))
+
+    @perf.timed("prueba.funcion")
+    def f(x):
+        return x * 2
+    assert f(21) == 42
+    before = perf.counts()
+    db.query("SELECT 1")
+    db.set_setting("x", 1)
+    d = perf.since(before)
+    assert d["sql.consultas"] >= 1 and d["sql.escrituras"] >= 1
+    text = perf.full_text()
+    assert "prueba.bloque" in text and "prueba.funcion" in text and "sql.consultas" in text
+    perf.flush()
+    perf.reset()
+    assert "prueba.bloque" in perf.full_text()          # lo último queda en el archivo

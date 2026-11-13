@@ -9,6 +9,7 @@ Punto de entrada y navegación KivyMD.
 """
 from __future__ import annotations
 
+import perf
 import gc
 import hashlib
 import os
@@ -153,6 +154,7 @@ class FenoRubusApp(MDApp):
         return root
 
     # ------------------------------------------------------- cultivos y estilos
+    @perf.timed("cultivo.abrir")
     def _load_module(self, crop_id: str) -> None:
         """Abre los datos del cultivo y rehace la interfaz con sus colores (las pantallas
         se vuelven a construir: precarga en _preload_steps)."""
@@ -480,7 +482,8 @@ class FenoRubusApp(MDApp):
                 for wait in (4, 12, 30, None):
                     try:
                         _step("sincroniza")
-                        res = self.sync.run(manual=manual, progress=progress)
+                        with perf.timed("sync.total", "manual" if manual else "automática"):
+                            res = self.sync.run(manual=manual, progress=progress)
                         msg = summary(res)
                         _step("cuaderno → PDF")
                         self._export_notebooks()
@@ -543,7 +546,8 @@ class FenoRubusApp(MDApp):
 
     def _screen(self, cls, name):
         if not self.sm.has_screen(name):
-            self.sm.add_widget(cls(name=name))
+            with perf.timed(f"pantalla.crear {name}"):
+                self.sm.add_widget(cls(name=name))
         return self.sm.get_screen(name)
 
     @property
@@ -630,6 +634,7 @@ class FenoRubusApp(MDApp):
         self._history = []
         self.sm.current = "start"
 
+    @perf.timed("inicio.entrar a muestreo")
     def enter_home(self):
         self._history = []
         self.sm.current = "home"
@@ -674,6 +679,7 @@ class FenoRubusApp(MDApp):
         self.toast(f"Listo: {res['units']} sectores y {res['photos']} fotos ahora en "
                    f"{dst['name']} ({res['new']}).")
 
+    @perf.timed("ensayo.abrir")
     def open_workspace(self, ws_id: int, target: str | None = "home"):
         """Cambia de ensayo o predio: todas las pantallas se rehacen con sus datos.
         target=None: solo cambia de ensayo, sin moverse de la pantalla actual (cuaderno)."""
@@ -923,7 +929,8 @@ class FenoRubusApp(MDApp):
             Clock.schedule_once(lambda *_: _gc_freeze(), .5)
         if self.sm.current != name:
             self._history.append(self.sm.current)
-        self.sm.current = name
+        with perf.timed(f"pantalla.ir {name}"):
+            self.sm.current = name
 
     def back(self):
         if self.sm.current == "settings" and getattr(self, "_settings_return", None):
@@ -983,6 +990,7 @@ class FenoRubusApp(MDApp):
         # Solo la pestaña visible; las demás se refrescan al seleccionarlas.
         self.home.refresh_current()
 
+    @perf.timed("registro.abrir")
     def open_observation(self, variety_id: int, week_id: int):
         self.observation.load(variety_id, week_id)
         self.go("observation")
@@ -1201,9 +1209,12 @@ class FenoRubusApp(MDApp):
         self.toast("Generando informe…")
 
         def work():
+            res = None
             try:
-                self._fetch_report_photos()
-                res = job()
+                with perf.timed("informe.bajar fotos"):
+                    self._fetch_report_photos()
+                with perf.timed("informe.generar", lambda: os.path.basename(getattr(res, "path", "") or "")):
+                    res = job()
                 self._report_done(res, None, on_done)
             except Exception as exc:  # noqa: BLE001
                 self._report_done(None, exc, on_done)

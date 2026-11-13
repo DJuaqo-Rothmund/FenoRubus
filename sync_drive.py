@@ -26,6 +26,7 @@ import urllib.parse
 import uuid
 from concurrent.futures import ThreadPoolExecutor
 
+import perf
 import sync
 from drive_backup import API, UPLOAD, DriveError
 
@@ -278,14 +279,18 @@ class DriveSync:
 
     def _run(self, manual, p) -> dict:
         p(.01, "Leyendo Drive")
-        root = self._root()
-        files = self._list(root)
+        before = perf.counts()
+        with perf.timed("sync.leer carpeta raíz"):
+            root = self._root()
+            files = self._list(root)
         device = sync.device_id(self.workspaces.shared)
         total = {"workspaces": 0, "created": 0, "received": 0, "sent": 0, "applied": 0,
                  "missing_files": [], "downloaded": 0, "pending_photos": 0, "when": _dt.datetime.now().isoformat(timespec="seconds")}
-        total["created"] = self._sync_workspaces(root, device, files)
+        with perf.timed("sync.lista de ensayos"):
+            total["created"] = self._sync_workspaces(root, device, files)
         try:        # plantillas de informes de la cuenta (todos los cultivos y equipos)
-            self.sync_report_templates()
+            with perf.timed("sync.plantillas de informes"):
+                self.sync_report_templates()
         except Exception as exc:  # noqa: BLE001 (no detiene la sincronización)
             print("plantillas de informes:", exc)
         total["uploaded"] = total["moved"] = 0
@@ -295,12 +300,17 @@ class DriveSync:
             base, step = .03 + .95 * idx / max(1, len(wss)), .95 / max(1, len(wss))
             name = ws.get("name") or ws["code"]
             p(base, f"{name}: registros")
-            db = self.open_db(ws)
+            code = ws["code"]
+            res, up, mv, got, left = {"received": 0, "sent": 0}, 0, 0, 0, 0
+            with perf.timed("sync.abrir base", code):
+                db = self.open_db(ws)
             folder = folders.get(ws["code"]) or self.drive._folder(ws["code"], root)
-            res = self.sync_db(db, folder)
+            with perf.timed("sync.registros", lambda: f"{code}: +{res['received']} recibidos, {res['sent']} enviados"):
+                res = self.sync_db(db, folder)
             p(base + step * .3, f"{name}: fotos")
-            up, mv = self._backup_photos(db, manual, lambda f, t="", b=base, s=step, n=name:
-                                         p(b + s * (.3 + .5 * f), f"{n}: {t or 'fotos'}"))
+            with perf.timed("sync.subir fotos", lambda: f"{code}: {up} subidas, {mv} movidas"):
+                up, mv = self._backup_photos(db, manual, lambda f, t="", b=base, s=step, n=name:
+                                             p(b + s * (.3 + .5 * f), f"{n}: {t or 'fotos'}"))
             total["uploaded"] += up
             total["moved"] += mv
             p(base + step * .8, f"{name}: bajando fotos")
@@ -308,11 +318,16 @@ class DriveSync:
             for k in ("received", "sent", "applied"):
                 total[k] += res[k]
             if self.photos_allowed():
-                got, left = self.fetch_missing(db, None if manual else MAX_DOWNLOADS)
+                with perf.timed("sync.bajar fotos", lambda: f"{code}: {got} bajadas, {left} pendientes"):
+                    got, left = self.fetch_missing(db, None if manual else MAX_DOWNLOADS)
                 total["downloaded"] += got
                 total["pending_photos"] += left
             else:
                 total["pending_photos"] += self.pending_count(db)
+        d = perf.since(before)
+        perf.note("sync.resumen", f"{len(wss)} ensayos · " + " · ".join(
+            f"{k}: {round(v)}" for k, v in sorted(d.items()) if k.startswith(("drive.", "sql."))))
+        perf.flush()
         return total
 
     def _backup_photos(self, db, manual: bool = False, progress=None) -> tuple[int, int]:

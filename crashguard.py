@@ -87,6 +87,11 @@ def full_text() -> str:
             parts.append("=== Pasos de esta apertura\n" + f.read().strip())
     except OSError:
         pass
+    try:
+        import perf
+        parts.append(perf.full_text())
+    except Exception:  # noqa: BLE001
+        pass
     return "\n\n".join(p for p in parts if p)
 
 
@@ -148,8 +153,20 @@ def begin() -> None:
     step(f"abre v{app_version()}")
 
 
+_last_step = [None, 0.0]      # (nombre, hora) del paso anterior: su duración va a los tiempos
+
+
 def step(name: str) -> None:
     """Anota un paso del arranque (se escribe al disco al tiro)."""
+    try:
+        import time
+        import perf
+        now = time.perf_counter()
+        if _last_step[0]:
+            perf.record(f"paso.{_last_step[0]}", (now - _last_step[1]) * 1000)
+        _last_step[0], _last_step[1] = (None if name in (DONE, PAUSED) else name), now
+    except Exception:  # noqa: BLE001
+        pass
     if _trail is None:
         return
     try:
@@ -164,6 +181,11 @@ def finish() -> None:
     """La apertura terminó bien: la próxima no entra en modo seguro."""
     global _trail
     step(DONE)
+    try:
+        import perf
+        perf.flush()
+    except Exception:  # noqa: BLE001
+        pass
     if _trail is not None:
         try:
             _trail.close()

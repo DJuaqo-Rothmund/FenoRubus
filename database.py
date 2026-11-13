@@ -31,6 +31,9 @@ import threading
 from typing import Any, Iterable
 
 import phenology as ph
+import time
+
+import perf
 from platform_utils import GLOBAL_KEYS, global_get, global_set
 
 SCHEMA_VERSION = 3
@@ -318,14 +321,21 @@ class Database:
             self.conn.close()
 
     def execute(self, sql: str, params: Iterable[Any] = ()) -> sqlite3.Cursor:
+        t0 = time.perf_counter()
         with self._lock:
             cur = self.conn.execute(sql, tuple(params))
             self.conn.commit()
-            return cur
+        perf.add("sql.escrituras")
+        perf.add("sql.escrituras ms", (time.perf_counter() - t0) * 1000)
+        return cur
 
     def query(self, sql: str, params: Iterable[Any] = ()) -> list[dict]:
+        t0 = time.perf_counter()
         with self._lock:
-            return [dict(r) for r in self.conn.execute(sql, tuple(params)).fetchall()]
+            rows = [dict(r) for r in self.conn.execute(sql, tuple(params)).fetchall()]
+        perf.add("sql.consultas")
+        perf.add("sql.consultas ms", (time.perf_counter() - t0) * 1000)
+        return rows
 
     def query_one(self, sql: str, params: Iterable[Any] = ()) -> dict | None:
         rows = self.query(sql, params)

@@ -19,6 +19,8 @@ import re
 import os
 import threading
 import time
+
+import perf
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -756,7 +758,10 @@ class DriveBackup:
             headers = {"Authorization": f"Bearer {self._get_token()}"}
             if content_type:
                 headers["Content-Type"] = content_type
+            t0 = time.perf_counter()
             status, data = self.transport(method, url, headers, body)
+            perf.add("drive.pedidos")
+            perf.add("drive.pedidos ms", (time.perf_counter() - t0) * 1000)
             if status == 401 and attempt == 0:
                 self._drop_token()  # token vencido: pedir otro una vez
                 continue
@@ -774,6 +779,7 @@ class DriveBackup:
     def _download(self, file_id: str) -> bytes:
         """Contenido de un archivo creado por la app (paquetes de sincronización, fotos)."""
         url = f"{API}/{file_id}?alt=media"
+        perf.add("drive.bajadas")
         for attempt in range(2):
             status, data = self.transport("GET", url, {"Authorization": f"Bearer {self._get_token()}"}, None)
             if status == 401 and attempt == 0:
@@ -915,9 +921,12 @@ class DriveBackup:
         self.log("Drive: se juntó una carpeta repetida")
 
     def _upload(self, path: str, remote: str) -> str:
-        parent, fname = self._parent_of(remote)
+        with perf.timed("drive.carpeta del archivo"):
+            parent, fname = self._parent_of(remote)
         try:
-            return self._post_file(path, fname, parent)
+            with perf.timed("drive.subir archivo", lambda: f"{os.path.getsize(path) // 1024} KB"):
+                perf.add("drive.subidas")
+                return self._post_file(path, fname, parent)
         except DriveError as exc:
             if exc.status == 404:  # la carpeta se borró en Drive: recrearla la próxima vez
                 self.db.set_setting("drive_folders", {})
