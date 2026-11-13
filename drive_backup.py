@@ -964,6 +964,17 @@ class DriveBackup:
         finally:
             _detach()
 
+    def _after_upload(self, file_id: str, path: str, remote: str) -> None:
+        """Ensayo compartido por otra persona: la foto se le traspasa (queda en su Drive) y se
+        deja en cola una copia para el Drive propio (sharing.after_upload)."""
+        if not remote.startswith(SHARE_SEG):
+            return
+        try:
+            import sharing
+            sharing.after_upload(self, file_id, path, remote)
+        except Exception as exc:  # noqa: BLE001 - nunca frena la subida
+            print("compartido: traspasar foto al dueño:", exc)
+
     def flush(self) -> int:
         """Sube lo pendiente. Devuelve cuántas fotos se subieron."""
         if not self.enabled:
@@ -978,6 +989,12 @@ class DriveBackup:
                 raise Offline("Esperando Wi-Fi (datos móviles desactivados para el respaldo)")
             self._sync_account_queue()
             self._skip_missing()
+            if self.db.get_setting("xfer_todo"):      # traspasos al dueño que fallaron antes
+                try:
+                    import sharing
+                    sharing.retry_transfers(self)
+                except Exception as exc:  # noqa: BLE001
+                    print("compartido: reintentar traspasos:", exc)
             # Primero mover lo de versiones anteriores (rápido: unas pocas carpetas)…
             self.relocate_legacy()  # lo subido antes de los ensayos -> «I+D/Nuevas variedades»
             self.relocate_moved()   # ensayo traspasado a un predio: carpeta y nombres en Drive
@@ -1018,6 +1035,7 @@ class DriveBackup:
                     self.db.execute("UPDATE drive_queue SET status='done', drive_id=?, error='', "
                                     "uploaded_at=? WHERE id=?", (fid, _now(), r["id"]))
                     uploaded += 1
+                    self._after_upload(fid, r["path"], name)
                 if not self._again:
                     left = self.db.query_one(
                         "SELECT COUNT(*) AS n FROM drive_queue WHERE status='pending' AND attempts=0")

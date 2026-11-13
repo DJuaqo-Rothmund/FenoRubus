@@ -2359,20 +2359,46 @@ class SharedFakeDrive(FakeDrive):
         import urllib.parse
         path = urllib.parse.urlsplit(url).path
         q = urllib.parse.parse_qs(urllib.parse.urlsplit(url).query)
+        if path.endswith("/about"):
+            return 200, json.dumps({"user": {"emailAddress": user}}).encode()
         if "/permissions" in path:
             fid = path.split("/files/")[1].split("/")[0]
+            f = self.files[fid]
             if method == "POST":
-                self.files[fid].setdefault("shared", set()).add(json.loads(body)["emailAddress"])
+                b = json.loads(body)
+                f.setdefault("shared", set()).add(b["emailAddress"])
+                if b.get("pendingOwner"):
+                    assert f.get("owner") == user, "solo el dueño ofrece la propiedad"
+                    f["pending"] = b["emailAddress"]
                 return 200, b'{"id": "p1"}'
-            perms = [{"id": e, "emailAddress": e, "role": "writer", "type": "user"}
-                     for e in self.files[fid].get("shared", ())]
+            if method == "PATCH":
+                pid = path.rsplit("/", 1)[1]
+                b = json.loads(body)
+                if b.get("role") == "owner":
+                    assert q.get("transferOwnership") == ["true"] and f.get("pending") == user == pid
+                    f["shared"].add(f["owner"])
+                    f["owner"], f["pending"] = user, None
+                elif b.get("pendingOwner"):
+                    f["pending"] = pid
+                return 200, b'{"id": "p1"}'
+            perms = [{"id": e, "emailAddress": e, "role": "writer", "type": "user",
+                      "pendingOwner": f.get("pending") == e}
+                     for e in sorted(f.get("shared", ())) if e != f.get("owner")]
             return 200, json.dumps({"permissions": perms}).encode()
+        if method == "GET" and "q" not in q and "alt=media" not in url:
+            fid = path.split("/files/")[1]
+            return 200, json.dumps({"id": fid, "owners": [{"emailAddress": self.files[fid].get("owner")}]}).encode()
         if method == "PATCH" and "uploadType" not in url and b"properties" in (body or b""):
             fid = path.split("/files/")[1]
             self.files[fid]["props"] = json.loads(body)["properties"]
             return 200, json.dumps({"id": fid}).encode()
         if method == "GET" and "q" in q:
             query = q["q"][0]
+            m = re.search(r"'([^']+@[^']+)' in owners", query)
+            if m:
+                hits = [{"id": k} for k, f in self.files.items()
+                        if f.get("owner") == m.group(1) and not f["folder"] and self._visible(k, user)]
+                return 200, json.dumps({"files": hits}).encode()
             if "sharedWithMe" in query:
                 hits = [{"id": k, "name": f["name"], "properties": f.get("props", {}),
                          "owners": [{"emailAddress": f.get("owner")}]}
@@ -2467,13 +2493,67 @@ def test_shared_workspace_photos_go_to_common_folder(tmp_path):
     cback.enqueue(pid, photo, flush=False)
     cback.flush()                                   # la cola sube la foto (en la app: al tomarla)
     coni.run()
+    def inside(f):
+        while f["parents"]:
+            if f["parents"][0] == folder:
+                return True
+            f = fake.files[f["parents"][0]]
+        return False
     up = [k for k, f in fake.files.items() if f["name"] == "20261110-AUF-T1R1D.jpg"]
-    assert len(up) == 1 and fake.files[up[0]]["owner"] == "coni@x.cl"     # en el Drive de Coni…
-    f, inside = fake.files[up[0]], False
-    while f["parents"]:                                                     # …dentro de la carpeta común
-        inside = inside or f["parents"][0] == folder
-        f = fake.files[f["parents"][0]]
-    assert inside
+    common = [k for k in up if inside(fake.files[k])]
+    assert len(up) == 2 and len(common) == 1                 # en la carpeta común + copia de Coni
     r = yo.run()
     local = os.path.join(ydir, "photos", "T2026", "S10", "20261110-AUF-T1R1D.jpg")
     assert r["downloaded"] == 1 and open(local, "rb").read() == b"FOTO DE CONI"
+
+
+def test_shared_workspace_photos_end_up_owned_by_the_owner_with_copy(tmp_path):
+    """Opción «todo a mi nombre»: la foto que Coni sube al ensayo que yo le compartí pasa a ser
+    mía (mi Drive) y ella guarda además una copia en su propio Drive."""
+    import sharing
+    from drive_backup import DriveBackup
+    fake = SharedFakeDrive()
+    yo, yws, yopen, ydir = _account(tmp_path, "yo", fake, "juaquin@x.cl")
+    coni, cws, copen, cdir = _account(tmp_path, "coni", fake, "coni@x.cl")
+    for ws_ in (yws, cws):
+        ws_.shared.set_setting("drive_enabled", True)
+    ydb = yopen(yws.create("predio", "predio", "El Amanecer 2", "EA"))
+    sharing.share(DriveBackup(ydb, authorizer=yo.drive.authorizer, transport=yo.drive.transport,
+                              metered=lambda: False), "coni@x.cl")
+    assert ydb.get_setting("share_owner") == "juaquin@x.cl"
+    yo.run()
+    sharing.join(coni.drive, cws, copen, sharing.invitations(coni.drive)[0])
+    coni.run()
+    cdb = copen(cws.by_code("EA"))
+    assert cdb.get_setting("share_owner") == "juaquin@x.cl"
+    v = cdb.list_varieties()[0] if cdb.list_varieties() else cdb.query_one("SELECT * FROM varieties")
+    if v is None:
+        cdb.add_variety("Meeker 2019")
+        v = cdb.list_varieties()[0]
+    w = cdb.week_for_date(dt.date(2026, 11, 10))
+    oid = cdb.get_or_create_observation(v["id"], w["id"])["id"]
+    photo = os.path.join(cdir, "photos", "T2026", "S10", "20261110-EA-C.jpg")
+    os.makedirs(os.path.dirname(photo))
+    open(photo, "wb").write(b"FOTO")
+    pid = cdb.add_photo(oid, "canopy", photo)
+    cback = DriveBackup(cdb, authorizer=coni.drive.authorizer, transport=coni.drive.transport,
+                        metered=lambda: False)
+    cback.enqueue(pid, photo, flush=False)
+    cback.flush()
+    ups = {k: f for k, f in fake.files.items() if f["name"] == "20261110-EA-C.jpg"}
+    assert len(ups) == 2                                     # la de la carpeta común + su copia
+    folder = ydb.get_setting("share_folder")
+
+    def inside(f):
+        while f["parents"]:
+            if f["parents"][0] == folder:
+                return True
+            f = fake.files[f["parents"][0]]
+        return False
+    common = [k for k, f in ups.items() if inside(f)]
+    copy = [k for k, f in ups.items() if not inside(f)]
+    assert len(common) == 1 and len(copy) == 1
+    assert fake.files[common[0]]["pending"] == "juaquin@x.cl" and fake.files[copy[0]]["owner"] == "coni@x.cl"
+    yo.run()                                                 # mi app acepta: queda a mi nombre
+    assert fake.files[common[0]]["owner"] == "juaquin@x.cl"
+    assert fake.files[copy[0]]["owner"] == "coni@x.cl"       # su copia sigue siendo de ella

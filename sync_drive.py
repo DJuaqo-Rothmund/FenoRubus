@@ -239,6 +239,8 @@ class DriveSync:
             db = self.open_db(ws)
             folder = folders.get(ws["code"]) or self.drive._folder(ws["code"], root)
             res = self.sync_db(db, folder, db.get_setting("share_sync") or None)
+            if db.get_setting("share_folder"):
+                self._accept_transfers(db)
             total["workspaces"] += 1
             for k in ("received", "sent", "applied"):
                 total[k] += res[k]
@@ -249,6 +251,20 @@ class DriveSync:
             else:
                 total["pending_photos"] += db.query_one("SELECT COUNT(*) AS n FROM sync_missing")["n"]
         return total
+
+    def _accept_transfers(self, db) -> int:
+        """Dueño de un ensayo compartido: acepta la propiedad de las fotos que subió la otra
+        persona (quedan en este Drive). Nunca frena la sincronización."""
+        try:
+            import sharing
+            from drive_backup import DriveBackup
+            backup = self.drive if db is getattr(self.drive, "db", None) else DriveBackup(
+                db, authorizer=self.drive.authorizer, transport=self.drive.transport,
+                metered=self.drive.metered)
+            return sharing.accept_transfers(backup)
+        except Exception as exc:  # noqa: BLE001
+            print("compartido: aceptar traspasos:", exc)
+            return 0
 
     def photos_allowed(self) -> bool:
         """Las fotos se bajan con Wi-Fi si así está el respaldo («Subir solo con Wi-Fi»)."""

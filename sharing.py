@@ -16,6 +16,10 @@ edición a la otra cuenta. Dentro:
   también a los otros equipos de la misma cuenta).
 * Hace falta el permiso amplio de Drive (drive_backup.SHARE_SCOPE): con el de siempre la app
   solo ve lo que ella misma creó en esa cuenta.
+* Todo a nombre de quien compartió (`share_owner`): cada foto que otra persona sube a la carpeta
+  común se le ofrece en propiedad (pendingOwner) y la app del dueño acepta sola al sincronizar
+  (cuentas gmail: Google exige ese «aceptar»). Quien subió la foto guarda además una copia en su
+  propio Drive (carpeta personal del ensayo).
 
 Puro Python (la red va por DriveBackup._call): se prueba con un Drive falso.
 """
@@ -67,6 +71,7 @@ def share(drive, email: str, message: str = "") -> dict:
                 json.dumps(body).encode(), JSON)
     db.set_setting("share_folder", folder)
     db.set_setting("share_sync", sync_folder)
+    db.set_setting("share_owner", folder_owner(drive, folder) or my_email(drive))
     db.log("share", "workspace", None, f"compartido con {email}")
     return {"folder": folder, "sync": sync_folder, "email": email}
 
@@ -106,7 +111,8 @@ def invitations(drive) -> list[dict]:
         out.append({"folder": f["id"], "code": (p.get("code") or "").upper(),
                     "name": p.get("name") or f.get("name") or "", "profile": p.get("profile") or "id",
                     "kind": p.get("kind") or "variedades",
-                    "owner": owner.get("displayName") or owner.get("emailAddress") or ""})
+                    "owner": owner.get("displayName") or owner.get("emailAddress") or "",
+                    "owner_email": (owner.get("emailAddress") or "").lower()})
     return out
 
 
@@ -142,6 +148,7 @@ def join(drive, workspaces, open_db, inv: dict) -> dict:
         sync_folder = drive._call("POST", f"{API}?fields=id", json.dumps(meta).encode(), JSON)["id"]
     db.set_setting("share_folder", inv["folder"])
     db.set_setting("share_sync", sync_folder)
+    db.set_setting("share_owner", inv.get("owner_email") or folder_owner(drive, inv["folder"]))
     db.log("share", "workspace", None, f"unido al ensayo compartido por {inv.get('owner', '')}")
     return ws
 
@@ -155,3 +162,128 @@ def check_access(drive, folder: str) -> bool:
         if exc.status in (403, 404):
             return False
         raise
+
+
+# ------------------------------------------------------- todo a nombre del dueño
+XFER_KEY = "xfer_todo"         # fotos cuyo traspaso falló: se reintenta (no viaja a otros equipos)
+XFER_TRIES = 8
+
+
+def my_email(drive) -> str:
+    """Correo de la cuenta de Google conectada (se pregunta una vez por conexión: si se cambia
+    de cuenta, no queda el correo anterior)."""
+    if getattr(drive, "account", None):
+        return drive.account.lower()
+    me = getattr(drive, "_me", None)
+    if me is None:
+        res = drive._call("GET", "https://www.googleapis.com/drive/v3/about?fields=user(emailAddress)")
+        me = drive._me = (res.get("user", {}).get("emailAddress") or "").lower()
+    return me
+
+
+def folder_owner(drive, folder: str) -> str:
+    try:
+        res = drive._call("GET", f"{API}/{folder}?fields=owners(emailAddress)")
+        return ((res.get("owners") or [{}])[0].get("emailAddress") or "").lower()
+    except DriveError:
+        return ""
+
+
+def owner_of(db) -> str:
+    return (db.get_setting("share_owner") or "").lower()
+
+
+def i_am_member(drive) -> bool:
+    """Ensayo compartido por OTRA persona (sus fotos se le traspasan al dueño)."""
+    owner = owner_of(drive.db)
+    return bool(drive.db.get_setting("share_folder") and owner and owner != my_email(drive))
+
+
+def request_transfer(drive, file_id: str, owner: str) -> bool:
+    """Ofrece la propiedad del archivo a `owner` (lo acepta su app). False: se reintenta luego."""
+    body = {"type": "user", "role": "writer", "emailAddress": owner, "pendingOwner": True}
+    try:
+        drive._call("POST", f"{API}/{file_id}/permissions?" + urllib.parse.urlencode(
+            {"sendNotificationEmail": "false", "fields": "id"}), json.dumps(body).encode(), JSON)
+        return True
+    except DriveError:
+        pass
+    try:            # ya tenía permiso (heredado o directo): se marca ese como dueño pendiente
+        for p in _perms(drive, file_id):
+            if p.get("emailAddress", "").lower() == owner:
+                drive._call("PATCH", f"{API}/{file_id}/permissions/{p['id']}?fields=id",
+                            json.dumps({"role": "writer", "pendingOwner": True}).encode(), JSON)
+                return True
+    except DriveError:
+        pass
+    return False
+
+
+def after_upload(drive, file_id: str, path: str, remote: str) -> None:
+    """Tras subir un archivo a la carpeta común de un ensayo ajeno: se le ofrece al dueño y se
+    deja en cola una copia para el Drive propio (carpeta personal del ensayo)."""
+    from drive_backup import SHARE_SEG
+    if not remote.startswith(SHARE_SEG) or not i_am_member(drive):
+        return
+    db = drive.db
+    if not request_transfer(drive, file_id, owner_of(db)):
+        todo = db.get_setting(XFER_KEY) or {}
+        todo[file_id] = 0
+        db.set_setting(XFER_KEY, todo)
+    from workspaces import Workspaces
+    rest = remote.split("/", 1)[1] if "/" in remote else remote
+    copy = f"{Workspaces.drive_prefix(db.workspace)}/{rest}"
+    if not db.query_one("SELECT id FROM drive_queue WHERE path=? AND name=?", (path, copy)):
+        drive.enqueue(None, path, flush=False, remote=copy)
+
+
+def retry_transfers(drive) -> int:
+    """Reintenta los traspasos que fallaron (sin red, permiso aún no propagado…)."""
+    db = drive.db
+    todo = db.get_setting(XFER_KEY) or {}
+    if not todo or not i_am_member(drive):
+        return 0
+    done = 0
+    for fid, tries in list(todo.items()):
+        if request_transfer(drive, fid, owner_of(db)):
+            todo.pop(fid)
+            done += 1
+        elif tries + 1 >= XFER_TRIES:
+            todo.pop(fid)
+        else:
+            todo[fid] = tries + 1
+    db.set_setting(XFER_KEY, todo)
+    return done
+
+
+def _perms(drive, file_id: str) -> list[dict]:
+    return drive._call("GET", f"{API}/{file_id}/permissions?" + urllib.parse.urlencode(
+        {"fields": "permissions(id,emailAddress,role,pendingOwner,type)"})).get("permissions", [])
+
+
+def accept_transfers(drive, limit: int = 200) -> int:
+    """En el teléfono del DUEÑO: acepta la propiedad de lo que los demás subieron a la carpeta
+    común (fotos de la otra persona → quedan en este Drive). Devuelve cuántas se aceptaron."""
+    db = drive.db
+    me = my_email(drive)
+    folder = db.get_setting("share_folder")
+    if not folder or not me or owner_of(db) != me:
+        return 0
+    others = [m["email"] for m in members(drive, folder) if m["email"] and m["email"] != me]
+    got = 0
+    for email in others:
+        q = f"'{email}' in owners and trashed=false and mimeType != '{FOLDER_MIME}'"
+        res = drive._call("GET", f"{API}?" + urllib.parse.urlencode(
+            {"q": q, "fields": "files(id)", "spaces": "drive", "pageSize": str(limit)}))
+        for f in res.get("files", []):
+            try:
+                mine = next((p for p in _perms(drive, f["id"])
+                             if p.get("emailAddress", "").lower() == me and p.get("pendingOwner")), None)
+                if mine:
+                    drive._call("PATCH", f"{API}/{f['id']}/permissions/{mine['id']}?" + urllib.parse.urlencode(
+                        {"transferOwnership": "true", "fields": "id"}),
+                        json.dumps({"role": "owner"}).encode(), JSON)
+                    got += 1
+            except DriveError:
+                continue           # la próxima sincronización lo intenta de nuevo
+    return got
