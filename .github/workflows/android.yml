@@ -105,6 +105,30 @@ jobs:
           "$BT/apksigner" verify --print-certs "$APK" | tee /tmp/certs.txt
           grep -qi "SHA-1 digest: edb0585ce094df75d479d547c10cc0810ef04038" /tmp/certs.txt
           "$BT/aapt" dump badging "$APK" | head -1 || true
+      # Qué ocupa espacio en el APK (para decidir recortes con datos, no a ciegas).
+      - name: Contenido del APK (tamaños)
+        if: success()
+        run: |
+          python3 - <<'PY'
+          import glob, io, tarfile, zipfile, collections
+          apk = glob.glob("bin/*.apk")[0]
+          z = zipfile.ZipFile(apk)
+          top = collections.Counter()
+          for i in z.infolist():
+              top["/".join(i.filename.split("/")[:2])] += i.compress_size
+          print("APK:", sum(top.values()) // 1024, "KB comprimido")
+          for k, v in top.most_common(15):
+              print(f"{v // 1024:>8} KB  {k}")
+          for name in z.namelist():
+              if name.endswith((".tar", ".tar.gz", ".mp3")) and "private" in name:
+                  t = tarfile.open(fileobj=io.BytesIO(z.read(name)))
+                  inner = collections.Counter()
+                  for m in t.getmembers():
+                      inner["/".join(m.name.split("/")[:3])] += m.size
+                  print(f"--- {name} (sin comprimir)")
+                  for k, v in inner.most_common(25):
+                      print(f"{v // 1024:>8} KB  {k}")
+          PY
       - name: Guardar caché de SDK/NDK
         if: always()
         uses: actions/cache/save@v4

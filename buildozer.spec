@@ -15,8 +15,9 @@ source.dir = .
 source.include_exts = py,png,jpg,kv,atlas,html,json,tflite,txt,ttf
 
 # (list) Directories / files to exclude
-source.exclude_dirs = tests, bin, .buildozer, .git, __pycache__, .pytest_cache, web, tools/web, tools/start_bg
-source.exclude_patterns = tools/demo_data.py, tools/export_mobilenet_tflite.py, tools/make_berries.py, tools/make_maps.py, tools/make_splash_layers.py, tools/make_splash_lottie.py, assets/splash_lottie.json, README.md
+# tools/ (scripts de desarrollo) y assets/src (originales de los dibujos) no se usan en el teléfono.
+source.exclude_dirs = tests, bin, .buildozer, .git, __pycache__, .pytest_cache, web, tools, assets/src
+source.exclude_patterns = assets/splash_lottie.json, assets/logo_source.png, assets/wordmark_source.png, README.md, IDEAS.md
 
 # (str) Application versioning
 version = 1.0.0

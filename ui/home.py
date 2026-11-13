@@ -271,13 +271,14 @@ class CropScreen(MDScreen):
 
     def on_enter(self, *_):
         self._t0 = time.monotonic()
-        # Cada cuadro (sincronizado con la pantalla): solo mueve y escala en el canvas.
-        self._ev = Clock.schedule_interval(self._float, 0)
+        # Solo mueve y escala en el canvas; a 30 cuadros/s y se detiene sin toques (batería).
+        from ui.idle_anim import IdleLoop
+        self._loop = getattr(self, "_loop", None) or IdleLoop(self._float)
+        self._loop.start()
 
     def on_leave(self, *_):
-        if getattr(self, "_ev", None):
-            self._ev.cancel()
-            self._ev = None
+        if getattr(self, "_loop", None):
+            self._loop.stop()
         self.ai_shown = 0                  # al volver, IA e IA+ quedan ocultas
 
     def _float(self, *_):
@@ -374,7 +375,9 @@ class StartBase(MDScreen):
             self._intro_ready = False
             self._play_intro()
         self._t0 = time.monotonic()
-        self._float_ev = Clock.schedule_interval(self._float, 0)
+        from ui.idle_anim import IdleLoop     # 30 cuadros/s y se detiene sin toques (batería)
+        self._loop = getattr(self, "_loop", None) or IdleLoop(self._float)
+        self._loop.start()
 
     FLOAT = ((0.0, "ic_id"), (1.6, "ic_predio"), (4.8, "ic_nb"), (3.2, "ic_yield"))   # desfase de cada ícono
 
@@ -394,8 +397,8 @@ class StartBase(MDScreen):
         return .7 + .25 * math.sin(t * 1.6)
 
     def on_leave(self, *_):
-        if getattr(self, "_float_ev", None):
-            self._float_ev.cancel()
+        if getattr(self, "_loop", None):
+            self._loop.stop()
 
     # ------------------------------------------------------------ animación
     def _prepare_intro(self):

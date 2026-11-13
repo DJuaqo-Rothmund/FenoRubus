@@ -477,7 +477,7 @@ class MindSky(Widget):
 
     def start(self):
         if self._ev is None:
-            self._ev = Clock.schedule_interval(self._step, 1 / 60)
+            self._ev = Clock.schedule_interval(self._step, 1 / 30)  # decorativo: 30 cuadros/s (batería)
 
     def stop(self):
         if self._ev is not None:
@@ -632,7 +632,7 @@ def ki_texture():
 class KiButton(ButtonBehavior, Widget):
     """Botón IA+: el logo con un «ki» rojo que emana del dibujo y se evapora hacia arriba
     (volutas difusas que suben, crecen y se desvanecen, y un aura que respira). Las
-    instrucciones se crean una vez; cada cuadro solo las mueve (60 por segundo; mientras
+    instrucciones se crean una vez; cada cuadro solo las mueve (30 por segundo; mientras
     no se ve, ni la pantalla ni el botón, el cuadro no hace nada)."""
     source = StringProperty("")
     N = 7
@@ -668,7 +668,7 @@ class KiButton(ButtonBehavior, Widget):
 
     def on_parent(self, *_):
         if self.parent is not None and self._ev is None:
-            self._ev = Clock.schedule_interval(self._step, 1 / 60)
+            self._ev = Clock.schedule_interval(self._step, 1 / 30)  # decorativo: 30 cuadros/s (batería)
 
     def _step0(self, *_):
         self._img.pos, self._img.size = self.pos, self.size
