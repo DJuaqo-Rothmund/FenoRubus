@@ -131,7 +131,9 @@ def open_weather(on_change=None):
     pick_dialog("Temperaturas y lluvia", items, subtitle=info,
                 footer=[("file-upload-outline", "Importar archivo (CSV o Excel)", lambda: import_file(db, changed)),
                         ("content-paste", "Pegar datos (de Excel o planilla)", lambda: paste(db, changed)),
-                        ("plus", "Agregar o corregir un día", lambda: edit_day(db, None, changed))],
+                        ("plus", "Agregar o corregir un día", lambda: edit_day(db, None, changed)),
+                        ("satellite-variant", "Datos de la zona (Open-Meteo)",
+                         lambda: download_reference(p, db, changed))],
                 empty="Aún no hay temperaturas. Importe un archivo de la estación, pegue una tabla "
                       "(fecha y T media; opcional T mín, T máx y lluvia) o agréguelas día a día.")
 
@@ -212,6 +214,54 @@ def import_file(db, on_done):
             return
         _review(db, days, warnings, f"archivo {name or os.path.basename(path)}"[:60], on_done)
     a.media.pick_document(picked, exts=(".csv", ".txt", ".tsv", ".xlsx"))
+
+
+def predio_coords(p: dict, db) -> tuple[float, float] | None:
+    """Centro del plano del predio; si no tiene plano, el promedio de las ubicaciones GPS de
+    sus registros (o los del ensayo actual)."""
+    from ui.sector_map import load_map
+    ll = gd.map_center(load_map(p.get("code")))
+    if ll:
+        return ll
+    for base in (db, app().db):
+        row = base.query_one("SELECT AVG(latitude) AS lat, AVG(longitude) AS lon FROM observations "
+                             "WHERE latitude IS NOT NULL AND longitude IS NOT NULL")
+        if row and row["lat"] is not None:
+            return row["lat"], row["lon"]
+    return None
+
+
+def download_reference(p: dict, db, on_done):
+    """Temperaturas de referencia de la zona (Open-Meteo) desde el 1/9 de la temporada
+    anterior hasta ayer, mientras no estén las de la estación del campo."""
+    a = app()
+    ll = predio_coords(p, db)
+    if ll is None:
+        a.toast("El predio no tiene plano ni registros con GPS: no sé dónde está.")
+        return
+    lat, lon = ll
+    season = a.season
+    start = gd.biofix(season - 1)
+    end = min(gd.season_end(season), _dt.date.today() - _dt.timedelta(days=1))
+    a.toast("Descargando temperaturas de referencia…")
+
+    def work():
+        try:
+            days = gd.fetch_open_meteo(lat, lon, start, end)
+            err = None
+        except Exception as exc:  # noqa: BLE001
+            days, err = [], exc
+
+        def done(*_):
+            if err is not None:
+                a.toast(f"No se pudo descargar (¿sin internet?): {err}")
+                return
+            note = (f"Referencia de la zona (Open-Meteo, {lat:.3f}, {lon:.3f}): modelo y satélite, "
+                    "no la estación del campo. Cuando tenga los datos del campo, impórtelos con "
+                    "«Guardar todo» y reemplazan a estos.")
+            _review(db, days, [note], gd.OPEN_METEO_SOURCE, on_done)
+        Clock.schedule_once(done, 0)
+    a.workers.submit(work)
 
 
 def paste(db, on_done):

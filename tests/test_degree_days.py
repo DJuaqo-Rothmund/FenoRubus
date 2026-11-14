@@ -102,3 +102,39 @@ def test_analyze_milestones_and_prediction(db):
     assert nm[0] == 61
     html = gd.svg_temperature(res["series"]) + gd.svg_stages(res["units"], res["series"].total)
     assert html.count("<svg") == 2
+
+
+def test_open_meteo_csv_and_fetch():
+    csv_text = ("latitude,longitude,elevation,utc_offset_seconds,timezone,timezone_abbreviation\n"
+                "-39.55,-72.47,120.0,-10800,America/Santiago,GMT-3\n\n"
+                "time,temperature_2m_mean (°C),temperature_2m_min (°C),temperature_2m_max (°C),precipitation_sum (mm)\n"
+                "2026-09-01,8.4,3.1,13.2,0.0\n2026-09-02,9.1,4.0,14.5,12.6\n")
+    days, _ = gd.parse_rows(gd.split_text(csv_text))
+    assert days[1] == {"day": "2026-09-02", "tmean": 9.1, "tmin": 4.0, "tmax": 14.5, "rain": 12.6}
+    import json
+    calls = []
+
+    def get(url):
+        calls.append(url)
+        if "archive" in url:
+            return json.dumps({"daily": {"time": ["2026-09-01", "2026-09-02", "2026-09-03"],
+                                         "temperature_2m_mean": [8.4, None, None],
+                                         "temperature_2m_min": [3.1, 2.0, None],
+                                         "temperature_2m_max": [13.2, 12.0, None],
+                                         "precipitation_sum": [0, 1.5, None]}}).encode()
+        return json.dumps({"daily": {"time": ["2026-09-03", "2026-09-04"],
+                                     "temperature_2m_mean": [10.0, 11.0], "temperature_2m_min": [5, 6],
+                                     "temperature_2m_max": [15, 16], "precipitation_sum": [0, 0]}}).encode()
+    today = dt.date.today()
+    start = today - dt.timedelta(days=3)
+    # Fechas relativas a hoy para que la parte «reciente» se pida al pronóstico.
+    def shift(raw):
+        return raw.replace(b"2026-09-01", str(start).encode()).replace(
+            b"2026-09-02", str(start + dt.timedelta(1)).encode()).replace(
+            b"2026-09-03", str(start + dt.timedelta(2)).encode()).replace(
+            b"2026-09-04", str(start + dt.timedelta(3)).encode())
+    out = gd.fetch_open_meteo(-39.55, -72.47, start, start + dt.timedelta(2), get=lambda u: shift(get(u)))
+    assert [d["tmean"] for d in out] == [8.4, 7.0, 10.0]          # 7.0 = (2+12)/2 · el 3º del pronóstico
+    assert len(calls) == 2 and "past_days" in calls[1]
+    lat, lon = gd.map_center({"w": 100, "h": 50, "geo": {"x0": -100, "y0": -40, "kx": 1, "ky": 1}})
+    assert (lat, lon) == (-15, -50)

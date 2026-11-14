@@ -456,7 +456,8 @@ class PreviewTab(MDScreen):
         s = res["series"]
         n = len(d["rows"])
         ids.headline.text = (f"{n} {'unidad' if n == 1 else 'unidades'} con estados BBCH · "
-                             f"T base {gd.fmt(s.tbase)} °C desde el 1 de septiembre")
+                             f"T base {gd.fmt(s.tbase)} °C desde el 1 de septiembre"
+                             + (" · temperaturas de REFERENCIA (Open-Meteo)" if res.get("ref_days") else ""))
         from kivy.uix.gridlayout import GridLayout
         from kivy.factory import Factory
         kp = GridLayout(cols=2, spacing=dp(6), size_hint_y=None)

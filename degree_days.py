@@ -118,14 +118,18 @@ def short_date(d: _dt.date | None) -> str:
 
 # ====================================================================== lectura de archivos
 COLUMNS = {
-    "day": ("fecha", "dia", "date", "day", "fecha_hora", "fecha_y_hora", "tiempo"),
+    "day": ("fecha", "dia", "date", "day", "fecha_hora", "fecha_y_hora", "tiempo", "time"),
     "tmean": ("tmedia", "t_media", "temp_media", "temperatura_media", "tmed", "t_med", "tprom",
               "t_prom", "temp_prom", "temperatura_promedio", "promedio", "media", "tmean", "t_mean",
-              "mean", "temperatura", "temp", "t", "temperatura_c", "t_c"),
-    "tmin": ("tmin", "t_min", "temp_min", "temperatura_minima", "minima", "min", "t_minima"),
-    "tmax": ("tmax", "t_max", "temp_max", "temperatura_maxima", "maxima", "max", "t_maxima"),
+              "mean", "temperatura", "temp", "t", "temperatura_c", "t_c", "temperature_2m_mean",
+              "temperature_2m"),
+    "tmin": ("tmin", "t_min", "temp_min", "temperatura_minima", "minima", "min", "t_minima",
+             "temperature_2m_min"),
+    "tmax": ("tmax", "t_max", "temp_max", "temperatura_maxima", "maxima", "max", "t_maxima",
+             "temperature_2m_max"),
     "rain": ("lluvia", "pp", "precipitacion", "precipitaciones", "pluviometria", "pluviometro",
-             "agua_caida", "rain", "mm", "lluvia_mm", "pp_mm", "precipitacion_mm"),
+             "agua_caida", "rain", "mm", "lluvia_mm", "pp_mm", "precipitacion_mm", "precipitation_sum",
+             "precipitation", "rain_sum"),
 }
 
 
@@ -134,10 +138,12 @@ def _column_of(header: str) -> str | None:
     for key, names in COLUMNS.items():
         if h in names:
             return key
-    for key, names in COLUMNS.items():           # «Temperatura media (°C)», «Lluvia (mm)»…
-        if any(h.startswith(n + "_") for n in names if len(n) > 2):
-            return key
-    return None
+    best = None                                   # «Temperatura media (°C)», «Lluvia (mm)»…
+    for key, names in COLUMNS.items():            # (el nombre más largo que calce)
+        for n in names:
+            if len(n) > 2 and h.startswith(n + "_") and (best is None or len(n) > best[1]):
+                best = (key, len(n))
+    return best[0] if best else None
 
 
 def split_text(text: str) -> list[list[str]]:
@@ -273,6 +279,71 @@ def parse_rows(rows: list[list[str]], decimal_comma: bool | None = None) -> tupl
             if d[k] is not None and not -30 <= d[k] <= 50:
                 warnings.append(f"{d['day']}: {k} = {d[k]} parece fuera de rango.")
     return out, warnings
+
+
+# ====================================================================== Open-Meteo (referencia)
+OPEN_METEO_ARCHIVE = "https://archive-api.open-meteo.com/v1/archive"
+OPEN_METEO_FORECAST = "https://api.open-meteo.com/v1/forecast"
+OPEN_METEO_SOURCE = "Open-Meteo (reanálisis)"
+_DAILY = "temperature_2m_mean,temperature_2m_min,temperature_2m_max,precipitation_sum"
+
+
+def map_center(plan: dict | None) -> tuple[float, float] | None:
+    """(lat, lon) del centro del plano de un predio (assets/maps/<código>.json)."""
+    g = (plan or {}).get("geo")
+    if not g or not plan.get("w"):
+        return None
+    return (plan["h"] / 2 + g["y0"]) / g["ky"], (plan["w"] / 2 + g["x0"]) / g["kx"]
+
+
+def _om_days(payload: dict) -> list[dict]:
+    d = payload.get("daily") or {}
+    out = []
+    for i, day in enumerate(d.get("time") or []):
+        def v(k):
+            vals = d.get(k) or []
+            x = vals[i] if i < len(vals) else None
+            return round(float(x), 2) if x is not None else None
+        rec = {"day": str(day)[:10], "tmean": v("temperature_2m_mean"), "tmin": v("temperature_2m_min"),
+               "tmax": v("temperature_2m_max"), "rain": v("precipitation_sum")}
+        if rec["tmean"] is None and rec["tmin"] is not None and rec["tmax"] is not None:
+            rec["tmean"] = round((rec["tmin"] + rec["tmax"]) / 2, 2)
+        if rec["tmean"] is not None:
+            out.append(rec)
+    return out
+
+
+def fetch_open_meteo(lat: float, lon: float, start: _dt.date, end: _dt.date, get=None) -> list[dict]:
+    """Temperatura diaria (media, mín, máx) y lluvia de Open-Meteo en esas coordenadas: el
+    reanálisis histórico (ERA5, ~5 días de atraso) y, para los últimos días, el modelo del
+    pronóstico. Es una REFERENCIA de la zona (celda de ~10-25 km), no la estación del campo.
+    get(url) -> bytes (para pruebas)."""
+    import json
+    from urllib.parse import urlencode
+    if get is None:
+        def get(url):
+            import urllib.request
+            from drive_backup import _ssl_context
+            with urllib.request.urlopen(url, timeout=60, context=_ssl_context()) as r:
+                return r.read()
+    base = {"latitude": f"{lat:.4f}", "longitude": f"{lon:.4f}", "daily": _DAILY,
+            "timezone": "America/Santiago"}
+    days = {d["day"]: d for d in _om_days(json.loads(get(
+        OPEN_METEO_ARCHIVE + "?" + urlencode(dict(base, start_date=start.isoformat(),
+                                                    end_date=end.isoformat())))))}
+    missing = [start + _dt.timedelta(days=i) for i in range((end - start).days + 1)]
+    missing = [d for d in missing if d.isoformat() not in days]
+    if missing and (_dt.date.today() - missing[0]).days <= 90:   # lo reciente: del pronóstico
+        past = min(92, (_dt.date.today() - missing[0]).days + 1)
+        try:
+            recent = _om_days(json.loads(get(OPEN_METEO_FORECAST + "?" + urlencode(
+                dict(base, past_days=past, forecast_days=1)))))
+        except Exception:  # noqa: BLE001 - sin los últimos días no es grave
+            recent = []
+        for d in recent:
+            if d["day"] not in days and start.isoformat() <= d["day"] <= end.isoformat():
+                days[d["day"]] = d
+    return [days[k] for k in sorted(days)]
 
 
 # ====================================================================== base de datos
@@ -537,7 +608,9 @@ def analyze(db, season: int, weather_rows: list[dict], prev_weather_rows: list[d
         prev_at = prev_series.acc_at(same)
         if prev_at is not None:
             vs_prev = {"prev": prev_at, "delta": series.total - prev_at, "day": same}
-    return {"season": season, "tbase": tbase, "start": series.start, "series": series,
+    ref = sum(1 for r in weather_rows if r.get("source") == OPEN_METEO_SOURCE
+              and series.start.isoformat() <= str(r["day"])[:10])
+    return {"ref_days": ref, "season": season, "tbase": tbase, "start": series.start, "series": series,
             "prev_series": prev_series, "units": units, "milestones": milestones,
             "rate": rate, "vs_prev": vs_prev, "has_prev": bool(prev_pts),
             "n_obs": sum(len(u["points"]) for u in units),
@@ -691,6 +764,9 @@ def display(res: dict) -> dict:
             if any(c["prev"] != "—" for c in cells):
                 prev_rows.append({"name": u["name"], "color": PALETTE[i % len(PALETTE)], "cells": cells})
     notes = []
+    if res.get("ref_days"):
+        notes.append(f"{res['ref_days']} día(s) con temperaturas de REFERENCIA de la zona (Open-Meteo: "
+                     "modelo y satélite), no de la estación del campo.")
     if s.missing:
         notes.append(f"{s.missing} día(s) sin temperatura: se completaron con la recta entre los días vecinos.")
     if res["no_gdd"]:
