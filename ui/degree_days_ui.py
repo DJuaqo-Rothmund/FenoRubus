@@ -121,8 +121,13 @@ def season_rows(p: dict, season: int) -> tuple[list[dict], list[dict]]:
             rows_for(p, gd.biofix(season - 1), gd.season_end(season - 1)))
 
 
+_om_back = {"n": 1}            # temporadas hacia atrás que necesita Open-Meteo (comparación)
+
+
 def _om_first() -> _dt.date:
-    return gd.biofix(app().season - 1)          # también la temporada anterior (comparación)
+    """Desde dónde bajar Open-Meteo: la temporada anterior (o más, si la comparación usa
+    varias temporadas de referencia)."""
+    return gd.biofix(app().season - max(1, _om_back["n"]))
 
 
 def om_update_sync(p: dict, force: bool = False) -> int:
@@ -131,7 +136,7 @@ def om_update_sync(p: dict, force: bool = False) -> int:
     if ll is None:
         raise ValueError("el predio no tiene plano ni registros con GPS: no se sabe dónde está")
     cache = _cache(p)
-    if not force and not cache.stale(*ll):
+    if not force and not cache.stale(*ll, first=_om_first()):
         return 0
     return cache.update(ll[0], ll[1], _om_first())
 
@@ -149,7 +154,7 @@ def om_refresh(p: dict, on_done=None, force: bool = False, quiet: bool = True):
             if not quiet:
                 a.toast("El predio no tiene plano ni registros con GPS: no sé dónde está.")
             return
-        if not force and not _cache(p).stale(*ll):
+        if not force and not _cache(p).stale(*ll, first=_om_first()):
             return
     except Exception:  # noqa: BLE001
         return
@@ -428,3 +433,82 @@ def summary(on_update=None) -> dict | None:
     weather, prev = season_rows(p, a.season)
     res = gd.analyze(a.db, a.season, weather, prev)
     return {"predio": p, "res": res, "d": gd.display(res), "mode": mode}
+
+
+# ====================================================================== comparación entre temporadas
+CMP_KEY = "reportcfg_cmp_refs"          # «prev» (la anterior) o «all» (todas las disponibles)
+
+
+def cmp_refs() -> tuple[str, list[int], list[int]]:
+    """(modo, temporadas de referencia elegidas, todas las disponibles)."""
+    import season_compare as sc
+    a = app()
+    avail = sc.available_seasons(a.db, a.season)
+    mode = a.db.get_setting(CMP_KEY, "prev") or "prev"
+    refs = avail if mode == "all" else avail[:1]
+    return mode, refs, avail
+
+
+def pick_cmp_refs(on_done=None):
+    import season_compare as sc
+    a = app()
+    mode, _refs, avail = cmp_refs()
+    if not avail:
+        a.toast("Aún no hay estados BBCH de temporadas anteriores en este ensayo.")
+        return
+
+    def choose(m):
+        a.db.set_setting(CMP_KEY, m)
+        if on_done:
+            on_done()
+    opts = [("prev", f"Solo la anterior ({sc.season_label(avail[0])})", "Compara contra un año")]
+    if len(avail) > 1:
+        opts.append(("all", f"Promedio de {len(avail)} temporadas",
+                     ", ".join(sc.season_label(x) for x in avail) + " · un «año normal»"))
+    else:
+        opts.append(("all", "Promedio de varias temporadas", "Cuando haya más de una cargada (hoy: 1)"))
+    pick_dialog("Comparar contra", [(("En uso · " if m == mode else "") + t, sub, lambda m=m: choose(m),
+                                      c(theme.BERRY) if m == mode else None) for m, t, sub in opts])
+
+
+def generate_compare(package: str = "pdf", on_done=None):
+    a = app()
+    p = predio_of()
+    if p is None:
+        a.toast("No hay predio con temperaturas: créelo en el perfil Predio.")
+        return
+    _mode, refs, _avail = cmp_refs()
+    if not refs:
+        confirm("Sin temporada anterior",
+                "Para comparar se necesitan los estados BBCH de la temporada anterior en este ensayo "
+                "(regístrelos o impórtelos en IA › «Base de datos de temporadas anteriores»). Las temperaturas de esa "
+                "temporada las pone Open-Meteo o sus datos propios.", [])
+        return
+    season = a.season
+    _om_back["n"] = season - min(refs)
+    om = mode_of(p) == gd.MODE_OM
+    r = a.configured_reports()
+
+    def job():
+        if om:
+            try:
+                om_update_sync(p)
+            except Exception as exc:  # noqa: BLE001
+                print("open-meteo:", exc)
+        weather = {s: rows_for(p, gd.biofix(s), gd.season_end(s)) for s in [season] + refs}
+        if not weather[season]:
+            raise ValueError("Sin temperaturas desde el 1 de septiembre (Open-Meteo necesita internet "
+                             "la primera vez).")
+        return r.season_compare(season, weather, refs, predio=p["name"], package=package)
+    if package == "preview":
+        def work():
+            try:
+                res = job()
+                Clock.schedule_once(lambda *_: on_done(res, None) if on_done else a.media.preview(res.path, res.title))
+            except Exception as exc:  # noqa: BLE001
+                err = exc
+                Clock.schedule_once(lambda *_: on_done(None, err) if on_done else
+                                    a.toast(f"No se pudo preparar: {err}"))
+        a.workers.submit(work)
+        return
+    a.run_report(job, on_done=on_done)

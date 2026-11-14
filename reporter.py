@@ -1104,6 +1104,70 @@ class ReportGenerator:
                      f"{predio or 'el predio'} · "
                      f"T base {gd.fmt(res['tbase'])} °C desde el 1 de septiembre")
 
+    # ------------------------------------- 7. comparación entre temporadas
+    def season_compare(self, season: int, weather: dict, refs: list[int], predio: str = "",
+                       package: str = "html", photos: bool = True) -> ReportResult:
+        """Esta temporada vs la anterior (o el promedio de varias): calor acumulado, días de
+        adelanto, hitos (fecha y °C·día, ¿clima o variedad/manejo?), estado a la misma fecha,
+        curvas superpuestas y fotos del mismo estado."""
+        import degree_days as gd
+        import season_compare as sc
+        if not refs:
+            raise ValueError("No hay temporadas anteriores con estados BBCH en este ensayo para comparar.")
+        groups, unit_title, _word = gd.groups_for(self.db)
+        res = sc.compare(self.db, season, weather, refs, groups=groups)
+        d = sc.display(res)
+        images = self._images(package, max_side=480)
+        pairs = self._compare_photos(res, images) if photos else []
+        for i, u in enumerate(res["units"]):
+            d["units"][i]["svg"] = sc.svg_unit(res, u, d["units"][i]["color"])
+        title = "Comparación entre temporadas"
+        src = "Open-Meteo (estimación de la zona)" if res["ref_days"] else "datos propios"
+        return self._render(
+            "season_compare.html", f"comparacion_{season}", "comparacion", title, images, package,
+            d=d, res=res, predio=predio or "el predio", unit_title=unit_title, pairs=pairs,
+            svg_thermal=sc.svg_thermal(res), source=src, tbase_txt=gd.fmt(res["tbase"]),
+            days_t=sc.DAYS_T, gdd_t=sc.GDD_T,
+            subtitle=f"{d['cur_name']} vs {d['base_name']} · T base {gd.fmt(res['tbase'])} °C desde el "
+                     f"1 de septiembre · temperaturas: {src} · {predio or 'el predio'}")
+
+    def _compare_photos(self, res: dict, images, per_unit: int = 3) -> list[dict]:
+        """Fotos del mismo estado en las dos temporadas (detalle; si no hay, general)."""
+        import degree_days as gd
+        if not res["refs"]:
+            return []
+        r0, season = res["refs"][0], res["season"]
+
+        def photo(points, code):
+            m = ph.bbch_value(code)
+            for p in points:
+                if p["value"] >= m:
+                    for oid in p.get("obs") or []:
+                        ph_ = self.db.get_photos(oid)
+                        for k in ("detail", "canopy"):
+                            if k in ph_:
+                                src = images.src(ph_[k]["path"])
+                                if src:
+                                    return {"src": src, "day": gd.short_date(p["day"]),
+                                            "code": ph.code_str(p["code"])}
+                    return None
+            return None
+        out = []
+        for u in res["units"]:
+            items = []
+            for row in reversed(u["rows"]):
+                if not (row["cur"] and row["refs"].get(r0)):
+                    continue
+                a = photo(u["points"].get(season, []), row["code"])
+                b = photo(u["points"].get(r0, []), row["code"])
+                if a or b:
+                    items.append({"code": ph.code_str(row["code"]), "label": row["label"], "cur": a, "ref": b})
+                if len(items) >= per_unit:
+                    break
+            if items:
+                out.append({"name": u["name"], "items": list(reversed(items))})
+        return out
+
     # ------------------------------------- 5. tratamientos × repeticiones
     def treatments(self, season: int, package: str = "html") -> ReportResult:
         """Compara tratamientos: promedio de las repeticiones por semana, ANOVA (bloques =

@@ -1,0 +1,66 @@
+{% extends "base.html" %}
+{% block meta %}{% endblock %}
+{% block content %}
+<style>
+.gdd-kpis { display: grid; grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); gap: 10px; margin: 6px 0 4px; }
+.gdd-kpis .stat .v { color: var(--berry); font-size: 22px; }
+svg.gddchart { width: 100%; height: auto; display: block; }
+svg.gddchart .grid { stroke: var(--rule); stroke-width: 1; }
+svg.gddchart .ax { fill: var(--muted); font-size: 11px; font-family: inherit; }
+svg.gddchart .lbl { fill: var(--ink-2); font-size: 12px; font-family: inherit; }
+svg.gddchart .acc { fill: none; stroke: var(--berry); stroke-width: 2.8; }
+svg.gddchart .prev { fill: none; stroke: var(--muted); stroke-width: 1.9; }
+.gdd-leg { display: flex; flex-wrap: wrap; gap: 6px 16px; font-size: 12.5px; color: var(--ink-2); margin: 6px 0; }
+table.cmp td, table.cmp th { text-align: center; } table.cmp td.n, table.cmp th.n { text-align: left; font-weight: 600; white-space: nowrap; }
+table.cmp td.up { color: var(--berry); font-weight: 700; } table.cmp td.dn { color: var(--neg); font-weight: 700; }
+.tag { font-size: 11.5px; padding: 2px 8px; border-radius: 9px; white-space: nowrap; }
+.tag.clima { background: rgba(46,106,138,.14); color: #2E6A8A; } .tag.manejo { background: rgba(176,18,75,.12); color: var(--berry); }
+.tag.igual { background: var(--chip); color: var(--olive); } .tag.pred { background: rgba(232,168,48,.18); color: #8a5a00; }
+.sms { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 260px), 1fr)); gap: 10px; }
+.sms .card { padding: 6px; }
+.pairs { display: grid; gap: 14px; } .pair-row { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 330px), 1fr)); gap: 10px; }
+.pair { padding: 8px; } .pair .h { font-size: 12.5px; font-weight: 600; margin-bottom: 6px; }
+.pair .two { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; } .pair figure { margin: 0; }
+.pair figcaption { font-size: 11px; color: var(--muted); margin-top: 3px; text-align: center; }
+.callout { border-left: 3px solid var(--berry); padding: 6px 12px; background: var(--paper); margin: 8px 0; font-size: 14px; }
+</style>
+<div class="gdd-kpis">{% for v, u, l in d.kpis %}<div class="card stat"><div class="v">{{ v }}{% if u %}<span class="u">{{ u }}</span>{% endif %}</div><div class="l">{{ l }}</div></div>{% endfor %}</div>
+{% if d.ahead_txt %}<div class="callout">{{ d.ahead_txt }}</div>{% endif %}
+
+<h2>1 · Calor acumulado: {{ d.cur_name }} vs {{ d.base_name }}</h2>
+<p class="lead">°C·día acumulados desde el 1 de septiembre de cada temporada, día a día. El punto es hoy; la raya muestra cuándo se juntó ese mismo calor en {{ d.ref_names[0] }}.</p>
+<div class="card" style="padding:10px">{{ svg_thermal|safe }}
+<div class="gdd-leg"><span style="color:var(--berry)">━ {{ d.cur_name }}</span>{% for n in d.ref_names %}<span>╍ {{ n }}</span>{% endfor %}</div></div>
+<div class="scroll-x" style="margin-top:10px"><table class="cmp">
+<tr><th class="n">Mes</th><th>T media {{ d.cur_name }}</th><th>T media {{ d.base_name }}</th><th>°C·día {{ d.cur_name }}</th><th>°C·día {{ d.base_name }}</th><th>Diferencia</th></tr>
+{% for m in d.months %}<tr><td class="n">{{ m.name }}</td><td>{{ m.t }} °C</td><td>{{ m.t_ref }} °C</td><td><b>{{ m.g }}</b></td><td>{{ m.g_ref }}</td><td class="{{ 'up' if m.up else 'dn' }}">{{ m.d }}</td></tr>{% endfor %}
+</table></div>
+
+<h2>2 · Cada hito: fecha y °C·día</h2>
+<p class="lead">Fecha y calor acumulado al alcanzar cada estado (interpolados entre muestreos). <b>¿Por qué?</b> Si la fecha cambió ({{ days_t }} días o más) pero el calor necesario fue casi el mismo (menos de {{ gdd_t }} °C·día de diferencia), lo explica el <span class="tag clima">clima</span>. Si el calor necesario también cambió, es algo propio de la <span class="tag manejo">variedad / manejo</span> (poda, riego, carga, sanidad…).</p>
+<div class="scroll-x"><table class="cmp">
+<tr><th class="n">{{ unit_title }}</th><th>Hito</th><th>Fecha {{ d.base_name }}</th><th>Fecha {{ d.cur_name }}</th><th>Δ fecha</th><th>°C·día {{ d.base_name }}</th><th>°C·día {{ d.cur_name }}</th><th>Δ °C·día</th><th>¿Por qué?</th></tr>
+{% for u in d.units %}{% for r in u.rows %}<tr>{% if loop.first %}<td class="n" rowspan="{{ u.rows|length }}"><span class="sw" style="background:{{ u.color }}"></span> {{ u.name }}</td>{% endif %}
+<td>BBCH {{ r.code }} · {{ r.label }}</td><td>{{ r.ref_day }}</td><td>{{ r.cur_day }}</td><td>{{ r.d_days }}</td><td>{{ r.ref_g }}</td><td><b>{{ r.cur_g }}</b></td><td>{{ r.d_gdd }}</td><td>{% if r.verdict_txt %}<span class="tag {{ r.verdict }}">{{ r.verdict_txt }}</span>{% endif %}</td></tr>{% endfor %}{% endfor %}
+</table></div>
+{% if d.multi %}<p class="small muted">Referencia: promedio de {{ d.ref_names|join(', ') }}.</p>{% endif %}
+
+<h2>3 · A la misma fecha</h2>
+<div class="scroll-x"><table class="cmp"><tr><th class="n">{{ unit_title }}</th><th>Último registro {{ d.cur_name }}</th><th>{{ d.ref_names[0] }} a esa altura</th><th>Diferencia</th></tr>
+{% for u in d.units if u.same %}<tr><td class="n"><span class="sw" style="background:{{ u.color }}"></span> {{ u.name }}</td><td><b>{{ u.same.cur }}</b> ({{ u.same.day }})</td><td>{{ u.same.ref }}</td><td class="{{ u.same.cls }}">{{ u.same.diff }}</td></tr>{% endfor %}
+</table></div>
+
+<h2>4 · Curva fenológica según °C·día</h2>
+<p class="lead">Estado BBCH (vertical) según calor acumulado (horizontal): en color {{ d.cur_name }}, punteado {{ d.ref_names|join(', ') }}. Si las curvas se superponen, el calor explica el avance.</p>
+<div class="sms">{% for u in d.units if u.svg %}<div class="card">{{ u.svg|safe }}</div>{% endfor %}</div>
+
+{% if pairs %}
+<h2>5 · El mismo estado, un año y otro</h2>
+<div class="pairs">{% for p in pairs %}<div><h3 style="font-size:15px;margin:4px 0 6px">{{ p.name }}</h3><div class="pair-row">
+{% for it in p["items"] %}<div class="card pair"><div class="h">BBCH {{ it.code }} · {{ it.label }}</div><div class="two">
+<figure>{% if it.ref %}<img src="{{ it.ref.src }}" alt=""><figcaption>{{ d.ref_names[0] }} · {{ it.ref.day }} · BBCH {{ it.ref.code }}</figcaption>{% else %}<div class="nophoto">sin foto</div>{% endif %}</figure>
+<figure>{% if it.cur %}<img src="{{ it.cur.src }}" alt=""><figcaption>{{ d.cur_name }} · {{ it.cur.day }} · BBCH {{ it.cur.code }}</figcaption>{% else %}<div class="nophoto">sin foto</div>{% endif %}</figure>
+</div></div>{% endfor %}</div></div>{% endfor %}</div>
+{% endif %}
+{% if res.ref_days %}<p class="small muted">Temperaturas de Open-Meteo: estimación de la zona (modelo y satélite), no la estación del campo.</p>{% endif %}
+{% endblock %}

@@ -182,3 +182,36 @@ def test_own_data_replaces_old_open_meteo_rows(db):
     r = db.query_one("SELECT * FROM weather_days WHERE day='2026-09-01'")
     assert (r["tmean"], r["tmin"], r["tmax"], r["source"]) == (12, None, None, "manual")
     assert len(gd.own_days(db)) == 1
+
+
+def test_season_compare(db):
+    import season_compare as sc
+    v = db.add_variety("Zeta A")
+    vid = v["id"] if isinstance(v, dict) else v
+
+    def obs(day, code):
+        w = db.week_for_date(day)
+        o = db.get_or_create_observation(vid, w["id"])
+        db.update_observation(o["id"], bbch_code=code, observed_at=day.isoformat())
+    cur = _temps(2026, 40, base=11, step=0)          # 6 °C·día por día
+    prev = _temps(2025, 200, base=10, step=0)        # 5 °C·día por día
+    b26, b25 = gd.biofix(2026), gd.biofix(2025)
+    obs(b25 + dt.timedelta(days=10), 15)             # 50
+    obs(b25 + dt.timedelta(days=40), 61)             # 200 → 51 el día 33
+    obs(b26 + dt.timedelta(days=10), 15)             # 60
+    obs(b26 + dt.timedelta(days=30), 55)             # 180 → 51 a 168 °C·día (día 28)
+    assert sc.available_seasons(db, 2026) == [2025]
+    res = sc.compare(db, 2026, {2026: cur, 2025: prev}, [2025])
+    th = res["thermal"]
+    assert th["now"] == pytest.approx(240)                       # 40 días × 6
+    assert th["refs"][2025]["at"] == pytest.approx(200)          # mismo día de la temporada: 40 × 5
+    assert th["refs"][2025]["ahead"] == 8                        # 240 se juntaron el día 48 (vs 40)
+    u = next(x for x in res["units"] if x["name"] == "Zeta A")
+    r51 = u["rows"][0]
+    assert r51["code"] == 51 and r51["d_days"] == -5            # llegó 5 días antes (día 28 vs 33)
+    assert r51["verdict"] in ("clima", "igual", "manejo")
+    d = sc.display(res)
+    assert d["cur_name"] == "2026-27" and d["base_name"] == "2025-26"
+    assert "adelantados" in d["ahead_txt"]
+    assert sc.verdict(-8, -5) == "clima" and sc.verdict(-1, 60) == "manejo" and sc.verdict(-1, 5) == "igual"
+    assert "<svg" in sc.svg_thermal(res) and "<svg" in sc.svg_unit(res, u, "#000")

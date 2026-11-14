@@ -123,6 +123,31 @@
                 PrimaryButton:
                     text: "Generar PDF"
                     on_release: root.gdd_generate()
+            PaperCard:
+                SectionLabel:
+                    text: "7 · COMPARACIÓN ENTRE TEMPORADAS"
+                Muted:
+                    text: "¿Vamos adelantados o atrasados y por qué? Calor acumulado y días de adelanto, cada hito (fecha y °C·día: ¿clima o variedad/manejo?), estado a la misma fecha, curvas superpuestas y fotos del mismo estado."
+                Muted:
+                    id: cmp_info
+                    text: ""
+                    theme_text_color: "Custom"
+                    text_color: c(theme.LEAF_DARK)
+                MDBoxLayout:
+                    adaptive_height: True
+                    spacing: dp(8)
+                    GhostButton:
+                        id: cmp_refs_btn
+                        icon: "calendar-range"
+                        text: "Comparar contra"
+                        on_release: root.cmp_pick_refs()
+                    GhostButton:
+                        icon: "eye-outline"
+                        text: "Vista previa"
+                        on_release: root.cmp_preview()
+                PrimaryButton:
+                    text: "Generar PDF"
+                    on_release: root.cmp_generate()
             SectionLabel:
                 text: "INFORMES GENERADOS"
             MDBoxLayout:

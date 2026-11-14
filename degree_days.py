@@ -408,11 +408,14 @@ class OmCache:
     def _same_place(self, lat, lon) -> bool:
         return self.lat is not None and abs(self.lat - lat) < .01 and abs(self.lon - lon) < .01
 
-    def stale(self, lat: float, lon: float, now: _dt.datetime | None = None) -> bool:
+    def stale(self, lat: float, lon: float, now: _dt.datetime | None = None,
+              first: _dt.date | None = None) -> bool:
         """¿Hay que pedir datos? (otro lugar, o faltan días hasta ayer o hay días del
         pronóstico por reemplazar, y la última consulta fue hace más de OM_MAX_AGE_H horas)."""
         now = now or _dt.datetime.now()
         if not self._same_place(lat, lon) or not self.days:
+            return True
+        if first is not None and first.isoformat() < min(self.days):
             return True
         yesterday = (now.date() - _dt.timedelta(days=1)).isoformat()
         behind = max(self.days) < yesterday or any(d.get("fc") for d in self.days.values())
@@ -440,6 +443,11 @@ class OmCache:
         else:
             start = first
         n = 0
+        if self.days and first.isoformat() < min(self.days):      # piden años más atrás
+            early_end = _dt.date.fromisoformat(min(self.days)) - _dt.timedelta(days=1)
+            for d in fetch(lat, lon, first, early_end):
+                self.days[d["day"]] = d
+                n += 1
         if start <= end:
             for d in fetch(lat, lon, start, end):
                 old = self.days.get(d["day"])
@@ -596,7 +604,7 @@ def _obs_date(o: dict) -> _dt.date:
 def observations(db, season: int) -> list[dict]:
     """Estados BBCH de la temporada con su fecha (fecha del registro o inicio de la semana)."""
     return db.query(
-        "SELECT o.variety_id, o.bbch_code, o.observed_at, w.start_date FROM observations o "
+        "SELECT o.id AS obs_id, o.variety_id, o.bbch_code, o.observed_at, w.start_date FROM observations o "
         "JOIN sampling_weeks w ON w.id = o.week_id "
         "WHERE w.season = ? AND o.bbch_code IS NOT NULL AND COALESCE(w.skipped, 0) = 0 "
         "ORDER BY w.start_date", (season,))
@@ -606,7 +614,7 @@ def unit_points(obs: list[dict], series: Series, groups: dict[int, str]) -> dict
     """{unidad: [{day, value, code, gdd}]} con la fecha y los °C·día de cada estado. groups:
     variety_id -> nombre de la unidad (en ensayos T×R, el tratamiento: promedio de las
     repeticiones de cada fecha)."""
-    per: dict[str, dict[_dt.date, list[tuple[float, int]]]] = {}
+    per: dict[str, dict[_dt.date, list[tuple]]] = {}
     for o in obs:
         name = groups.get(o["variety_id"])
         if name is None:
@@ -614,7 +622,8 @@ def unit_points(obs: list[dict], series: Series, groups: dict[int, str]) -> dict
         d = _obs_date(o)
         if d < series.start:                    # antes del inicio del conteo (otoño-invierno)
             continue
-        per.setdefault(name, {}).setdefault(d, []).append((ph.bbch_value(o["bbch_code"]), o["bbch_code"]))
+        per.setdefault(name, {}).setdefault(d, []).append(
+            (ph.bbch_value(o["bbch_code"]), o["bbch_code"], o.get("obs_id")))
     out = {}
     for name, by_day in per.items():
         pts, best = [], -1.0
@@ -623,7 +632,8 @@ def unit_points(obs: list[dict], series: Series, groups: dict[int, str]) -> dict
             v = sum(x[0] for x in vals) / len(vals)
             code = max(vals)[1]
             best = max(best, v)                      # un estado no retrocede
-            pts.append({"day": d, "value": best, "code": code, "gdd": series.acc_at(d)})
+            pts.append({"day": d, "value": best, "code": code, "gdd": series.acc_at(d),
+                        "obs": [x[2] for x in vals if x[2] is not None]})
         out[name] = pts
     return out
 

@@ -43,6 +43,7 @@ class ReportGroup(GlassButton):
 REPORT_GROUPS = [("semanal", "Reportes semanales"), ("periodo", "Evolución mensual / rango"),
                  ("variedad", "Fichas por variedad"), ("matriz", "Matriz comparativa"),
                  ("tratamientos", "Comparación de tratamientos"), ("diasgrado", "Fenología y días grado"),
+                 ("comparacion", "Comparación entre temporadas"),
                  ("", "Mediciones y otros")]
 
 
@@ -98,6 +99,7 @@ class ReportsTab(MDScreen):
                                        else "3 · FICHA COMPLETA POR VARIEDAD")
         self._labels()
         self._gdd_label()
+        self._cmp_label()
         self.list_recent()
 
     # ------------------------------------------------ 6. fenología y días grado
@@ -126,6 +128,40 @@ class ReportsTab(MDScreen):
         except Exception as exc:  # noqa: BLE001
             ids.gdd_info.text = f"Temperaturas de {p['name']}"
             print("días grado:", exc)
+
+    def _cmp_label(self):
+        from ui import degree_days_ui as gdu
+        import season_compare as sc
+        try:
+            mode, refs, avail = gdu.cmp_refs()
+        except Exception as exc:  # noqa: BLE001
+            print("comparación:", exc)
+            return
+        ids = self.ids
+        cur = sc.season_label(app().season)
+        if not refs:
+            ids.cmp_info.text = (f"Aún no hay estados BBCH de temporadas anteriores en este ensayo: "
+                                 f"regístrelos o impórtelos para comparar con {cur}.")
+            ids.cmp_refs_btn.text = "Comparar contra"
+            return
+        base = (sc.season_label(refs[0]) if len(refs) == 1 else
+                f"promedio de {len(refs)} temporadas")
+        ids.cmp_info.text = f"{cur} vs {base}" + (f" · disponibles: {', '.join(sc.season_label(x) for x in avail)}"
+                                                   if len(avail) > 1 else "")
+        ids.cmp_refs_btn.text = "Contra: " + (sc.season_label(refs[0]) if len(refs) == 1 else "promedio")
+
+    def cmp_pick_refs(self):
+        from ui import degree_days_ui as gdu
+        gdu.pick_cmp_refs(on_done=self._cmp_label)
+
+    def cmp_preview(self):
+        from ui import degree_days_ui as gdu
+        app().toast("Preparando vista previa…")
+        gdu.generate_compare("preview")
+
+    def cmp_generate(self):
+        from ui import degree_days_ui as gdu
+        gdu.generate_compare("pdf", on_done=lambda _res: self.list_recent())
 
     def gdd_weather(self):
         from ui import degree_days_ui as gdu

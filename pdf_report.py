@@ -1256,8 +1256,172 @@ def degree_days(ctx: dict, names: dict, num=None) -> Report:
     return r
 
 
+def _cmp_thermal_chart(r: Report, ctx: dict, h: float = 180):
+    res = ctx["res"]
+    cur = res["series"][res["season"]]
+    refs = [res["series"][x] for x in res["refs"] if res["series"][x].days]
+    n = max(122, len(cur.days) + 30)
+    shown = {s.season: s.days[:n] for s in refs}
+    top = max([cur.total] + [d[-1]["acc"] for d in shown.values() if d])
+    gmax = max(100, (int(top / 200) + 1) * 200)
+    r.ensure(h + 26)
+    x0, y0, w, hh = M + 26, r.y + 6, CW - 34, h - 24
+
+    def X(i):
+        return x0 + w * i / (n - 1)
+
+    def Y(g):
+        return y0 + hh - hh * g / gmax
+    for g in range(0, gmax + 1, 200 if gmax > 600 else 100):
+        r.line(x0, Y(g), x0 + w, Y(g), "#ece8dc", .4)
+        r.text(x0 - 4, Y(g) + 2.5, str(g), 6.5, False, MUTED, "right")
+    import datetime as _dt
+    for i in range(n):
+        d = cur.start + _dt.timedelta(days=i)
+        if d.day == 1:
+            r.text(X(i), y0 + hh + 10, f"1/{d.month}", 6.5, False, MUTED, "center")
+    for s in refs:
+        pts = [(X(i), Y(x["acc"])) for i, x in enumerate(shown[s.season])]
+        for a, b in zip(pts[::2], pts[1::2]):
+            r.line(a[0], a[1], b[0], b[1], MUTED, 1)
+    r.polyline([(X(i), Y(x["acc"])) for i, x in enumerate(cur.days)], "#B0124B", 1.9)
+    r.circle(X(len(cur.days) - 1), Y(cur.total), 2.6, fill="#B0124B")
+    r.y += h
+    d = ctx["d"]
+    _gdd_legend(r, [("#B0124B", d["cur_name"])] + [(MUTED, f"{n_} (punteada)") for n_ in d["ref_names"]])
+
+
+def _cmp_unit_charts(r: Report, ctx: dict, cols: int = 3, h: float = 120):
+    res, d = ctx["res"], ctx["d"]
+    gap = 8
+    bw = (CW - gap * (cols - 1)) / cols
+    units = [(u, du) for u, du in zip(res["units"], d["units"])
+             if any(p["gdd"] is not None for ps in u["points"].values() for p in ps)]
+    for k in range(0, len(units), cols):
+        r.ensure(h + 8)
+        for j, (u, du) in enumerate(units[k:k + cols]):
+            x = M + j * (bw + gap)
+            curg = [p["gdd"] for p in u["points"].get(res["season"], []) if p["gdd"] is not None]
+            allg = [p["gdd"] for ps in u["points"].values() for p in ps if p["gdd"] is not None]
+            top = max(curg) * 1.35 + 60 if curg else max(allg)
+            gmax = max(200, (int(min(top, max(allg)) / 200) + 1) * 200)
+            x0, y0, w, hh = x + 18, r.y + 14, bw - 24, h - 30
+
+            def X(g, x0=x0, w=w, gmax=gmax):
+                return x0 + w * g / gmax
+
+            def Y(v, y0=y0, hh=hh):
+                return y0 + hh - hh * min(v, 90) / 90
+            r.rect(x, r.y, bw, h, stroke=RULE, lw=.5, radius=4)
+            r.text(x + 6, r.y + 10, r.fit(du["name"], bw - 12, 7.5, True), 7.5, True, du["color"])
+            for b in (0, 30, 60, 90):
+                r.line(x0, Y(b), x0 + w, Y(b), "#ece8dc", .3)
+                r.text(x0 - 3, Y(b) + 2, str(b), 5.5, False, MUTED, "right")
+            for g in range(0, gmax + 1, 200 if gmax <= 1000 else 400):
+                r.text(X(g), y0 + hh + 8, str(g), 5.5, False, MUTED, "center")
+            for ref in res["refs"]:
+                ps = [(X(p["gdd"]), Y(p["value"])) for p in u["points"].get(ref, [])
+                      if p["gdd"] is not None and p["gdd"] <= gmax]
+                for a, b in zip(ps, ps[1:]):
+                    r.line(a[0], a[1], b[0], b[1], MUTED, .9, dash=(3, 2))
+            ps = [(X(p["gdd"]), Y(p["value"])) for p in u["points"].get(res["season"], []) if p["gdd"] is not None]
+            if len(ps) > 1:
+                r.polyline(ps, du["color"], 1.4)
+            for p in ps:
+                r.circle(*p, 1.5, fill=du["color"])
+        r.y += h + 8
+
+
+def season_compare(ctx: dict, names: dict, num=None) -> Report:
+    d = ctx["d"]
+    r = _doc(ctx, [], names, num)
+    if d["kpis"]:
+        n = len(d["kpis"])
+        gap = 6
+        bw = (CW - gap * (n - 1)) / n
+        r.ensure(48)
+        for i, (v, u, label) in enumerate(d["kpis"]):
+            x = M + i * (bw + gap)
+            r.rect(x, r.y, bw, 42, fill="#f6f3ec", radius=5)
+            r.text(x + 7, r.y + 16, r.fit(v, bw - 30, 12, True), 12, True, BERRY)
+            if u:
+                r.text(x + 9 + r.width(r.fit(v, bw - 30, 12, True), 12, True), r.y + 16, u, 6.5, False, MUTED)
+            for k, line in enumerate(r.wrap(label, bw - 12, 6.8)[:2]):
+                r.text(x + 7, r.y + 27 + k * 8, line, 6.8, False, INK2)
+        r.y += 50
+    if d["ahead_txt"]:
+        r.para(d["ahead_txt"], 9.5, BERRY, True)
+    r.h2(f"1 · Calor acumulado: {d['cur_name']} vs {d['base_name']}",
+         "°C·día acumulados desde el 1 de septiembre de cada temporada. El punto es hoy.")
+    r.keep(lambda: _cmp_thermal_chart(r, ctx))
+    if d["months"]:
+        r.table(["Mes", f"T media {d['cur_name']}", f"T media {d['base_name']}", f"°C·día {d['cur_name']}",
+                 f"°C·día {d['base_name']}", "Diferencia"],
+                [[{"text": m["name"], "bold": True}, m["t"] + " °C", m["t_ref"] + " °C", {"text": m["g"], "bold": True},
+                  m["g_ref"], {"text": m["d"], "bold": True, "color": BERRY if m["up"] else "#2E6A8A"}]
+                 for m in d["months"]], [1.6, 1, 1, 1, 1, 1], size=7.6,
+                aligns=["left"] + ["center"] * 5)
+    r.h2("2 · Cada hito: fecha y °C·día",
+         f"¿Por qué? Si la fecha cambió ({ctx['days_t']} días o más) pero el calor necesario fue casi el mismo "
+         f"(menos de {ctx['gdd_t']} °C·día de diferencia), lo explica el CLIMA. Si el calor necesario también "
+         "cambió, es algo propio de la VARIEDAD o del MANEJO (poda, riego, carga, sanidad…).")
+    tag = {"clima": ("#e3eef7", "#2E6A8A"), "manejo": ("#f7e1e8", BERRY), "igual": ("#eef0e6", OLIVE),
+           "pred": ("#fbf1dc", "#8a5a00")}
+    rows = []
+    for u in d["units"]:
+        for k, row in enumerate(u["rows"]):
+            fill, color = tag.get(row["verdict"], (None, MUTED))
+            rows.append([{"text": u["name"] if k == 0 else "", "bold": True},
+                         f"BBCH {row['code']} · {row['label']}", row["ref_day"], row["cur_day"], row["d_days"],
+                         row["ref_g"], {"text": row["cur_g"], "bold": True}, row["d_gdd"],
+                         {"text": row["verdict_txt"], "fill": fill, "color": color, "bold": True}])
+    r.table([ctx["unit_title"], "Hito", f"Fecha {d['base_name']}", f"Fecha {d['cur_name']}", "Δ fecha",
+             f"°C·día {d['base_name']}", f"°C·día {d['cur_name']}", "Δ °C·día", "¿Por qué?"], rows,
+            [1.3, 1.9, .9, .9, .9, .9, .9, .8, 1.2], size=6.8, aligns=["left", "left"] + ["center"] * 7)
+    same = [u for u in d["units"] if u["same"]]
+    if same:
+        r.h2("3 · A la misma fecha")
+        r.table([ctx["unit_title"], f"Último registro {d['cur_name']}", f"{d['ref_names'][0]} a esa altura", "Diferencia"],
+                [[{"text": u["name"], "bold": True}, f"{u['same']['cur']} ({u['same']['day']})", u["same"]["ref"],
+                  {"text": u["same"]["diff"], "bold": True,
+                   "color": BERRY if u["same"]["cls"] == "up" else ("#2E6A8A" if u["same"]["cls"] == "dn" else INK)}]
+                 for u in same], [1.4, 1.6, 1.6, 1.2], size=7.6)
+    r.h2("4 · Curva fenológica según °C·día",
+         f"Estado BBCH según calor acumulado: en color {d['cur_name']}, punteado {', '.join(d['ref_names'])}. "
+         "Si las curvas se superponen, el calor explica el avance.")
+    _cmp_unit_charts(r, ctx)
+    if ctx.get("pairs"):
+        r.h2("5 · El mismo estado, un año y otro")
+        cols = 3
+        gap = 8
+        bw = (CW - gap * (cols - 1)) / cols
+        ph_w = (bw - 6) / 2
+        ph_h = ph_w * .75
+        for p in ctx["pairs"]:
+            items = p["items"]
+            for k in range(0, len(items), cols):
+                block_h = 14 + ph_h + 18 + (12 if k == 0 else 0)
+                r.ensure(block_h)
+                if k == 0:
+                    r.text(M, r.y + 9, p["name"], 9, True, INK)
+                    r.y += 12
+                for j, it in enumerate(items[k:k + cols]):
+                    x = M + j * (bw + gap)
+                    r.text(x, r.y + 8, r.fit(f"BBCH {it['code']} · {it['label']}", bw, 7, True), 7, True, INK2)
+                    for q, (key, nm) in enumerate((("ref", d["ref_names"][0]), ("cur", d["cur_name"]))):
+                        im = it[key]
+                        r.photo(im["src"] if im else None, x + q * (ph_w + 6), r.y + 12, ph_w, ph_h,
+                                caption=f"{nm} · {im['day']}" if im else nm)
+                r.y += 14 + ph_h + 16
+    if ctx["res"].get("ref_days"):
+        r.para("Temperaturas de Open-Meteo: estimación de la zona (modelo y satélite), no la estación del campo.",
+               7.6, MUTED)
+    return r
+
+
 RENDERERS = {"weekly.html": weekly, "period.html": period, "variety.html": variety, "matrix.html": matrix,
-             "treatments.html": treatments, "degree_days.html": degree_days}
+             "treatments.html": treatments, "degree_days.html": degree_days,
+             "season_compare.html": season_compare}
 
 
 def render(template: str, ctx: dict, names: dict, num=None) -> bytes:
