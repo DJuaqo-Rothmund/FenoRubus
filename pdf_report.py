@@ -1182,7 +1182,8 @@ def _gdd_stage_chart(r: Report, ctx: dict, h: float = 210):
 def degree_days(ctx: dict, names: dict, num=None) -> Report:
     d = ctx["d"]
     r = _doc(ctx, [f"T base {ctx['tbase_txt']} °C", f"desde el {ctx['start_txt']}",
-                   f"temperaturas: {ctx['predio']}"], names, num)
+                   ("Open-Meteo (estimación)" if ctx["res"]["ref_days"] else "datos propios") + f" · {ctx['predio']}"],
+              names, num)
     if d["kpis"]:
         n = len(d["kpis"])
         gap = 6

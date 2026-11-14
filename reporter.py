@@ -1100,7 +1100,7 @@ class ReportGenerator:
             unit_others={"tratamiento": "los otros tratamientos", "sector": "los otros sectores"
                          }.get(unit_word, "las otras variedades"),
             subtitle=f"{ph.season_title(season)} · temperaturas "
-                     f"{'de referencia (Open-Meteo) de la zona de' if res['ref_days'] else 'de'} "
+                     f"{'Open-Meteo (estimación) de la zona de' if res['ref_days'] else 'propias de'} "
                      f"{predio or 'el predio'} · "
                      f"T base {gd.fmt(res['tbase'])} °C desde el 1 de septiembre")
 

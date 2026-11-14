@@ -340,9 +340,11 @@ class PreviewTab(MDScreen):
         if self.kind == "gdd":
             from kivy.factory import Factory
             from ui import degree_days_ui as gdu
+            import degree_days as gd
             p = gdu.predio_of()
+            src = gd.MODES[gdu.mode_of(p)][0] if p else ""
             box.add_widget(MDLabel(text=("Estados BBCH según el calor acumulado (T base 5 °C desde el 1 de "
-                                         f"septiembre) con las temperaturas de {p['name']}." if p else
+                                         f"septiembre) · temperaturas de {p['name']}: {src}." if p else
                                          "Cree un predio (perfil Predio) para cargar sus temperaturas."),
                                    font_style="Caption", adaptive_height=True,
                                    theme_text_color="Custom", text_color=c(theme.MUTED)))
@@ -438,7 +440,7 @@ class PreviewTab(MDScreen):
         box = ids.visual
         fast_clear(box)
         try:
-            sm = gdu.summary()
+            sm = gdu.summary(on_update=lambda: self.kind == "gdd" and self.refresh())
         except Exception as exc:  # noqa: BLE001
             sm = None
             ids.headline.text = f"No se pudo calcular: {exc}"
@@ -457,7 +459,8 @@ class PreviewTab(MDScreen):
         n = len(d["rows"])
         ids.headline.text = (f"{n} {'unidad' if n == 1 else 'unidades'} con estados BBCH · "
                              f"T base {gd.fmt(s.tbase)} °C desde el 1 de septiembre"
-                             + (" · temperaturas de REFERENCIA (Open-Meteo)" if res.get("ref_days") else ""))
+                             + (" · Open-Meteo (estimación de la zona)" if res.get("ref_days") else
+                                " · datos propios"))
         from kivy.uix.gridlayout import GridLayout
         from kivy.factory import Factory
         kp = GridLayout(cols=2, spacing=dp(6), size_hint_y=None)

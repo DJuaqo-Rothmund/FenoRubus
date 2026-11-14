@@ -115,10 +115,14 @@ class ReportsTab(MDScreen):
             return
         ids.gdd_predio_btn.text = f"Predio: {p['name']}"
         try:
-            s = gd.Series(gd.list_days(gdu.weather_db(ws), gd.biofix(a.season), gd.season_end(a.season)), a.season)
-            ids.gdd_info.text = (f"Temperaturas de {p['name']}: {len(s.days)} días · "
+            mode = gdu.mode_of(p)
+            src = gd.MODES[mode][0]
+            s = gd.Series(gdu.season_rows(p, a.season)[0], a.season)
+            ids.gdd_info.text = (f"Fuente: {src} · {len(s.days)} días · "
                                  f"{gd.fmt(s.total, 0)} °C·día al {gd.short_date(s.last)}" if s.days else
-                                 f"Temperaturas de {p['name']}: aún no hay datos desde el 1 de septiembre.")
+                                 f"Fuente: {src} · aún sin datos desde el 1 de septiembre.")
+            if mode == gd.MODE_OM:
+                gdu.om_refresh(p, on_done=lambda n: n and self._gdd_label())
         except Exception as exc:  # noqa: BLE001
             ids.gdd_info.text = f"Temperaturas de {p['name']}"
             print("días grado:", exc)

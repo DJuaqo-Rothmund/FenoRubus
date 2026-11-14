@@ -138,3 +138,47 @@ def test_open_meteo_csv_and_fetch():
     assert len(calls) == 2 and "past_days" in calls[1]
     lat, lon = gd.map_center({"w": 100, "h": 50, "geo": {"x0": -100, "y0": -40, "kx": 1, "ky": 1}})
     assert (lat, lon) == (-15, -50)
+
+
+def test_weather_mode_and_open_meteo_cache(db, tmp_path):
+    assert gd.get_mode(db) == gd.MODE_OM                     # sin datos propios
+    gd.save_days(db, [{"day": "2026-09-01", "tmean": 10}], source=gd.OPEN_METEO_SOURCE)
+    assert gd.get_mode(db) == gd.MODE_OM and gd.own_days(db) == []
+    gd.save_days(db, [{"day": "2026-09-02", "tmean": 11}])
+    assert gd.get_mode(db) == gd.MODE_OWN
+    gd.set_mode(db, gd.MODE_OM)
+    assert gd.get_mode(db) == gd.MODE_OM
+
+    asked = []
+
+    def fetch(lat, lon, start, end):
+        asked.append((start, end))
+        out, d = [], start
+        while d <= end:
+            fc = (end - d).days < 2                     # los 2 últimos «del pronóstico»
+            out.append(dict({"day": d.isoformat(), "tmean": 10.0 + (0.5 if not fc else 0), "source": "x"},
+                            **({"fc": 1} if fc else {})))
+            d += dt.timedelta(days=1)
+        return out
+    path = str(tmp_path / "om.json")
+    c = gd.OmCache(path)
+    today = dt.date(2026, 9, 11)
+    assert c.stale(-39.5, -72.4)
+    assert c.update(-39.5, -72.4, dt.date(2026, 9, 1), fetch=fetch, today=today) == 10
+    assert asked[-1] == (dt.date(2026, 9, 1), dt.date(2026, 9, 10))
+    c2 = gd.OmCache(path)                                   # quedó guardada
+    assert len(c2.rows(dt.date(2026, 9, 5))) == 6
+    # Al día siguiente: se vuelven a pedir los días del pronóstico (9 y 10) y el 11.
+    c2.update(-39.5, -72.4, dt.date(2026, 9, 1), fetch=fetch, today=today + dt.timedelta(days=1))
+    assert asked[-1] == (dt.date(2026, 9, 9), dt.date(2026, 9, 11))
+    assert c2.days["2026-09-09"]["tmean"] == 10.5 and "fc" not in c2.days["2026-09-09"]
+    assert not c2.stale(-39.5, -72.4, now=dt.datetime(2026, 9, 12, 1))        # recién consultado
+    assert c2.stale(-39.6, -72.4)                                             # otro lugar
+
+
+def test_own_data_replaces_old_open_meteo_rows(db):
+    gd.save_days(db, [{"day": "2026-09-01", "tmean": 10, "tmin": 1, "tmax": 19}], source=gd.OPEN_METEO_SOURCE)
+    assert gd.save_days(db, [{"day": "2026-09-01", "tmean": 12}], overwrite=False) == 1
+    r = db.query_one("SELECT * FROM weather_days WHERE day='2026-09-01'")
+    assert (r["tmean"], r["tmin"], r["tmax"], r["source"]) == (12, None, None, "manual")
+    assert len(gd.own_days(db)) == 1

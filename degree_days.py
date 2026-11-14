@@ -305,7 +305,7 @@ def _om_days(payload: dict) -> list[dict]:
             x = vals[i] if i < len(vals) else None
             return round(float(x), 2) if x is not None else None
         rec = {"day": str(day)[:10], "tmean": v("temperature_2m_mean"), "tmin": v("temperature_2m_min"),
-               "tmax": v("temperature_2m_max"), "rain": v("precipitation_sum")}
+               "tmax": v("temperature_2m_max"), "rain": v("precipitation_sum"), "source": OPEN_METEO_SOURCE}
         if rec["tmean"] is None and rec["tmin"] is not None and rec["tmax"] is not None:
             rec["tmean"] = round((rec["tmin"] + rec["tmax"]) / 2, 2)
         if rec["tmean"] is not None:
@@ -342,8 +342,113 @@ def fetch_open_meteo(lat: float, lon: float, start: _dt.date, end: _dt.date, get
             recent = []
         for d in recent:
             if d["day"] not in days and start.isoformat() <= d["day"] <= end.isoformat():
-                days[d["day"]] = d
+                days[d["day"]] = dict(d, fc=1)          # del pronóstico: se reemplaza después
     return [days[k] for k in sorted(days)]
+
+
+# ====================================================================== fuente de temperaturas
+# Cada predio elige de dónde salen sus temperaturas (ajuste del predio, viaja con la sync):
+#   «openmeteo»: estimación de la zona, se descarga y actualiza sola (caché en el teléfono,
+#                no se sincroniza: cada equipo la baja);
+#   «propios»:   los datos de la estación del campo que se cargan a mano (tabla weather_days).
+MODE_KEY = "trial_weather_mode"
+MODE_OM, MODE_OWN = "openmeteo", "propios"
+MODES = {MODE_OM: ("Open-Meteo", "estimación de la zona (modelo y satélite); se actualiza sola"),
+         MODE_OWN: ("Datos propios", "estación del campo; los carga usted (más precisos)")}
+OM_MAX_AGE_H = 6
+
+
+def own_days(db, start: _dt.date | None = None, end: _dt.date | None = None) -> list[dict]:
+    """Datos propios del predio (sin los de Open-Meteo que guardaba la versión anterior)."""
+    return [r for r in list_days(db, start, end) if r.get("source") != OPEN_METEO_SOURCE]
+
+
+def get_mode(db) -> str:
+    """Fuente elegida; sin elegir: datos propios si ya hay, si no Open-Meteo."""
+    v = db.get_setting(MODE_KEY, "")
+    if v in MODES:
+        return v
+    return MODE_OWN if own_days(db) else MODE_OM
+
+
+def set_mode(db, mode: str) -> None:
+    if mode not in MODES:
+        raise ValueError(mode)
+    db.set_setting(MODE_KEY, mode)
+
+
+class OmCache:
+    """Días de Open-Meteo de un predio guardados en el teléfono (JSON)."""
+
+    def __init__(self, path: str):
+        self.path = path
+        try:
+            import json
+            with open(path, encoding="utf-8") as f:
+                data = json.load(f)
+        except (OSError, ValueError):
+            data = {}
+        self.lat, self.lon = data.get("lat"), data.get("lon")
+        self.fetched = data.get("fetched") or ""
+        self.days = {d["day"]: d for d in data.get("days") or []}
+
+    def save(self) -> None:
+        import json
+        import os
+        tmp = self.path + ".part"
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump({"lat": self.lat, "lon": self.lon, "fetched": self.fetched,
+                       "days": [self.days[k] for k in sorted(self.days)]}, f, ensure_ascii=False)
+        os.replace(tmp, self.path)
+
+    def rows(self, start: _dt.date | None = None, end: _dt.date | None = None) -> list[dict]:
+        lo, hi = (start.isoformat() if start else ""), (end.isoformat() if end else "9999")
+        return [self.days[k] for k in sorted(self.days) if lo <= k <= hi]
+
+    def _same_place(self, lat, lon) -> bool:
+        return self.lat is not None and abs(self.lat - lat) < .01 and abs(self.lon - lon) < .01
+
+    def stale(self, lat: float, lon: float, now: _dt.datetime | None = None) -> bool:
+        """¿Hay que pedir datos? (otro lugar, o faltan días hasta ayer o hay días del
+        pronóstico por reemplazar, y la última consulta fue hace más de OM_MAX_AGE_H horas)."""
+        now = now or _dt.datetime.now()
+        if not self._same_place(lat, lon) or not self.days:
+            return True
+        yesterday = (now.date() - _dt.timedelta(days=1)).isoformat()
+        behind = max(self.days) < yesterday or any(d.get("fc") for d in self.days.values())
+        try:
+            age = (now - _dt.datetime.fromisoformat(self.fetched)).total_seconds() / 3600
+        except ValueError:
+            age = 1e9
+        return behind and age >= OM_MAX_AGE_H
+
+    def update(self, lat: float, lon: float, first: _dt.date, fetch=None,
+               today: _dt.date | None = None) -> int:
+        """Baja lo que falta (desde «first» si es otro lugar o está vacía; si no, desde el
+        primer día del pronóstico o el día siguiente al último). Devuelve los días nuevos o
+        cambiados."""
+        fetch = fetch or fetch_open_meteo
+        today = today or _dt.date.today()
+        end = today - _dt.timedelta(days=1)
+        if not self._same_place(lat, lon):
+            self.days, self.lat, self.lon = {}, lat, lon
+        if self.days:
+            fc = [k for k, d in self.days.items() if d.get("fc")]
+            nxt = (_dt.date.fromisoformat(max(self.days)) + _dt.timedelta(days=1)).isoformat()
+            start = _dt.date.fromisoformat(min(fc + [nxt]))
+            start = max(start, first)
+        else:
+            start = first
+        n = 0
+        if start <= end:
+            for d in fetch(lat, lon, start, end):
+                old = self.days.get(d["day"])
+                if old != d:
+                    self.days[d["day"]] = d
+                    n += 1
+        self.fetched = _dt.datetime.now().isoformat(timespec="seconds")
+        self.save()
+        return n
 
 
 # ====================================================================== base de datos
@@ -374,6 +479,12 @@ def save_days(db, days: list[dict], source: str = "manual", overwrite: bool = Tr
                        "VALUES (?, ?, ?, ?, ?, ?, ?)",
                        (d["day"], vals.get("tmean"), vals.get("tmin"), vals.get("tmax"),
                         vals.get("rain"), source, _now()))
+            n += 1
+        elif row.get("source") == OPEN_METEO_SOURCE and source != OPEN_METEO_SOURCE:
+            # Día que la versión anterior guardó de Open-Meteo: el dato propio lo reemplaza entero.
+            db.execute("UPDATE weather_days SET tmean=?, tmin=?, tmax=?, rain=?, source=?, updated_at=? "
+                       "WHERE id=?", (vals.get("tmean"), vals.get("tmin"), vals.get("tmax"),
+                                      vals.get("rain"), source, _now(), row["id"]))
             n += 1
         elif overwrite and any(row.get(k) != v for k, v in vals.items()):
             sets = ", ".join(f"{k}=?" for k in vals)
@@ -765,8 +876,8 @@ def display(res: dict) -> dict:
                 prev_rows.append({"name": u["name"], "color": PALETTE[i % len(PALETTE)], "cells": cells})
     notes = []
     if res.get("ref_days"):
-        notes.append(f"{res['ref_days']} día(s) con temperaturas de REFERENCIA de la zona (Open-Meteo: "
-                     "modelo y satélite), no de la estación del campo.")
+        notes.append(f"Temperaturas de Open-Meteo ({res['ref_days']} días): estimación de la zona "
+                     "(modelo y satélite), no la estación del campo. Con datos propios el cálculo es más preciso.")
     if s.missing:
         notes.append(f"{s.missing} día(s) sin temperatura: se completaron con la recta entre los días vecinos.")
     if res["no_gdd"]:

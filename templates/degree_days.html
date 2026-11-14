@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% block meta %}<span>T base {{ tbase_txt }} °C</span><span>Desde el {{ start_txt }}</span><span>Temperaturas: {{ predio }}</span>{% endblock %}
+{% block meta %}<span>T base {{ tbase_txt }} °C</span><span>Desde el {{ start_txt }}</span><span>Temperaturas: {% if res.ref_days %}Open-Meteo (estimación de la zona){% else %}datos propios{% endif %} · {{ predio }}</span>{% endblock %}
 {% block content %}
 <style>
 .gdd-kpis { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 10px; margin: 6px 0 4px; }
@@ -29,7 +29,7 @@ table.gdd td.na { color: var(--muted); }
   <div class="gdd-kpis">
   {% for v, u, l in d.kpis %}<div class="card stat"><div class="v">{{ v }}<span class="u">{{ u }}</span></div><div class="l">{{ l }}</div></div>{% endfor %}
   </div>
-  {% if not has_weather %}<p class="lead">Aún no hay temperaturas de {{ predio }} desde el {{ start_txt }}. Cárguelas en Informes › Fenología y días grado › Temperaturas.</p>{% endif %}
+  {% if not has_weather %}<p class="lead">Aún no hay temperaturas de {{ predio }} desde el {{ start_txt }}. Elija la fuente en Informes › Fenología y días grado › Temperaturas.</p>{% endif %}
 </section>
 {% if has_weather %}
 <h2>1 · Temperatura media diaria y días grado acumulados</h2>

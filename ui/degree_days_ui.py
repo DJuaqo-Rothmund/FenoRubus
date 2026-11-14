@@ -94,8 +94,119 @@ def _row_text(r: dict, acc: dict) -> tuple[str, str]:
     return title, " · ".join(sub)
 
 
+# ------------------------------------------------------------- fuente: Open-Meteo o propios
+_om_busy: set = set()
+_om_tried: dict = {}          # código -> hora del último intento fallido (no reintentar en bucle)
+
+
+def mode_of(p: dict) -> str:
+    return gd.get_mode(_db_of(p))
+
+
+def _cache(p: dict) -> gd.OmCache:
+    from platform_utils import data_subdir
+    return gd.OmCache(os.path.join(data_subdir("clima"), f"openmeteo_{p['code']}.json"))
+
+
+def rows_for(p: dict, start: _dt.date | None, end: _dt.date | None) -> list[dict]:
+    """Temperaturas del predio según su fuente elegida."""
+    if mode_of(p) == gd.MODE_OM:
+        return _cache(p).rows(start, end)
+    return gd.own_days(_db_of(p), start, end)
+
+
+def season_rows(p: dict, season: int) -> tuple[list[dict], list[dict]]:
+    """(esta temporada, la anterior) desde el 1 de septiembre."""
+    return (rows_for(p, gd.biofix(season), gd.season_end(season)),
+            rows_for(p, gd.biofix(season - 1), gd.season_end(season - 1)))
+
+
+def _om_first() -> _dt.date:
+    return gd.biofix(app().season - 1)          # también la temporada anterior (comparación)
+
+
+def om_update_sync(p: dict, force: bool = False) -> int:
+    """Actualiza la caché de Open-Meteo (en un hilo de trabajo). Lanza si no hay internet."""
+    ll = predio_coords(p, _db_of(p))
+    if ll is None:
+        raise ValueError("el predio no tiene plano ni registros con GPS: no se sabe dónde está")
+    cache = _cache(p)
+    if not force and not cache.stale(*ll):
+        return 0
+    return cache.update(ll[0], ll[1], _om_first())
+
+
+def om_refresh(p: dict, on_done=None, force: bool = False, quiet: bool = True):
+    """Actualiza Open-Meteo en segundo plano; on_done(n_días) en el hilo de Kivy."""
+    import time
+    a = app()
+    code = p["code"]
+    if code in _om_busy or (not force and time.time() - _om_tried.get(code, 0) < 600):
+        return
+    try:
+        ll = predio_coords(p, _db_of(p))
+        if ll is None:
+            if not quiet:
+                a.toast("El predio no tiene plano ni registros con GPS: no sé dónde está.")
+            return
+        if not force and not _cache(p).stale(*ll):
+            return
+    except Exception:  # noqa: BLE001
+        return
+    _om_busy.add(code)
+    if not quiet:
+        a.toast("Actualizando Open-Meteo…")
+
+    def work():
+        n, err = 0, None
+        try:
+            n = om_update_sync(p, force=True)
+            _om_tried.pop(code, None)
+        except Exception as exc:  # noqa: BLE001
+            err = exc
+            _om_tried[code] = time.time()
+        finally:
+            _om_busy.discard(code)
+
+        def done(*_):
+            if err is not None:
+                if not quiet:
+                    a.toast(f"No se pudo actualizar Open-Meteo (¿sin internet?): {err}")
+                return
+            if not quiet:
+                a.toast(f"Open-Meteo al día ({n} día{'s' if n != 1 else ''} nuevo{'s' if n != 1 else ''})")
+            if on_done:
+                on_done(n)
+        Clock.schedule_once(done, 0)
+    a.workers.submit(work)
+
+
+def pick_mode(p: dict, on_done=None):
+    """Elegir la fuente de las temperaturas del predio."""
+    a = app()
+    cur = mode_of(p)
+    db = _db_of(p)
+    own = gd.own_days(db)
+
+    def choose(m):
+        gd.set_mode(db, m)
+        a.toast(f"{p['name']}: temperaturas de {gd.MODES[m][0]}")
+        if m == gd.MODE_OM:
+            om_refresh(p, on_done=lambda _n: on_done and on_done(), force=False, quiet=False)
+        if on_done:
+            on_done()
+    items = []
+    for m, (name, desc) in gd.MODES.items():
+        extra = f" · {len(own)} días cargados" if m == gd.MODE_OWN and own else ""
+        items.append((("En uso · " if m == cur else "") + name, desc + extra, lambda m=m: choose(m),
+                      c(theme.BERRY) if m == cur else None))
+    pick_dialog(f"Fuente de temperaturas · {p['name']}", items,
+                subtitle="Se guardan por separado: puede cambiar cuando quiera sin perder nada.")
+
+
 def open_weather(on_change=None):
-    """Lista de días del predio (los más nuevos arriba): tocar edita; importar o pegar."""
+    """Temperaturas del predio según su fuente: Open-Meteo (solo lectura, se actualiza sola)
+    o datos propios (tocar edita; importar, pegar o agregar)."""
     a = app()
     p = predio_of()
     if p is None:
@@ -103,8 +214,9 @@ def open_weather(on_change=None):
         return
     db = _db_of(p)
     season = a.season
+    mode = mode_of(p)
     start, end = gd.biofix(season), gd.season_end(season)
-    rows = gd.list_days(db, gd.biofix(season - 1), end)
+    rows = rows_for(p, gd.biofix(season - 1), end)
     cur = [r for r in rows if r["day"] >= start.isoformat()]
     series = gd.Series(cur, season)
     acc = {r["day"]: r["acc"] for r in series.days}
@@ -118,30 +230,46 @@ def open_weather(on_change=None):
         confirm("Borrar día", f"¿Borrar las temperaturas del {r['day']}?",
                 [("Eliminar", lambda: (gd.delete_day(db, r["day"]), changed()))])
 
+    def om_info(_r):
+        a.toast("Estimación de Open-Meteo: para corregir días, cambie a «Datos propios».")
+
     items = []
     for r in reversed(rows):
         title, sub = _row_text(r, acc)
-        items.append((title, sub, lambda r=r: edit_day(db, r, changed), None, lambda r=r: delete(r)))
+        if mode == gd.MODE_OM:
+            items.append((title, sub + (" · pronóstico" if r.get("fc") else ""), lambda r=r: om_info(r)))
+        else:
+            items.append((title, sub, lambda r=r: edit_day(db, r, changed), None, lambda r=r: delete(r)))
     prev_n = len(rows) - len(cur)
-    info = (f"{p['name']} · desde el 1/9: {len(cur)} días"
+    name = gd.MODES[mode][0]
+    info = (f"Fuente: {name} · {p['name']}\nDesde el 1/9: {len(cur)} días"
             + (f", {gd.fmt(series.total, 0)} °C·día al {gd.short_date(series.last)}" if series.days else "")
             + (f" · temporada anterior: {prev_n} días" if prev_n else ""))
-    if series.days and series.last < _dt.date.today() - _dt.timedelta(days=1) and season == ph.season_of(_dt.date.today()):
+    if mode == gd.MODE_OM:
+        ll = predio_coords(p, db)
+        info += (f"\nEstimación de la zona ({ll[0]:.3f}, {ll[1]:.3f}); se actualiza sola." if ll else
+                 "\nEl predio no tiene plano ni GPS: no se puede descargar.")
+    elif series.days and series.last < _dt.date.today() - _dt.timedelta(days=1) and season == ph.season_of(_dt.date.today()):
         info += f"\nFaltan días desde el {gd.short_date(series.last + _dt.timedelta(days=1))}."
-    pick_dialog("Temperaturas y lluvia", items, subtitle=info,
-                footer=[("file-upload-outline", "Importar archivo (CSV o Excel)", lambda: import_file(db, changed)),
-                        ("content-paste", "Pegar datos (de Excel o planilla)", lambda: paste(db, changed)),
-                        ("plus", "Agregar o corregir un día", lambda: edit_day(db, None, changed)),
-                        ("satellite-variant", "Datos de la zona (Open-Meteo)",
-                         lambda: download_reference(p, db, changed))],
-                empty="Aún no hay temperaturas. Importe un archivo de la estación, pegue una tabla "
-                      "(fecha y T media; opcional T mín, T máx y lluvia) o agréguelas día a día.")
+    switch = ("swap-horizontal", f"Cambiar fuente (ahora: {name})", lambda: pick_mode(p, on_done=changed))
+    if mode == gd.MODE_OM:
+        footer = [("refresh", "Actualizar ahora", lambda: om_refresh(p, on_done=lambda _n: changed(),
+                                                                    force=True, quiet=False)), switch]
+        empty = ("Aún no se han descargado. Toque «Actualizar ahora» (necesita internet).")
+        om_refresh(p, on_done=lambda n: n and changed())        # si está desactualizada
+    else:
+        footer = [("file-upload-outline", "Importar archivo (CSV o Excel)", lambda: import_file(db, changed)),
+                  ("content-paste", "Pegar datos (de Excel o planilla)", lambda: paste(db, changed)),
+                  ("plus", "Agregar o corregir un día", lambda: edit_day(db, None, changed)), switch]
+        empty = ("Aún no hay datos propios. Importe un archivo de la estación, pegue una tabla "
+                 "(fecha y T media; opcional T mín, T máx y lluvia) o agréguelos día a día.")
+    pick_dialog("Temperaturas y lluvia", items, subtitle=info, footer=footer, empty=empty)
 
 
 def edit_day(db, row: dict | None, on_done):
     a = app()
     form = MDBoxLayout(orientation="vertical", adaptive_height=True, spacing=dp(6), padding=(0, dp(8), 0, 0))
-    last = gd.list_days(db)[-1:] if row is None else []
+    last = gd.own_days(db)[-1:] if row is None else []
     if row:
         d = _dt.date.fromisoformat(row["day"])
     elif last:
@@ -182,7 +310,7 @@ def _review(db, days, warnings, source, on_done):
     if not days:
         a.toast("No se reconocieron días: " + (warnings[0] if warnings else "revise el formato"))
         return
-    have = {r["day"] for r in gd.list_days(db)}
+    have = {r["day"] for r in gd.own_days(db)}
     new = sum(1 for d in days if d["day"] not in have)
     cols = [n for k, n in (("tmean", "T media"), ("tmin", "T mín"), ("tmax", "T máx"), ("rain", "lluvia"))
             if any(d.get(k) is not None for d in days)]
@@ -231,39 +359,6 @@ def predio_coords(p: dict, db) -> tuple[float, float] | None:
     return None
 
 
-def download_reference(p: dict, db, on_done):
-    """Temperaturas de referencia de la zona (Open-Meteo) desde el 1/9 de la temporada
-    anterior hasta ayer, mientras no estén las de la estación del campo."""
-    a = app()
-    ll = predio_coords(p, db)
-    if ll is None:
-        a.toast("El predio no tiene plano ni registros con GPS: no sé dónde está.")
-        return
-    lat, lon = ll
-    season = a.season
-    start = gd.biofix(season - 1)
-    end = min(gd.season_end(season), _dt.date.today() - _dt.timedelta(days=1))
-    a.toast("Descargando temperaturas de referencia…")
-
-    def work():
-        try:
-            days = gd.fetch_open_meteo(lat, lon, start, end)
-            err = None
-        except Exception as exc:  # noqa: BLE001
-            days, err = [], exc
-
-        def done(*_):
-            if err is not None:
-                a.toast(f"No se pudo descargar (¿sin internet?): {err}")
-                return
-            note = (f"Referencia de la zona (Open-Meteo, {lat:.3f}, {lon:.3f}): modelo y satélite, "
-                    "no la estación del campo. Cuando tenga los datos del campo, impórtelos con "
-                    "«Guardar todo» y reemplazan a estos.")
-            _review(db, days, [note], gd.OPEN_METEO_SOURCE, on_done)
-        Clock.schedule_once(done, 0)
-    a.workers.submit(work)
-
-
 def paste(db, on_done):
     form = MDBoxLayout(orientation="vertical", adaptive_height=True, spacing=dp(6), padding=(0, dp(8), 0, 0))
     form.add_widget(MDLabel(text="Copie las columnas desde Excel o la planilla de la estación y péguelas aquí. "
@@ -286,20 +381,30 @@ def generate(package: str = "pdf", on_done=None):
     if p is None:
         a.toast("No hay predio con temperaturas: créelo en el perfil Predio.")
         return
-    wdb = _db_of(p)
     season = a.season
-    weather = gd.list_days(wdb, gd.biofix(season), gd.season_end(season))
-    prev = gd.list_days(wdb, gd.biofix(season - 1), gd.season_end(season - 1))
-    if not weather:
+    om = mode_of(p) == gd.MODE_OM
+    if not om and not season_rows(p, season)[0]:
         confirm("Faltan temperaturas",
-                f"No hay temperaturas de {p['name']} desde el 1 de septiembre. Cárguelas primero.",
-                [("Cargar temperaturas", lambda: open_weather())])
+                f"No hay datos propios de {p['name']} desde el 1 de septiembre. Cárguelos o use Open-Meteo.",
+                [("Temperaturas", lambda: open_weather())])
         return
     r = a.configured_reports()
+
+    def job():
+        if om:
+            try:
+                om_update_sync(p)            # al día antes del informe (si hay internet)
+            except Exception as exc:  # noqa: BLE001
+                print("open-meteo:", exc)
+        weather, prev = season_rows(p, season)
+        if not weather:
+            raise ValueError("Sin temperaturas desde el 1 de septiembre (Open-Meteo necesita internet "
+                             "la primera vez).")
+        return r.degree_days(season, weather, prev, predio=p["name"], package=package)
     if package == "preview":
         def work():
             try:
-                res = r.degree_days(season, weather, prev, predio=p["name"], package="preview")
+                res = job()
                 Clock.schedule_once(lambda *_: on_done(res, None) if on_done else a.media.preview(res.path, res.title))
             except Exception as exc:  # noqa: BLE001
                 err = exc
@@ -307,19 +412,19 @@ def generate(package: str = "pdf", on_done=None):
                                     a.toast(f"No se pudo preparar: {err}"))
         a.workers.submit(work)
         return
-    a.run_report(lambda: r.degree_days(season, weather, prev, predio=p["name"], package=package),
-                 on_done=on_done)
+    a.run_report(job, on_done=on_done)
 
 
-def summary() -> dict | None:
-    """Para la vista previa del teléfono: análisis y textos (None si no hay predio)."""
+def summary(on_update=None) -> dict | None:
+    """Para la vista previa del teléfono: análisis y textos (None si no hay predio). Con
+    Open-Meteo desactualizado, lo pone al día en segundo plano y llama on_update()."""
     a = app()
     p = predio_of()
     if p is None:
         return None
-    wdb = _db_of(p)
-    season = a.season
-    weather = gd.list_days(wdb, gd.biofix(season), gd.season_end(season))
-    prev = gd.list_days(wdb, gd.biofix(season - 1), gd.season_end(season - 1))
-    res = gd.analyze(a.db, season, weather, prev)
-    return {"predio": p, "res": res, "d": gd.display(res)}
+    mode = mode_of(p)
+    if mode == gd.MODE_OM:
+        om_refresh(p, on_done=lambda n: n and on_update and on_update())
+    weather, prev = season_rows(p, a.season)
+    res = gd.analyze(a.db, a.season, weather, prev)
+    return {"predio": p, "res": res, "d": gd.display(res), "mode": mode}
