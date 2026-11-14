@@ -74,6 +74,35 @@ def data_subdir(*parts: str) -> str:
     return path
 
 
+# Ajustes de todo el teléfono fuera de las bases (p. ej. el permiso para compartir ensayos):
+# un JSON en la carpeta de datos. Se vuelve a leer en cada consulta (pocos y rápidos).
+def _global_path() -> str:
+    return os.path.join(get_data_dir(), "global.json")
+
+
+def global_get(key: str, default=None):
+    import json
+    try:
+        with open(_global_path(), encoding="utf-8") as f:
+            return json.load(f).get(key, default)
+    except (OSError, ValueError):
+        return default
+
+
+def global_set(key: str, value) -> None:
+    import json
+    try:
+        with open(_global_path(), encoding="utf-8") as f:
+            data = json.load(f)
+    except (OSError, ValueError):
+        data = {}
+    data[key] = value
+    tmp = _global_path() + ".part"
+    with open(tmp, "w", encoding="utf-8") as f:
+        json.dump(data, f, ensure_ascii=False)
+    os.replace(tmp, _global_path())
+
+
 def resource_path(*parts: str) -> str:
     """Ruta a recursos empaquetados junto al código (templates, modelos)."""
     return os.path.join(os.path.dirname(os.path.abspath(__file__)), *parts)

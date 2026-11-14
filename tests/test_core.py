@@ -2557,3 +2557,67 @@ def test_shared_workspace_photos_end_up_owned_by_the_owner_with_copy(tmp_path):
     yo.run()                                                 # mi app acepta: queda a mi nombre
     assert fake.files[common[0]]["owner"] == "juaquin@x.cl"
     assert fake.files[copy[0]]["owner"] == "coni@x.cl"       # su copia sigue siendo de ella
+
+
+def test_no_undefined_names_in_app_code():
+    """Un nombre sin importar (p. ej. form_dialog tras dividir pantallas) solo falla al tocar el
+    botón en el teléfono: aquí se detecta antes."""
+    import glob
+    pyflakes = pytest.importorskip("pyflakes.api")
+    from pyflakes import reporter as rep
+    import io
+    root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    bad = []
+    for path in glob.glob(os.path.join(root, "*.py")) + glob.glob(os.path.join(root, "ui", "*.py")):
+        if os.path.basename(path) == "screens.py":
+            continue                       # solo reúne los módulos con «import *»
+        out = io.StringIO()
+        pyflakes.checkPath(path, rep.Reporter(out, out))
+        bad += [ln for ln in out.getvalue().splitlines() if "undefined name" in ln]
+    assert not bad, "\n".join(bad)
+
+
+def test_local_imports_exist():
+    """«from modulo_de_la_app import nombre» (también dentro de funciones) debe existir en ese
+    módulo: si no, solo falla al tocar el botón en el teléfono (p. ej. global_set en la versión
+    estable). Se revisa el código sin ejecutarlo."""
+    import ast
+    import glob
+    root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    files = glob.glob(os.path.join(root, "*.py")) + glob.glob(os.path.join(root, "ui", "*.py"))
+    defined, stars = {}, {}
+    for path in files:
+        rel = os.path.relpath(path, root)[:-3].replace(os.sep, ".")
+        tree = ast.parse(open(path, encoding="utf-8").read())
+        names, star = set(), []
+        for node in tree.body:
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+                names.add(node.name)
+            elif isinstance(node, (ast.Assign, ast.AnnAssign)):
+                for t in (node.targets if isinstance(node, ast.Assign) else [node.target]):
+                    names |= {n.id for n in ast.walk(t) if isinstance(n, ast.Name)}
+            elif isinstance(node, (ast.Import, ast.ImportFrom)):
+                names |= {(a.asname or a.name).split(".")[0] for a in node.names}
+                if isinstance(node, ast.ImportFrom) and any(a.name == "*" for a in node.names):
+                    star.append(node.module)
+            elif isinstance(node, (ast.If, ast.Try)):
+                for sub in ast.walk(node):
+                    if isinstance(sub, (ast.FunctionDef, ast.ClassDef)):
+                        names.add(sub.name)
+                    elif isinstance(sub, ast.Assign):
+                        names |= {n.id for t in sub.targets for n in ast.walk(t) if isinstance(n, ast.Name)}
+                    elif isinstance(sub, (ast.Import, ast.ImportFrom)):
+                        names |= {(a.asname or a.name).split(".")[0] for a in sub.names}
+        defined[rel], stars[rel] = names, star
+    bad = []
+    for path in files:
+        tree = ast.parse(open(path, encoding="utf-8").read())
+        for node in ast.walk(tree):
+            if isinstance(node, ast.ImportFrom) and not node.level and node.module in defined:
+                if stars[node.module]:
+                    continue                        # reúne otros módulos con «import *»
+                for a in node.names:
+                    sub = f"{node.module}.{a.name}"
+                    if a.name != "*" and a.name not in defined[node.module] and sub not in defined:
+                        bad.append(f"{os.path.relpath(path, root)}:{node.lineno} {node.module}.{a.name}")
+    assert not bad, "\n".join(bad)
