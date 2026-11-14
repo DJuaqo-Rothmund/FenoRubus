@@ -1,0 +1,63 @@
+{% extends "base.html" %}
+{% block meta %}<span>T base {{ tbase_txt }} °C</span><span>Desde el {{ start_txt }}</span><span>Temperaturas: {{ predio }}</span>{% endblock %}
+{% block content %}
+<style>
+.gdd-kpis { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 10px; margin: 6px 0 4px; }
+.gdd-kpis .stat .v { color: var(--berry); }
+svg.gddchart { width: 100%; height: auto; display: block; }
+svg.gddchart .grid { stroke: var(--rule); stroke-width: 1; }
+svg.gddchart .ax { fill: var(--muted); font-size: 11px; font-family: inherit; }
+svg.gddchart .ax.t { fill: #2E86C1; } svg.gddchart .ax.g { fill: var(--berry); }
+svg.gddchart .lbl { fill: var(--ink-2); font-size: 12px; font-family: inherit; }
+svg.gddchart .bar { fill: #7FB3D5; } svg.gddchart .bar.cold { fill: #C9D1D3; } svg.gddchart .bar.fill { fill: none; stroke: #7FB3D5; stroke-dasharray: 2 2; }
+svg.gddchart .tbase { stroke: var(--ink-2); stroke-dasharray: 4 3; }
+svg.gddchart .acc { fill: none; stroke: var(--berry); stroke-width: 2.6; }
+svg.gddchart .prev { fill: none; stroke: var(--muted); stroke-width: 1.8; stroke-dasharray: 6 4; }
+.gdd-leg { display: flex; flex-wrap: wrap; gap: 6px 16px; font-size: 12.5px; color: var(--ink-2); margin: 6px 0; }
+.gdd-leg i { display: inline-block; width: 12px; height: 12px; border-radius: 3px; margin-right: 5px; vertical-align: -1px; }
+.gdd-leg i.ln { height: 3px; vertical-align: 3px; width: 16px; }
+table.gdd td, table.gdd th { text-align: center; }
+table.gdd td.n, table.gdd th.n { text-align: left; font-weight: 600; white-space: nowrap; }
+table.gdd td b { font-size: 14px; } table.gdd td small { display: block; color: var(--muted); font-size: 11.5px; }
+table.gdd td.pred { background: rgba(232, 168, 48, .14); } table.gdd td.pred small { color: #8a5a00; }
+table.gdd td.late { background: rgba(176, 18, 75, .10); } table.gdd td.late small { color: var(--berry); }
+table.gdd td.na { color: var(--muted); }
+.gdd-now { display: grid; gap: 6px; } .gdd-now div { padding: 8px 12px; }
+.gdd-now b { margin-right: 6px; } .gdd-now span { color: var(--ink-2); font-size: 13px; }
+</style>
+<section>
+  <div class="gdd-kpis">
+  {% for v, u, l in d.kpis %}<div class="card stat"><div class="v">{{ v }}<span class="u">{{ u }}</span></div><div class="l">{{ l }}</div></div>{% endfor %}
+  </div>
+  {% if not has_weather %}<p class="lead">Aún no hay temperaturas de {{ predio }} desde el {{ start_txt }}. Cárguelas en Informes › Fenología y días grado › Temperaturas.</p>{% endif %}
+</section>
+{% if has_weather %}
+<h2>1 · Temperatura media diaria y días grado acumulados</h2>
+<p class="lead">Cada día suma la temperatura media menos {{ tbase_txt }} °C (si es menor, suma 0). La curva es el calor acumulado desde el {{ start_txt }}.</p>
+<div class="card" style="padding:10px">{{ svg_temp|safe }}
+<div class="gdd-leg"><span><i style="background:#7FB3D5"></i>T media diaria (°C)</span><span><i style="background:#C9D1D3"></i>bajo la T base</span><span><i class="ln" style="background:var(--berry)"></i>°C·día acumulados</span>{% if has_prev_weather %}<span><i class="ln" style="background:var(--muted)"></i>temporada anterior</span>{% endif %}</div></div>
+<h2>2 · Avance fenológico según días grado</h2>
+<p class="lead">Estado BBCH según el calor acumulado (no según la fecha). Así se comparan aunque el clima cambie entre semanas o temporadas: quien llega al mismo estado con menos °C·día es más temprano.</p>
+<div class="card" style="padding:10px">{{ svg_stages|safe }}
+<div class="gdd-leg">{% for r in d.rows %}<span><i style="background:{{ r.color }}"></i>{{ r.name }}</span>{% endfor %}</div></div>
+{% endif %}
+<h2>3 · Días grado para alcanzar cada hito</h2>
+<p class="lead">°C·día acumulados (y fecha) cuando se alcanzó cada estado, interpolados entre muestreos. En amarillo, pronóstico: los °C·día de la temporada anterior (o de {{ unit_others }}) y el ritmo de los últimos 7 días.</p>
+<div class="scroll-x"><table class="gdd">
+<tr><th class="n">{{ unit_title }}</th>{% for c, l in d.heads %}<th>BBCH {{ c }}<br><span style="text-transform:none;letter-spacing:0">{{ l }}</span></th>{% endfor %}</tr>
+{% for r in d.rows %}<tr><td class="n"><span class="sw" style="background:{{ r.color }}"></span> {{ r.name }}</td>{% for c in r.cells %}<td class="{{ c.cls }}"><b>{{ c.main }}</b><small>{{ c.sub }}</small></td>{% endfor %}</tr>{% endfor %}
+</table></div>
+<h2>4 · Estado actual y próximo hito</h2>
+<div class="gdd-now">{% for r in d.rows %}<div class="card"><b><span class="sw" style="background:{{ r.color }}"></span> {{ r.name }}</b><span>{{ r.now }} — {{ r.next }}</span></div>{% endfor %}</div>
+<h2>5 · Comparación con la temporada anterior</h2>
+{% if d.prev_rows %}
+<div class="scroll-x"><table class="gdd">
+<tr><th class="n">{{ unit_title }}</th>{% for c, l in d.heads %}<th>BBCH {{ c }}</th>{% endfor %}</tr>
+{% for r in d.prev_rows %}<tr><td class="n"><span class="sw" style="background:{{ r.color }}"></span> {{ r.name }}</td>{% for c in r.cells %}<td><b>{{ c.now }}</b><small>antes {{ c.prev }}{% if c.diff %} · {{ c.diff }}{% endif %}</small></td>{% endfor %}</tr>{% endfor %}
+</table></div>
+<p class="small muted">°C·día de esta temporada (arriba) y de la anterior (abajo). Si el número es parecido, el hito depende del calor y sirve para pronosticar.</p>
+{% else %}
+<p class="lead">Sin datos de la temporada anterior para comparar: se necesitan sus estados BBCH en este ensayo y las temperaturas de {{ predio }} desde el {{ prev_start_txt }}.</p>
+{% endif %}
+{% if d.notes %}<ul class="summary small muted">{% for n in d.notes %}<li>{{ n }}</li>{% endfor %}</ul>{% endif %}
+{% endblock %}

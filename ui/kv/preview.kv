@@ -185,8 +185,8 @@
                         pos_hint: {"center_y": .5}
                         on_release: app.open_heatmap()
                 MDGridLayout:
-                    cols: 2
-                    spacing: dp(8)
+                    cols: 3
+                    spacing: dp(6)
                     adaptive_height: True
                     SegButton:
                         text: root.variety_label
@@ -196,6 +196,10 @@
                         text: "Matriz global"
                         selected: root.kind == "matrix"
                         on_release: root.set_kind("matrix")
+                    SegButton:
+                        text: "Días grado"
+                        selected: root.kind == "gdd"
+                        on_release: root.set_kind("gdd")
                 MDBoxLayout:
                     id: params
                     orientation: "vertical"
@@ -212,6 +216,7 @@
                     theme_text_color: "Custom"
                     text_color: c(theme.LEAF_DARK)
                 MDBoxLayout:
+                    id: ring_row
                     size_hint_y: None
                     height: dp(96)
                     spacing: dp(14)

@@ -97,6 +97,11 @@ class WorkspacesScreen(MDScreen):
                                 "ORDER BY w.start_date DESC LIMIT 1")
             if last:
                 parts.append(f"último registro: {ph.week_title(last['start_date'])}")
+            if ws.get("profile") == "id":
+                from ui import degree_days_ui as gdu
+                pname = gdu.predio_name(ws)
+                if pname:
+                    parts.insert(1, f"Predio {pname}")
         except Exception:  # noqa: BLE001 - nunca bloquear el menú por una base dañada
             pass
         return " · ".join(parts)
@@ -195,6 +200,11 @@ class WorkspacesScreen(MDScreen):
 
         items = [("Cambiar nombre", f"Código {ws['code']} (no cambia)", rename)]
         if ws["profile"] == "id" and not ws["archived"]:
+            from ui import degree_days_ui as gdu
+            pname = gdu.predio_name(ws)
+            items.append(("Predio del ensayo…", (f"Ahora: {pname} · " if pname else "") +
+                          "sus temperaturas se usan para los días grado",
+                          lambda: Clock.schedule_once(lambda *_: gdu.pick_predio(ws, on_done=self.refresh), .3)))
             items.append(("Mover a Predio…", "Si estos datos son de un predio (p. ej. tras actualizar)",
                           move))
         if ws["archived"]:

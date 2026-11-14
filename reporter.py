@@ -1075,6 +1075,33 @@ class ReportGenerator:
                     gallery_label="fotos generales" if gk == "canopy" else "fotos de detalle")
 
 
+    # ------------------------------------- 6. fenología y días grado
+    def degree_days(self, season: int, weather: list[dict], prev_weather: list[dict] | None = None,
+                    predio: str = "", package: str = "html") -> ReportResult:
+        """Fenología y días grado: °C·día desde el 1 de septiembre (T base 5 °C), estados BBCH
+        según el calor acumulado, hitos con su °C·día, pronóstico y temporada anterior."""
+        import degree_days as gd
+        groups, unit_title, unit_word = gd.groups_for(self.db)
+        res = gd.analyze(self.db, season, weather, prev_weather, groups=groups)
+        d = gd.display(res)
+        s = res["series"]
+        images = self._images(package, max_side=360)
+        gmax = max([s.total] + [p["gdd"] for u in res["units"] for p in u["points"] if p["gdd"] is not None])
+        title = "Fenología y días grado"
+        return self._render(
+            "degree_days.html", f"diasgrado_{season}", "diasgrado", title, images, package,
+            d=d, res=res, predio=predio or "el predio", has_weather=bool(s.days),
+            has_prev_weather=bool(res["prev_series"].days),
+            svg_temp=gd.svg_temperature(s, res["prev_series"]) if s.days else "",
+            svg_stages=gd.svg_stages(res["units"], gmax) if s.days else "",
+            tbase_txt=gd.fmt(res["tbase"]), start_txt=ph.format_date_es(res["start"]),
+            prev_start_txt=ph.format_date_es(gd.biofix(season - 1)),
+            unit_title=unit_title,
+            unit_others={"tratamiento": "los otros tratamientos", "sector": "los otros sectores"
+                         }.get(unit_word, "las otras variedades"),
+            subtitle=f"{ph.season_title(season)} · temperaturas de {predio or 'el predio'} · "
+                     f"T base {gd.fmt(res['tbase'])} °C desde el 1 de septiembre")
+
     # ------------------------------------- 5. tratamientos × repeticiones
     def treatments(self, season: int, package: str = "html") -> ReportResult:
         """Compara tratamientos: promedio de las repeticiones por semana, ANOVA (bloques =

@@ -1082,8 +1082,181 @@ def _parcels(r: Report, ctx: dict):
         r.heatmap(ctx["heat"], ctx["weeks"], label="Parcela")
 
 
+def _gdd_temp_chart(r: Report, ctx: dict, h: float = 190):
+    """Barras de T media diaria, línea de T base y curva de °C·día (y la temporada anterior)."""
+    s, prev = ctx["res"]["series"], ctx["res"]["prev_series"]
+    n = len(s.days)
+    shown = prev.days[:n] if prev.days else []
+    tmax = max(25, max(d["tmean"] for d in s.days) + 2)
+    tmin = min(0, min(d["tmean"] for d in s.days) - 1)
+    gtop = max(s.total, shown[-1]["acc"] if shown else 0)
+    gmax = max(100, (int(gtop / 100) + 1) * 100)
+    r.ensure(h + 24)
+    x0, y0, w, hh = M + 26, r.y + 8, CW - 26 - 34, h - 26
+    span = max(n - 1, 1)
+
+    def X(i):
+        return x0 + w * i / span
+
+    def YT(t):
+        return y0 + hh - hh * (t - tmin) / (tmax - tmin)
+
+    def YG(g):
+        return y0 + hh - hh * g / gmax
+    for t in range(int(tmin // 5 * 5), int(tmax) + 1, 5):
+        r.line(x0, YT(t), x0 + w, YT(t), "#ece8dc", .4)
+        r.text(x0 - 4, YT(t) + 2.5, f"{t}°", 6.5, False, "#2E86C1", "right")
+    bw = max(.6, w / max(n, 1) * .7)
+    for i, d in enumerate(s.days):
+        top, base = YT(max(d["tmean"], tmin)), YT(max(0, tmin))
+        if d["filled"]:
+            r.rect(X(i) - bw / 2, min(top, base), bw, abs(base - top), stroke="#7FB3D5", lw=.4)
+        else:
+            r.rect(X(i) - bw / 2, min(top, base), bw, abs(base - top),
+                   fill="#7FB3D5" if d["gdd"] > 0 else "#C9D1D3")
+    r.line(x0, YT(s.tbase), x0 + w, YT(s.tbase), INK2, .6, dash=(3, 2))
+    r.text(x0 + w - 2, YT(s.tbase) - 3, f"T base {ctx['tbase_txt']} °C", 6.5, True, INK2, "right")
+    if shown:
+        pts = [(X(i), YG(d["acc"])) for i, d in enumerate(shown)]
+        for a, b in zip(pts[::2], pts[1::2]):       # punteada
+            r.line(a[0], a[1], b[0], b[1], MUTED, 1)
+    r.polyline([(X(i), YG(d["acc"])) for i, d in enumerate(s.days)], "#B0124B", 1.8)
+    step = max(50, gmax // 5 // 50 * 50)
+    for g in range(0, gmax + 1, step):
+        r.text(x0 + w + 4, YG(g) + 2.5, str(g), 6.5, False, "#B0124B")
+    for i, d in enumerate(s.days):
+        if d["day"].day in (1, 15):
+            r.text(X(i), y0 + hh + 10, f"{d['day'].day}/{d['day'].month}", 6.5, False, MUTED, "center")
+    r.y += h
+    leg = [("#7FB3D5", "T media diaria (°C)"), ("#C9D1D3", "bajo la T base"), ("#B0124B", "°C·día acumulados")]
+    if shown:
+        leg.append((MUTED, "temporada anterior (misma fecha)"))
+    _gdd_legend(r, leg)
+
+
+def _gdd_legend(r: Report, items):
+    x = M
+    r.ensure(14)
+    for color, label in items:
+        lw = r.width(label, 7.2) + 22
+        if x + lw > M + CW:
+            x = M
+            r.y += 11
+        r.rect(x, r.y + 2, 9, 7, fill=color, radius=1.5)
+        r.text(x + 12, r.y + 8.5, label, 7.2, False, INK2)
+        x += lw
+    r.y += 16
+
+
+def _gdd_stage_chart(r: Report, ctx: dict, h: float = 210):
+    import degree_days as gd
+    units = ctx["res"]["units"]
+    gtop = max([ctx["res"]["series"].total] + [p["gdd"] for u in units for p in u["points"] if p["gdd"] is not None])
+    gmax = max(100, (int(gtop / 100) + 1) * 100)
+    r.ensure(h + 30)
+    x0, y0, w, hh = M + 26, r.y + 6, CW - 40, h - 30
+
+    def X(g):
+        return x0 + w * g / gmax
+
+    def Y(v):
+        return y0 + hh - hh * min(v, 90) / 90
+    for b in range(0, 91, 10):
+        r.line(x0, Y(b), x0 + w, Y(b), "#ece8dc", .4)
+        r.text(x0 - 4, Y(b) + 2.5, str(b), 6.5, False, MUTED, "right")
+    step = 100 if gmax <= 1000 else 200
+    for g in range(0, gmax + 1, step):
+        r.text(X(g), y0 + hh + 10, str(g), 6.5, False, MUTED, "center")
+    r.text(x0 + w / 2, y0 + hh + 21, "Días grado acumulados desde el 1 de septiembre (°C·día)", 7, False, INK2, "center")
+    for i, u in enumerate(units):
+        col = gd.PALETTE[i % len(gd.PALETTE)]
+        pts = [(X(p["gdd"]), Y(p["value"])) for p in u["points"] if p["gdd"] is not None]
+        if len(pts) > 1:
+            r.polyline(pts, col, 1.5)
+        for p in pts:
+            r.circle(*p, 1.9, fill=col)
+    r.y += h
+    _gdd_legend(r, [(row["color"], row["name"]) for row in ctx["d"]["rows"]])
+
+
+def degree_days(ctx: dict, names: dict, num=None) -> Report:
+    d = ctx["d"]
+    r = _doc(ctx, [f"T base {ctx['tbase_txt']} °C", f"desde el {ctx['start_txt']}",
+                   f"temperaturas: {ctx['predio']}"], names, num)
+    if d["kpis"]:
+        n = len(d["kpis"])
+        gap = 6
+        bw = (CW - gap * (n - 1)) / n
+        r.ensure(48)
+        for i, (v, u, label) in enumerate(d["kpis"]):
+            x = M + i * (bw + gap)
+            r.rect(x, r.y, bw, 42, fill="#f6f3ec", radius=5)
+            r.text(x + 7, r.y + 16, v, 13, True, BERRY)
+            r.text(x + 9 + r.width(v, 13, True), r.y + 16, u, 6.5, False, MUTED)
+            for k, line in enumerate(r.wrap(label, bw - 12, 6.8)[:2]):
+                r.text(x + 7, r.y + 27 + k * 8, line, 6.8, False, INK2)
+        r.y += 50
+    if not ctx["has_weather"]:
+        r.para(f"Aún no hay temperaturas de {ctx['predio']} desde el {ctx['start_txt']}: cárguelas en "
+               "Informes › Fenología y días grado › Temperaturas.", 9.5, BERRY, True)
+    else:
+        r.h2("1 · Temperatura media diaria y días grado acumulados",
+             f"Cada día suma la temperatura media menos {ctx['tbase_txt']} °C (si es menor, suma 0). "
+             f"La curva es el calor acumulado desde el {ctx['start_txt']}.")
+        r.keep(lambda: _gdd_temp_chart(r, ctx))
+        r.h2("2 · Avance fenológico según días grado",
+             "Estado BBCH según el calor acumulado (no según la fecha): quien llega al mismo estado "
+             "con menos °C·día es más temprano, aunque el clima cambie entre semanas o temporadas.")
+        r.keep(lambda: _gdd_stage_chart(r, ctx))
+    r.h2("3 · Días grado para alcanzar cada hito",
+         "°C·día acumulados (y fecha) al alcanzar cada estado, interpolados entre muestreos. Fondo amarillo: "
+         f"pronóstico según la temporada anterior (o {ctx['unit_others']}) y el ritmo de los últimos 7 días; "
+         "rosado: ya debería haberse alcanzado (revisar en terreno).")
+
+    def two(main, sub, color=INK, sub_color=MUTED):
+        def draw(doc, x, y, w, h):
+            doc.text(x + w / 2, y + 11, main, 8.6, True, color, "center")
+            if sub:
+                doc.text(x + w / 2, y + 20.5, doc.fit(sub, w - 4, 6.3), 6.3, False, sub_color, "center")
+        return draw
+    fills = {"pred": "#fbf1dc", "pred late": "#f7e1e8"}
+    rows = []
+    for row in d["rows"]:
+        cells = [{"text": row["name"], "bold": True}]
+        for c in row["cells"]:
+            col = "#8a5a00" if c["cls"] == "pred" else (BERRY if c["cls"] == "pred late" else MUTED)
+            cells.append({"draw": two(c["main"], c["sub"], INK if c["cls"] == "hit" else col, col), "h": 26,
+                          "fill": fills.get(c["cls"])})
+        rows.append(cells)
+    hdr = [{"text": ctx["unit_title"]}] + [{"text": f"BBCH {c} · {lab}"} for c, lab in d["heads"]]
+    r.table(hdr, rows, [1.5] + [1] * len(d["heads"]), size=7, aligns=["left"] + ["center"] * len(d["heads"]))
+    r.h2("4 · Estado actual y próximo hito")
+    r.table(["", "Último estado", "Próximo hito"],
+            [[{"text": row["name"], "bold": True}, row["now"], row["next"]] for row in d["rows"]],
+            [1.3, 2, 3.4], size=7.6)
+    r.h2("5 · Comparación con la temporada anterior",
+         "°C·día de esta temporada y, abajo, de la anterior. Si se parecen, el hito depende del calor y "
+         "sirve para pronosticar." if d["prev_rows"] else None)
+    if d["prev_rows"]:
+        prow = []
+        for row in d["prev_rows"]:
+            cells = [{"text": row["name"], "bold": True}]
+            for c in row["cells"]:
+                cells.append({"draw": two(c["now"], f"antes {c['prev']}" + (f" · {c['diff']}" if c["diff"] else "")),
+                              "h": 26})
+            prow.append(cells)
+        r.table([{"text": ctx["unit_title"]}] + [{"text": f"BBCH {c}"} for c, _l in d["heads"]], prow,
+                [1.5] + [1] * len(d["heads"]), size=7, aligns=["left"] + ["center"] * len(d["heads"]))
+    else:
+        r.para("Sin datos de la temporada anterior para comparar: se necesitan sus estados BBCH en este "
+               f"ensayo y las temperaturas de {ctx['predio']} desde el {ctx['prev_start_txt']}.", 8.8, INK2)
+    for note in d["notes"]:
+        r.para("• " + note, 7.6, MUTED)
+    return r
+
+
 RENDERERS = {"weekly.html": weekly, "period.html": period, "variety.html": variety, "matrix.html": matrix,
-             "treatments.html": treatments}
+             "treatments.html": treatments, "degree_days.html": degree_days}
 
 
 def render(template: str, ctx: dict, names: dict, num=None) -> bytes:

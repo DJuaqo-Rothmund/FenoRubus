@@ -98,6 +98,31 @@
                 PrimaryButton:
                     text: "Generar PDF"
                     on_release: root.generate("treatments")
+            PaperCard:
+                SectionLabel:
+                    text: "6 · FENOLOGÍA Y DÍAS GRADO"
+                Muted:
+                    text: "Estados BBCH según el calor acumulado (°C·día, T base 5 °C desde el 1 de septiembre): días grado de cada hito, pronóstico del próximo y comparación con la temporada anterior."
+                Muted:
+                    id: gdd_info
+                    text: ""
+                    theme_text_color: "Custom"
+                    text_color: c(theme.LEAF_DARK)
+                MDBoxLayout:
+                    adaptive_height: True
+                    spacing: dp(8)
+                    GhostButton:
+                        icon: "thermometer"
+                        text: "Temperaturas"
+                        on_release: root.gdd_weather()
+                    GhostButton:
+                        id: gdd_predio_btn
+                        icon: "map-marker-outline"
+                        text: "Predio"
+                        on_release: root.gdd_pick_predio()
+                PrimaryButton:
+                    text: "Generar PDF"
+                    on_release: root.gdd_generate()
             SectionLabel:
                 text: "INFORMES GENERADOS"
             MDBoxLayout:

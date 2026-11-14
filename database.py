@@ -249,6 +249,17 @@ CREATE TABLE IF NOT EXISTS notebook_photos (
     created_at  TEXT NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS weather_days (      -- temperaturas del predio (días grado)
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    day         TEXT NOT NULL UNIQUE,           -- AAAA-MM-DD
+    tmean       REAL,                           -- °C
+    tmin        REAL,
+    tmax        REAL,
+    rain        REAL,                           -- mm (por ahora solo se guarda)
+    source      TEXT DEFAULT '',
+    updated_at  TEXT NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS settings (
     key    TEXT PRIMARY KEY,
     value  TEXT

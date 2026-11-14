@@ -216,11 +216,82 @@ class StageHeatmap(Widget):
 # ===========================================================================
 # Vista previa de informes (sin enviar)
 # ===========================================================================
+class GddChart(Widget):
+    """Vista previa de días grado: barras de T media diaria, línea de T base y curva de
+    °C·día acumulados (escala a la derecha). data = {"temps", "acc", "tbase", "prev"}."""
+    data = ObjectProperty(None, allownone=True)
+
+    def __init__(self, **kw):
+        super().__init__(**kw)
+        self.size_hint_y = None
+        self.height = dp(170)
+        self.bind(pos=self._redraw, size=self._redraw, data=self._redraw)
+
+    def _redraw(self, *_):
+        from kivy.graphics import Color, Line, Rectangle
+        from kivy.core.text import Label as CoreLabel
+        self.canvas.clear()
+        d = self.data
+        if not d or not d["temps"]:
+            return
+        temps, acc, prev = d["temps"], d["acc"], d.get("prev") or []
+        n = len(temps)
+        pl, pr, pb, pt = dp(26), dp(34), dp(16), dp(8)
+        x0, y0 = self.x + pl, self.y + pb
+        w, h = self.width - pl - pr, self.height - pb - pt
+        tmin, tmax = min(0, min(temps) - 1), max(25, max(temps) + 2)
+        gmax = max(100, (int(max([acc[-1]] + prev[:n][-1:]) / 100) + 1) * 100)
+
+        def X(i):
+            return x0 + w * i / max(n - 1, 1)
+
+        def YT(t):
+            return y0 + h * (t - tmin) / (tmax - tmin)
+
+        def YG(g):
+            return y0 + h * g / gmax
+
+        def label(text, x, y, color, anchor="left"):
+            lb = CoreLabel(text=text, font_size=dp(9))
+            lb.refresh()
+            tex = lb.texture
+            Color(*color)
+            ox = {"left": 0, "right": -tex.width, "center": -tex.width / 2}[anchor]
+            Rectangle(texture=tex, pos=(x + ox, y - tex.height / 2), size=tex.size)
+        muted = c(theme.MUTED)
+        with self.canvas:
+            Color(*c(theme.MUTED, .25))
+            for t in range(int(tmin // 5 * 5), int(tmax) + 1, 5):
+                Line(points=[x0, YT(t), x0 + w, YT(t)], width=dp(.5))
+            bw = max(dp(1), w / n * .7)
+            for i, t in enumerate(temps):
+                Color(*(c("#7FB3D5") if t > d["tbase"] else c("#C9D1D3")))
+                top = YT(max(t, tmin))
+                Rectangle(pos=(X(i) - bw / 2, YT(max(0, tmin))), size=(bw, top - YT(max(0, tmin))))
+            Color(*c(theme.INK, .7))
+            Line(points=[x0, YT(d["tbase"]), x0 + w, YT(d["tbase"])], width=dp(.7), dash_length=4, dash_offset=3)
+            if prev:
+                Color(*c(theme.MUTED, .9))
+                pts = [v for i, g in enumerate(prev[:n]) for v in (X(i), YG(g))]
+                if len(pts) >= 4:
+                    Line(points=pts, width=dp(.9), dash_length=5, dash_offset=4)
+            Color(*c("#B0124B"))
+            Line(points=[v for i, g in enumerate(acc) for v in (X(i), YG(g))], width=dp(1.6))
+            for t in range(int(tmin // 5 * 5), int(tmax) + 1, 10):
+                label(f"{t}°", x0 - dp(4), YT(t), c("#2E86C1"), "right")
+            step = max(50, gmax // 4 // 50 * 50)
+            for g in range(0, gmax + 1, step):
+                label(str(g), x0 + w + dp(4), YG(g), c("#B0124B"))
+            for i, day in enumerate(d["days"]):
+                if day.day in (1, 15):
+                    label(f"{day.day}/{day.month}", X(i), self.y + dp(6), muted, "center")
+
+
 class PreviewTab(MDScreen):
     """Vista previa: «Por variedad» (la frambuesa de cada variedad; tocarla abre todo su
     informe) y «Matriz global» (estados BBCH de la temporada, o de un mes)."""
     kind = StringProperty("variety")
-    KIND_NAMES = {"variety": "Por variedad", "matrix": "Matriz global"}
+    KIND_NAMES = {"variety": "Por variedad", "matrix": "Matriz global", "gdd": "Días grado"}
     sel_month = ObjectProperty(None, allownone=True)   # (año, mes) o None = toda la temporada
     variety_label = StringProperty("Por variedad")    # «Por sector» en predios con plano
     sel_sector = StringProperty("")
@@ -266,6 +337,20 @@ class PreviewTab(MDScreen):
     def _build_params(self):
         box = self.ids.params
         fast_clear(box)
+        if self.kind == "gdd":
+            from kivy.factory import Factory
+            from ui import degree_days_ui as gdu
+            p = gdu.predio_of()
+            box.add_widget(MDLabel(text=("Estados BBCH según el calor acumulado (T base 5 °C desde el 1 de "
+                                         f"septiembre) con las temperaturas de {p['name']}." if p else
+                                         "Cree un predio (perfil Predio) para cargar sus temperaturas."),
+                                   font_style="Caption", adaptive_height=True,
+                                   theme_text_color="Custom", text_color=c(theme.MUTED)))
+            if p:
+                b = Factory.GhostButton(icon="thermometer", text="Temperaturas y lluvia")
+                b.bind(on_release=lambda *_: gdu.open_weather(on_change=self.refresh))
+                box.add_widget(b)
+            return
         if self.kind == "variety":
             box.add_widget(MDLabel(text=("Toque un sector del plano para ver su información; tocando "
                                          "un equipo de riego se acerca." if self._plan() else
@@ -307,6 +392,13 @@ class PreviewTab(MDScreen):
     def _summarize(self):
         from reporter import report_summary
         a = app()
+        ids = self.ids
+        gdd = self.kind == "gdd"
+        ids.ring_row.height, ids.ring_row.opacity = (0, 0) if gdd else (dp(96), 1)
+        ids.size_text.opacity = 0 if gdd else 1
+        if gdd:
+            self._summarize_gdd()
+            return
         rng = self._range() if self.kind == "matrix" else None
         if rng:
             sm = report_summary(a.db, "period", a.season, week_from=rng[0], week_to=rng[1])
@@ -337,6 +429,69 @@ class PreviewTab(MDScreen):
         ids.preview_btn.opacity = 1 if self.kind == "matrix" else 0
         ids.preview_btn.disabled = self.kind != "matrix"
         ids.preview_btn.height = dp(48) if self.kind == "matrix" else 0
+
+    # ------------------------------------------------------------ días grado
+    def _summarize_gdd(self):
+        from ui import degree_days_ui as gdu
+        import degree_days as gd
+        ids = self.ids
+        box = ids.visual
+        fast_clear(box)
+        try:
+            sm = gdu.summary()
+        except Exception as exc:  # noqa: BLE001
+            sm = None
+            ids.headline.text = f"No se pudo calcular: {exc}"
+        ids.sum_title.text = "Días grado · " + (sm["predio"]["name"] if sm else "sin predio")
+        ok = bool(sm and sm["res"]["series"].days)
+        ids.preview_btn.opacity, ids.preview_btn.disabled = (1, False) if ok else (0, True)
+        ids.preview_btn.height = dp(48) if ok else 0
+        if not ok:
+            if sm:
+                ids.headline.text = "Aún no hay temperaturas desde el 1 de septiembre."
+            ids.lack_text.text = "Cargue las temperaturas (botón arriba)" if sm else ""
+            ids.lack_text.text_color = c(theme.BERRY)
+            return
+        res, d = sm["res"], sm["d"]
+        s = res["series"]
+        n = len(d["rows"])
+        ids.headline.text = (f"{n} {'unidad' if n == 1 else 'unidades'} con estados BBCH · "
+                             f"T base {gd.fmt(s.tbase)} °C desde el 1 de septiembre")
+        from kivy.uix.gridlayout import GridLayout
+        from kivy.factory import Factory
+        kp = GridLayout(cols=2, spacing=dp(6), size_hint_y=None)
+        kp.bind(minimum_height=kp.setter("height"))
+        for v, u, lab in d["kpis"]:
+            kp.add_widget(MDLabel(text=f"[b][color=#B0124B]{v}[/color][/b] {u}\n[size=11sp]{lab}[/size]",
+                                  markup=True, font_style="Body2", adaptive_height=True,
+                                  theme_text_color="Custom", text_color=c(theme.INK)))
+        box.add_widget(kp)
+        prev = res["prev_series"].days
+        box.add_widget(GddChart(data={"temps": [r["tmean"] for r in s.days], "acc": [r["acc"] for r in s.days],
+                                      "days": [r["day"] for r in s.days], "tbase": s.tbase,
+                                      "prev": [r["acc"] for r in prev]}))
+        box.add_widget(Factory.Muted(text="Barras: T media diaria · línea roja: °C·día acumulados"
+                                          + (" · punteada: temporada anterior" if prev else "")))
+        for row in d["rows"]:
+            item = MDBoxLayout(orientation="vertical", adaptive_height=True, padding=(0, dp(4)))
+            item.add_widget(MDLabel(text=f"[color={row['color']}][b]{row['name']}[/b][/color]  {row['now']}",
+                                    markup=True, font_style="Body2", adaptive_height=True,
+                                    theme_text_color="Custom", text_color=c(theme.INK)))
+            late = "ya debería" in row["next"]
+            item.add_widget(MDLabel(text=row["next"].capitalize(), font_style="Caption", adaptive_height=True,
+                                    theme_text_color="Custom",
+                                    text_color=c(theme.BERRY) if late else c(theme.MUTED)))
+            box.add_widget(item)
+        if not d["rows"]:
+            box.add_widget(Factory.Muted(text="Aún no hay estados BBCH desde el 1 de septiembre."))
+        today = _dt.date.today()
+        behind = (today - s.last).days - 1 if s.last else 0
+        if behind > 0 and res["season"] == ph.season_of(today):
+            ids.lack_text.text = f"Faltan {behind} día{'s' if behind != 1 else ''} de temperatura (desde el {gd.short_date(s.last + _dt.timedelta(days=1))})"
+            ids.lack_text.text_color = c(theme.BERRY)
+        else:
+            ids.lack_text.text = "Temperaturas al día"
+            ids.lack_text.text_color = c(theme.LEAF)
 
     # ------------------------------------------------- frambuesas y mapa de estados
     def _open_cell(self, cell):
@@ -533,8 +688,14 @@ class PreviewTab(MDScreen):
 
     # ----------------------------------------------------------- vista previa
     def open_preview(self):
-        """Matriz global completa (de la temporada o del mes elegido)."""
+        """Matriz global completa (de la temporada o del mes elegido) o el informe de días grado."""
         a = app()
+        if self.kind == "gdd":
+            from ui import degree_days_ui as gdu
+            self.ids.preview_btn.disabled = True
+            self.ids.preview_btn.text = "Preparando vista previa…"
+            gdu.generate("preview", on_done=self._ready)
+            return
         r = a.configured_reports()
         rng = self._range()
         self.ids.preview_btn.disabled = True

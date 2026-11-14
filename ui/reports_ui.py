@@ -42,7 +42,8 @@ class ReportGroup(GlassButton):
 # Grupos de la lista de informes: (prefijo del archivo, título)
 REPORT_GROUPS = [("semanal", "Reportes semanales"), ("periodo", "Evolución mensual / rango"),
                  ("variedad", "Fichas por variedad"), ("matriz", "Matriz comparativa"),
-                 ("tratamientos", "Comparación de tratamientos"), ("", "Mediciones y otros")]
+                 ("tratamientos", "Comparación de tratamientos"), ("diasgrado", "Fenología y días grado"),
+                 ("", "Mediciones y otros")]
 
 
 class ReportsTab(MDScreen):
@@ -96,7 +97,43 @@ class ReportsTab(MDScreen):
         self.ids.variety_title.text = ("3 · FICHA COMPLETA POR PARCELA" if trial
                                        else "3 · FICHA COMPLETA POR VARIEDAD")
         self._labels()
+        self._gdd_label()
         self.list_recent()
+
+    # ------------------------------------------------ 6. fenología y días grado
+    def _gdd_label(self):
+        from ui import degree_days_ui as gdu
+        import degree_days as gd
+        a = app()
+        ws = a.workspace or {}
+        p = gdu.predio_of(ws)
+        ids = self.ids
+        ids.gdd_predio_btn.opacity = 0 if ws.get("profile") == "predio" else 1
+        ids.gdd_predio_btn.disabled = ws.get("profile") == "predio"
+        if p is None:
+            ids.gdd_info.text = "Sin predio: créelo en el perfil Predio para cargar sus temperaturas."
+            return
+        ids.gdd_predio_btn.text = f"Predio: {p['name']}"
+        try:
+            s = gd.Series(gd.list_days(gdu.weather_db(ws), gd.biofix(a.season), gd.season_end(a.season)), a.season)
+            ids.gdd_info.text = (f"Temperaturas de {p['name']}: {len(s.days)} días · "
+                                 f"{gd.fmt(s.total, 0)} °C·día al {gd.short_date(s.last)}" if s.days else
+                                 f"Temperaturas de {p['name']}: aún no hay datos desde el 1 de septiembre.")
+        except Exception as exc:  # noqa: BLE001
+            ids.gdd_info.text = f"Temperaturas de {p['name']}"
+            print("días grado:", exc)
+
+    def gdd_weather(self):
+        from ui import degree_days_ui as gdu
+        gdu.open_weather(on_change=self._gdd_label)
+
+    def gdd_pick_predio(self):
+        from ui import degree_days_ui as gdu
+        gdu.pick_predio(app().workspace, on_done=self._gdd_label)
+
+    def gdd_generate(self):
+        from ui import degree_days_ui as gdu
+        gdu.generate("pdf", on_done=lambda _res: self.list_recent())
 
     def _labels(self):
         ids = self.ids

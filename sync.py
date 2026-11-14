@@ -52,11 +52,12 @@ TABLES: dict[str, dict] = {
                         "natural": ("variety_id", "season")},
     "custom_fields": {"uid": "lower(hex(randomblob(16)))", "fk": {"variety_id": "varieties"},
                       "natural": ("variety_id", "season", "key")},
+    "weather_days": {"uid": "NEW.day", "fk": {}, "natural": ("day",)},
 }
 # Orden de aplicación: primero lo que otros referencian.
 ORDER = ["varieties", "sampling_weeks", "treatments", "measures", "observations", "photos",
          "variety_attachments", "measure_entries", "variety_metrics", "custom_fields",
-         "notebook_entries", "notebook_photos"]
+         "notebook_entries", "notebook_photos", "weather_days"]
 PATH_COLUMNS = {"photos": "path", "variety_attachments": "path", "measure_entries": "path",
                 "notebook_photos": "path"}
 # Ajustes del ensayo que también viajan (semana de referencia, primera semana fijada…).
