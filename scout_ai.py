@@ -50,7 +50,10 @@ PLANTNET_DAILY = 500
 PLANTNET_MIN_SCORE = .15        # por debajo, se pide una segunda opinión (Gemini)
 # Modelos gratuitos de Gemini en orden (alias «latest»: siempre el vigente). Cada uno tiene su
 # propia cuota diaria gratuita: si se agota uno, se usa el siguiente.
-GEMINI_MODELS = ("gemini-flash-latest", "gemini-flash-lite-latest", "gemini-2.5-flash")
+GEMINI_MODELS = ("gemini-2.5-flash", "gemini-flash-latest", "gemini-2.5-flash-lite",
+                 "gemini-flash-lite-latest", "gemini-2.0-flash")
+GEMINI_OK_KEY = "scout_gemini_ok"        # último modelo que respondió: se prueba primero
+GEMINI_LIST_URL = "https://generativelanguage.googleapis.com/v1beta/models"
 GEMINI_URL = "https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
 MAX_PHOTOS = 5
 MAX_SIDE = 1280
@@ -193,6 +196,17 @@ def _post(url: str, body: bytes, headers: dict, timeout: int = 90) -> tuple[int,
         raise Offline(f"Sin conexión: {getattr(e, 'reason', e)}") from e
 
 
+def _get(url: str, headers: dict, timeout: int = 30) -> tuple[int, bytes]:
+    req = urllib.request.Request(url, method="GET", headers=headers)
+    try:
+        with urllib.request.urlopen(req, timeout=timeout, context=_ssl()) as r:
+            return r.status, r.read()
+    except urllib.error.HTTPError as e:
+        return e.code, e.read()
+    except (urllib.error.URLError, OSError) as e:
+        raise Offline(f"Sin conexión: {getattr(e, 'reason', e)}") from e
+
+
 def _json(data: bytes) -> dict:
     try:
         out = json.loads(data.decode("utf-8", "replace"))
@@ -315,9 +329,15 @@ def ask_plantnet(key: str, images: list[bytes], organs: list[str]) -> tuple[dict
     return {"is_target": True, "candidates": cands, "photo_advice": "", "notes": ""}, remaining
 
 
-def ask_gemini(key: str, images: list[bytes], text: str, models=GEMINI_MODELS, progress=None) -> dict:
-    """Prueba los modelos gratuitos en orden: si uno no existe (404) o se le agotó la cuota
-    (429), pasa al siguiente."""
+def gemini_order(db=None) -> list[str]:
+    first = db.get_setting(GEMINI_OK_KEY) if db is not None else None
+    return ([first] if first else []) + [m for m in GEMINI_MODELS if m != first]
+
+
+def ask_gemini(key: str, images: list[bytes], text: str, models=GEMINI_MODELS, progress=None,
+               db=None) -> dict:
+    """Prueba los modelos gratuitos en orden (el último que funcionó primero): si uno no
+    existe, no acepta la consulta o no tiene cuota gratuita, pasa al siguiente."""
     parts = [{"inline_data": {"mime_type": "image/jpeg", "data": base64.b64encode(i).decode()}}
              for i in images]
     parts.append({"text": text})
@@ -325,32 +345,92 @@ def ask_gemini(key: str, images: list[bytes], text: str, models=GEMINI_MODELS, p
                        "generationConfig": {"responseMimeType": "application/json",
                                             "responseSchema": gemini_schema()}}).encode()
     headers = {"Content-Type": "application/json", "x-goog-api-key": key}
-    quota_msg = ""
+    if db is not None and models is GEMINI_MODELS:
+        models = gemini_order(db)
+    quota_msg, errors = "", []
     for model in models:
+        short = model.replace("gemini-", "")
         if progress:
-            progress(f"Gemini ({model.replace('gemini-', '').replace('-latest', '')})")
+            progress(f"Gemini ({short})")
         code, data = _post(GEMINI_URL.format(model=model), body, headers, timeout=60)
-        if code == 404:                 # modelo retirado: el siguiente
+        msg = _err_text(data) if code != 200 else ""
+        if code in (401, 403) or (code == 400 and "api key" in msg.lower()):
+            raise BadKey(f"Gemini: la clave no es válida ({msg[:120]}).")
+        if code == 429 and "limit: 0" in msg.replace("limit:0", "limit: 0"):
+            errors.append(f"{short}: sin nivel gratuito")      # ese modelo no es gratis: no es «cuota agotada»
             continue
         if code == 429:
-            quota_msg = _err_text(data)
+            quota_msg = msg
+            errors.append(f"{short}: sin cuota")
             continue
-        if code in (401, 403) or (code == 400 and "API key" in _err_text(data)):
-            raise BadKey("Gemini: la clave no es válida.")
-        if code != 200:
-            raise AIError(f"Gemini ({code}): {_err_text(data)}")
+        if code != 200:                 # modelo retirado (404) o que no acepta la consulta (400)
+            errors.append(f"{short}: {code} {msg[:80]}")
+            continue
         j = _json(data)
         try:
             txt = "".join(p.get("text", "") for p in j["candidates"][0]["content"]["parts"])
-            return json.loads(txt)
+            out = json.loads(txt)
         except (KeyError, IndexError, ValueError) as exc:
             reason = ((j.get("promptFeedback") or {}).get("blockReason")
                       or ((j.get("candidates") or [{}])[0].get("finishReason")))
             raise AIError(f"Gemini no dio una respuesta válida ({reason or exc}).") from exc
-    if quota_msg:
-        raise Quota("Gemini: sin cuota gratuita por ahora (" + quota_msg[:100] + ")",
+        if db is not None:
+            db.set_setting(GEMINI_OK_KEY, model)
+        return out
+    if quota_msg and len(errors) == sum(e.endswith("sin cuota") for e in errors):
+        raise Quota("Gemini: sin cuota gratuita por ahora (" + quota_msg[:140] + ")",
                     daily="day" in quota_msg.lower())
-    raise AIError("Gemini: ningún modelo disponible.")
+    raise AIError("Gemini: ningún modelo respondió · " + " · ".join(errors)[:300])
+
+
+def test_keys(db) -> list[str]:
+    """Prueba rápida de las claves (Ajustes de IA › Probar claves): qué responde cada servicio."""
+    keys, out = load_keys(db), []
+    k = keys.get("gemini")
+    if not k:
+        out.append("Gemini: sin clave.")
+    else:
+        try:
+            code, data = _get(f"{GEMINI_LIST_URL}?pageSize=200", {"x-goog-api-key": k})
+            if code != 200:
+                out.append(f"Gemini: la clave no sirve ({code}: {_err_text(data)[:160]})")
+            else:
+                names = [m.get("name", "").split("/")[-1] for m in _json(data).get("models", [])]
+                flash = [n for n in names if "flash" in n]
+                out.append("Gemini: clave válida. Modelos flash disponibles: " + (", ".join(flash[:8]) or "ninguno"))
+                body = json.dumps({"contents": [{"parts": [{"text": "Responde solo: ok"}]}]}).encode()
+                tried = [m for m in gemini_order(db) if m in names] + [n for n in flash if n not in GEMINI_MODELS][:3]
+                for m in tried:
+                    code, data = _post(GEMINI_URL.format(model=m), body,
+                                       {"Content-Type": "application/json", "x-goog-api-key": k}, timeout=40)
+                    if code == 200:
+                        db.set_setting(GEMINI_OK_KEY, m)
+                        u = usage(db)
+                        if "gemini" in u["out"]:
+                            u["out"].remove("gemini")
+                            db.set_setting("scout_ai_usage", u)
+                        out.append(f"Gemini: responde con {m}. Listo para identificar.")
+                        break
+                    out.append(f"Gemini {m}: {code} {_err_text(data)[:160]}")
+                else:
+                    out.append("Gemini: ningún modelo respondió (ver arriba).")
+        except Offline as exc:
+            out.append(f"Gemini: {exc}")
+    k = keys.get("plantnet")
+    if not k:
+        out.append("Pl@ntNet: sin clave.")
+    else:
+        try:
+            code, data = _get(f"https://my-api.plantnet.org/v2/projects?api-key={urllib.request.quote(k)}", {})
+            out.append("Pl@ntNet: clave válida." if code == 200 else
+                       f"Pl@ntNet: {code} {_err_text(data)[:160]}")
+        except Offline as exc:
+            out.append(f"Pl@ntNet: {exc}")
+    u = usage(db)
+    if u["out"]:
+        out.append("Marcados sin cuota hoy: " + ", ".join(PROVIDERS.get(p, p) for p in u["out"]) +
+                   " (se reintenta mañana; «Probar claves» los desbloquea si ya responden).")
+    return out
 
 
 # ----------------------------------------------------------------- resultado
@@ -425,7 +505,7 @@ def pending(db) -> list[int]:
     return [r["record_id"] for r in db.query("SELECT record_id FROM scout_ai WHERE status='pending' ORDER BY id")]
 
 
-def identify(db, record_id: int, progress=None) -> dict:
+def identify(db, record_id: int, progress=None, force: bool = False) -> dict:
     """Consulta los servicios en orden y guarda el resultado. Lanza Offline (queda
     pendiente), Quota/BadKey/AIError (queda con error)."""
     rec = db.get_record(record_id)
@@ -449,7 +529,7 @@ def identify(db, record_id: int, progress=None) -> dict:
     last_err: Exception | None = None
     weak: dict | None = None
     for prov in providers:
-        if prov in usage(db)["out"]:
+        if prov in usage(db)["out"] and not force:     # a mano (force) se intenta igual
             continue
         try:
             if progress:
@@ -467,7 +547,7 @@ def identify(db, record_id: int, progress=None) -> dict:
                 weak = res if res["candidates"] else weak      # segunda opinión con Gemini
                 continue
             text = text or prompt(section, rec, views)
-            raw = ask_gemini(keys[prov], images, text, progress=progress)
+            raw = ask_gemini(keys[prov], images, text, progress=progress, db=db)
             _count(db, prov)
             return _done(db, record_id, normalize(db, section, raw, prov))
         except Quota as exc:

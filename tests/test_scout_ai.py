@@ -93,7 +93,7 @@ def test_gemini_free_models_and_quota(db, tmp_path, monkeypatch):
 
     def post(url, body, headers, timeout=90):
         calls.append(url)
-        if "flash-latest" in url and "lite" not in url:      # primer modelo sin cuota: pasa al lite
+        if "lite" not in url:      # los modelos no-lite sin cuota: pasa al lite
             return 429, json.dumps({"error": {"message": "Quota exceeded per minute"}}).encode()
         if "lite" in url:
             code, payload = _gemini_ok("Gorgojo negro de la vid", "Otiorhynchus sulcatus")
@@ -103,7 +103,9 @@ def test_gemini_free_models_and_quota(db, tmp_path, monkeypatch):
     rec = _record(db, tmp_path, "plagas")
     res = scout_ai.identify(db, rec)
     assert res["candidates"][0]["name"] == "Gorgojo negro de la vid"
-    assert [u.split("/models/")[1].split(":")[0] for u in calls] == ["gemini-flash-latest", "gemini-flash-lite-latest"]
+    assert [u.split("/models/")[1].split(":")[0] for u in calls] == ["gemini-2.5-flash", "gemini-flash-latest",
+                                                                       "gemini-2.5-flash-lite"]
+    assert db.get_setting(scout_ai.GEMINI_OK_KEY) == "gemini-2.5-flash-lite"      # la próxima, primero
     # todos sin cuota diaria: queda pendiente y Gemini se marca agotado hoy
     monkeypatch.setattr(scout_ai, "_post", _fake({"generativelanguage": (429, {"error": {
         "message": "Quota exceeded for GenerateRequestsPerDayPerProjectPerModel"}})}, []))
@@ -150,3 +152,18 @@ def test_normalize_keeps_unlisted_species(db):
     res = scout_ai.normalize(db, "malezas", raw, "gemini")
     assert res["candidates"][0]["name"] == "Acedera" and res["candidates"][0]["species_id"] is None
     assert res["candidates"][1]["name"] == "Junquillo" and res["candidates"][1]["species_id"]
+
+
+def test_gemini_model_without_free_tier_is_skipped(db, tmp_path, monkeypatch):
+    scout_ai.save_keys(db, gemini="gm")
+
+    def post(url, body, headers, timeout=90):
+        if "2.5-flash:" in url:
+            return 429, json.dumps({"error": {"message": "Quota exceeded for metric: "
+                                              "generate_content_free_tier_requests, limit: 0, model: x PerDay"}}).encode()
+        code, payload = _gemini_ok("Trips", "Frankliniella occidentalis")
+        return code, json.dumps(payload).encode()
+    monkeypatch.setattr(scout_ai, "_post", post)
+    rec = _record(db, tmp_path, "plagas")
+    assert scout_ai.identify(db, rec)["candidates"][0]["name"] == "Trips"
+    assert "gemini" not in scout_ai.usage(db)["out"]       # no se marca «sin cuota» todo el día

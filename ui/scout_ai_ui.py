@@ -71,6 +71,25 @@ def keys_dialog(on_done=None):
     row, auto = check_row("Identificar sola cada captura nueva (si hay clave)", auto_on())
     form.add_widget(row)
 
+    def probe(*_):
+        scout_ai.save_keys(db(), **{k: f.text for k, f in fields.items()})
+        app().toast("Probando las claves…")
+
+        def work():
+            try:
+                lines = scout_ai.test_keys(db())
+            except Exception as exc:  # noqa: BLE001
+                lines = [f"Error: {exc}"]
+            Clock.schedule_once(lambda *_: _show(lines))
+
+        def _show(lines):
+            from ui.screens import text_dialog
+            text_dialog("Prueba de las claves de IA", lines, highlight="no sirve")
+        threading.Thread(target=work, daemon=True).start()
+    b = Factory.GhostButton(icon="check-network-outline", text="Probar claves (guarda y consulta)")
+    b.bind(on_release=probe)
+    form.add_widget(b)
+
     def ok(_f):
         scout_ai.save_keys(db(), **{k: f.text for k, f in fields.items()})
         db().set_setting(AUTO_KEY, bool(auto.active))
@@ -124,7 +143,7 @@ def run(record_id: int, on_done=None, quiet: bool = False):
     def work():
         res, err = None, None
         try:
-            res = scout_ai.identify(db(), record_id, progress=progress)
+            res = scout_ai.identify(db(), record_id, progress=progress, force=not quiet)
         except Exception as exc:  # noqa: BLE001 (se muestra al usuario)
             err = exc
         Clock.schedule_once(lambda *_: finished(res, err))
@@ -295,11 +314,15 @@ def ai_block(record_id: int, refresh):
         b.bind(on_release=lambda *_: running(record_id) is None and run(record_id, refresh))
         box.add_widget(b)
     elif job and job["status"] in ("pending", "error"):
-        msg = {"pending": "IA: pendiente (sin señal o sin cuota)",
-               "error": f"IA: {job['error'] or 'error'}"}[job["status"]]
+        msg = "IA: pendiente" if job["status"] == "pending" else "IA: no se pudo"
         b = Factory.GhostButton(icon="robot-confused-outline", text=msg + " · tocar para reintentar")
         b.bind(on_release=lambda *_: (scout_ai.queue(db(), record_id), run(record_id, refresh)))
         box.add_widget(b)
+        if job["error"]:            # el motivo real (sin señal, sin cuota, clave, modelo…)
+            box.add_widget(Factory.Muted(text=job["error"]))
+        k = Factory.GhostButton(icon="key-outline", text="Revisar / probar claves de IA")
+        k.bind(on_release=lambda *_: keys_dialog(refresh))
+        box.add_widget(k)
     else:
         if not has_keys(sec):
             b = Factory.GhostButton(icon="key-outline", text="Identificar con IA (poner las claves)")
