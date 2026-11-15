@@ -16,7 +16,7 @@ from kivymd.uix.screen import MDScreen
 import phenology as ph
 from ui import theme
 from ui.theme import c
-from ui.common import (DIALOG_BG, GlassButton, PillButton, app, confirm, fast_clear, form_dialog,
+from ui.common import (dialog_bg, GlassButton, PillButton, app, confirm, fast_clear, form_dialog,
     remember_variety)
 
 
@@ -103,7 +103,7 @@ def sector_map_fullscreen(plan, small, on_select):
     from android_bridge import allow_rotation
     from ui.sector_map import SectorMap
     view = ModalView(size_hint=(1, 1), auto_dismiss=True, background_color=(0, 0, 0, .85))
-    root = MDBoxLayout(orientation="vertical", md_bg_color=DIALOG_BG)
+    root = MDBoxLayout(orientation="vertical", md_bg_color=dialog_bg())
     head = MDBoxLayout(adaptive_height=True, padding=(dp(14), dp(6)), spacing=dp(8))
     title = MDLabel(text=plan.get("name") or "Plano de sectores", font_style="H6", bold=True,
                     adaptive_height=True, pos_hint={"center_y": .5})

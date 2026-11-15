@@ -99,7 +99,9 @@ BLOB_PREDIO = resource_path("assets", "ui", "blob_predio.png")
 BLOB_AI = resource_path("assets", "ui", "blob_ai.png")             # burbuja nocturna con estrellas
 START_AI_NIGHT = resource_path("assets", "ui", "start_ai_night.png")
 AI_GLOW = resource_path("assets", "ui", "ai_glow.png")
-START_NOTEBOOK = resource_path("assets", "ui", "start_notebook.png")   # cuaderno con frambuesa
+START_NOTEBOOK = resource_path("assets", "ui", "start_notebook.png")   # cuaderno (línea negra)
+START_NOTEBOOK_LIGHT = resource_path("assets", "ui", "start_notebook_light.png")   # misma, en claro
+CAMERA_ART = resource_path("assets", "ui", "camera_art.png")       # botón «Cámara» (obturador con brote)
 START_YIELD = resource_path("assets", "ui", "start_yield.png")      # canasta con frambuesas y gráfico (Gemini)
 BLOB_YIELD = resource_path("assets", "ui", "blob_yield.png")
 BLOB_NOTEBOOK = resource_path("assets", "ui", "blob_notebook.png")
@@ -350,6 +352,12 @@ def configure(crop: str | None = None, style_name: str | None = None) -> None:
     else:
         BACKGROUND = START_BG = resource_path("assets", "styles", style, "background.jpg")
     BLOB_ID = _crop_asset("blob_id.png", crop_id)
+    global START_PREDIO
+    START_PREDIO = _crop_asset("start_predio.png", crop_id)     # campo con la fruta del cultivo
+    # Íconos de Drive: trazo claro en los estilos oscuros (el verde oscuro no se veía).
+    suffix = "_dark" if style in DARK_STYLES else ""
+    for name in ("UP", "OK", "OFF"):
+        g["DRIVE_" + name] = resource_path("assets", "ui", f"drive_{name.lower()}{suffix}.png")
     install_palette()
 
 

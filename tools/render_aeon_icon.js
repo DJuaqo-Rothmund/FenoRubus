@@ -12,7 +12,8 @@ const path = require("path");
   await p.setContent(`<html><body style="margin:0;background:transparent">${svg}</body></html>`);
   await p.evaluate((N) => {
     const s = document.querySelector("svg");
-    for (const el of s.querySelectorAll("path,polygon")) if (el.getBBox().y > 175) el.remove();   // el nombre
+    const vb = s.viewBox.baseVal, cut = vb.y + vb.height * 0.8;      // el nombre va abajo
+    for (const el of s.querySelectorAll("path,polygon")) if (el.getBBox().y > cut) el.remove();
     const bb = s.getBBox(), side = Math.max(bb.width, bb.height) * 1.06;
     s.setAttribute("viewBox", `${bb.x + bb.width / 2 - side / 2} ${bb.y + bb.height / 2 - side / 2} ${side} ${side}`);
     s.setAttribute("width", N); s.setAttribute("height", N);

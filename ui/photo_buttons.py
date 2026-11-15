@@ -27,8 +27,14 @@ class RoundPhotoButton(ButtonBehavior, BoxLayout):
         self.filled = filled
         self.ring = AnchorLayout(size_hint=(1, None), height=dp(68))
         fg = (1, 1, 1, 1) if filled else c(theme.BERRY)
-        self.ring.add_widget(MDIcon(icon=icon, theme_text_color="Custom", text_color=fg, font_size="30sp",
-                                    halign="center", size_hint=(None, None), size=(dp(40), dp(40))))
+        self.art = icon == "camera-outline"       # la cámara: el dibujo de AeonCrop (disco claro)
+        if self.art:
+            from kivy.uix.image import Image
+            self.ring.add_widget(Image(source=theme.CAMERA_ART, size_hint=(None, None), size=(dp(54), dp(54)),
+                                       fit_mode="contain", mipmap=True))
+        else:
+            self.ring.add_widget(MDIcon(icon=icon, theme_text_color="Custom", text_color=fg, font_size="30sp",
+                                        halign="center", size_hint=(None, None), size=(dp(40), dp(40))))
         self.add_widget(self.ring)
         self.add_widget(MDLabel(text=text, halign="center", font_style="Caption", bold=True,
                                 theme_text_color="Custom", text_color=c(theme.INK), size_hint_y=None,
@@ -43,7 +49,12 @@ class RoundPhotoButton(ButtonBehavior, BoxLayout):
         k = .9 if self.state == "down" else 1
         self.canvas.before.clear()
         with self.canvas.before:
-            if self.filled:
+            if self.art:
+                Color(*c("#FCFDFA", k))
+                Ellipse(pos=(x, y), size=(d, d))
+                Color(*c(theme.BERRY, .85))
+                Line(circle=(r.center_x, r.center_y, d / 2 - dp(1)), width=dp(1.6))
+            elif self.filled:
                 Color(*c(theme.BERRY, k))
                 Ellipse(pos=(x, y), size=(d, d))
             else:

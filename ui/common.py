@@ -32,7 +32,14 @@ from ui.pending import PostIt  # noqa: F401 - registra la clase para el KV
 from ui.theme import c
 
 
-DIALOG_BG = (0.985, 0.992, 0.985, 1)
+_DIALOG_LIGHT = (0.985, 0.992, 0.985, 1)
+
+
+def dialog_bg():
+    """Fondo de los diálogos según el estilo: claro, o la superficie del estilo oscuro (antes
+    era siempre blanco y en los estilos oscuros el título y los botones no se veían)."""
+    from ui import theme as _t
+    return c(_t.SURFACE) if _t.is_dark() else _DIALOG_LIGHT
 
 
 def app() -> "MDApp":
@@ -344,7 +351,7 @@ def pick_dialog(title: str, items: list[tuple], dark: bool = False, subtitle: st
                 b.size_hint = (1, None)
                 row.add_widget(b)
             content.add_widget(row)
-    dialog = MDDialog(title=title, type="custom", content_cls=content, md_bg_color=DIALOG_BG,
+    dialog = MDDialog(title=title, type="custom", content_cls=content, md_bg_color=dialog_bg(),
                       buttons=[MDFlatButton(text="CERRAR", on_release=lambda *_: dialog.dismiss())])
 
     def closed(*_):
@@ -450,7 +457,7 @@ def bbch_dialog(title: str, db, callback, extra: list | None = None, current: in
                     state["current_row"] = row
 
     build()
-    dialog = MDDialog(title=title, type="custom", content_cls=scroll, md_bg_color=DIALOG_BG,
+    dialog = MDDialog(title=title, type="custom", content_cls=scroll, md_bg_color=dialog_bg(),
                       size_hint=(.96, None),
                       buttons=[MDFlatButton(text="CERRAR", on_release=lambda *_: dialog.dismiss())])
 
@@ -657,7 +664,7 @@ def text_dialog(title: str, lines: list[str], highlight: str = "", actions=(), s
     else:
         buttons = [MDFlatButton(text=t.upper(), on_release=run(cb)) for t, cb in actions]
         buttons.append(MDFlatButton(text="CERRAR", on_release=lambda *_: dialog.dismiss()))
-    dialog = MDDialog(title=title, type="custom", content_cls=content, md_bg_color=DIALOG_BG,
+    dialog = MDDialog(title=title, type="custom", content_cls=content, md_bg_color=dialog_bg(),
                       buttons=buttons)
     dialog.open()
     if content is not sv:
@@ -731,7 +738,7 @@ def confirm(title: str, text: str, actions: list[tuple[str, callable]]):
     buttons += [MDFlatButton(text=t.upper(), theme_text_color="Custom",
                              text_color=c(theme.BERRY if "ELIMIN" in t.upper() else theme.LEAF_DARK),
                              on_release=wrap(cb)) for t, cb in actions]
-    dialog = MDDialog(title=title, text=text, buttons=buttons, md_bg_color=DIALOG_BG)
+    dialog = MDDialog(title=title, text=text, buttons=buttons, md_bg_color=dialog_bg())
     dialog.open()
     return dialog
 
@@ -743,7 +750,7 @@ def form_dialog(title: str, content, on_ok, ok_text: str = "GUARDAR"):
         if on_ok(content) is not False:
             dialog.dismiss()
 
-    dialog = MDDialog(title=title, type="custom", content_cls=content, md_bg_color=DIALOG_BG, buttons=[
+    dialog = MDDialog(title=title, type="custom", content_cls=content, md_bg_color=dialog_bg(), buttons=[
         MDFlatButton(text="CANCELAR", on_release=lambda *_: dialog.dismiss()),
         MDFlatButton(text=ok_text, theme_text_color="Custom", text_color=c(theme.LEAF_DARK),
                      on_release=_ok)])
@@ -767,7 +774,7 @@ def list_dialog(title: str, rows: list[tuple[str, str]]):
     from kivymd.uix.scrollview import MDScrollView
     sv = MDScrollView(size_hint_y=None, height=dp(420))
     sv.add_widget(box)
-    dialog = MDDialog(title=title, type="custom", content_cls=sv, md_bg_color=DIALOG_BG,
+    dialog = MDDialog(title=title, type="custom", content_cls=sv, md_bg_color=dialog_bg(),
                       buttons=[MDFlatButton(text="CERRAR", on_release=lambda *_: dialog.dismiss())])
     dialog.open()
 

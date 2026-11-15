@@ -22,7 +22,7 @@ from kivymd.uix.screen import MDScreen
 import phenology as ph
 from ui import theme
 from ui.theme import c
-from ui.common import (DIALOG_BG, GlassButton, SegButton, Tag, app, confirm, current_profile,
+from ui.common import (dialog_bg, GlassButton, SegButton, Tag, app, confirm, current_profile,
     fast_clear, form_dialog, manage_catalog, pick_catalog, pick_dialog, remember_variety,
     thumb_widget)
 
@@ -77,7 +77,7 @@ def map_dialog(start: tuple, zoom: int, on_pick):
 
     a = app()
     view = ModalView(size_hint=(1, 1), auto_dismiss=True, background_color=(0, 0, 0, .6))
-    root = MDBoxLayout(orientation="vertical", md_bg_color=DIALOG_BG)
+    root = MDBoxLayout(orientation="vertical", md_bg_color=dialog_bg())
     head = MDBoxLayout(orientation="vertical", adaptive_height=True, padding=(dp(16), dp(12)),
                        spacing=dp(2))
     head.add_widget(MDLabel(text="Marque la ubicación de la muestra", font_style="H6", bold=True,

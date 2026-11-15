@@ -92,7 +92,7 @@ def main(src: str):
     def load(name):
         return Image.open(os.path.join(src, name + ".png")).convert("RGBA")
 
-    square(load("AeonCrop"), 600, .02).save(os.path.join(UI, "aeoncrop.png"))
+    # aeoncrop.png y los de IA/IA+ los hace ahora tools/make_module_icons.py (dibujos nuevos).
     rub = square(load("PhenoRubus"), 384)
     rub.save(os.path.join(UI, "logo.png"))
     for crop, name in (("arandano", "PhenoBlue"), ("cranberry", "PhenoCran")):
@@ -105,13 +105,6 @@ def main(src: str):
         gray = fruit.convert("LA").convert("RGBA")
         gray.putalpha(fruit.getchannel("A").point(lambda v: v * 6 // 10))
         gray.save(os.path.join(d, "fruit_gris.png"))
-    ia = tint(load("IA"), (190, 228, 255))
-    on_blob(ia).save(os.path.join(UI, "aeon_ia.png"))
-    glow = Image.new("RGBA", (420, 420), (0, 0, 0, 0))
-    g = neon(square(ia, int(420 * .6)))
-    glow.alpha_composite(g, ((420 - g.width) // 2, (420 - g.height) // 2))
-    glow.save(os.path.join(UI, "aeon_ia_glow.png"))
-    on_blob(tint(load("IAplus"), (150, 210, 255))).save(os.path.join(UI, "aeon_iaplus.png"))
     if len(sys.argv) > 2:      # ícono sin letras (tools/render_aeon_icon.js)
         icon = Image.new("RGBA", (512, 512), (242, 244, 238, 255))
         icon.alpha_composite(square(Image.open(sys.argv[2]).convert("RGBA"), 512, .10))

@@ -134,7 +134,7 @@ KV = """
         size_hint_x: None
         width: dp(86)
         theme_text_color: "Custom"
-        text_color: c("#2F7F92")
+        text_color: theme.on_bg("#2F7F92")
 
 <CountRow>:
     size_hint_y: None
@@ -230,7 +230,7 @@ class _Thumb(ButtonBehavior, MDBoxLayout):
         self.add_widget(self.img)
         self.add_widget(MDLabel(text=caption, font_style="Caption", halign="center", adaptive_height=True,
                                 bold=counted, theme_text_color="Custom",
-                                text_color=c(ACCENT if counted else theme.MUTED)))
+                                text_color=theme.on_bg(ACCENT) if counted else c(theme.MUTED)))
         app().thumb_async(path, 240, lambda t: setattr(self.img, "source", t))
 
 
@@ -387,7 +387,7 @@ class YieldSet(YieldScreenBase):
         card = _card(f"CONTEO TOTAL · {res['counted']} de {res['photos']} foto(s) contadas")
         for k, name, color in R.stages(_crop_id()):
             line = MDBoxLayout(adaptive_height=True)
-            line.add_widget(MDLabel(text=name, adaptive_height=True, theme_text_color="Custom", text_color=c(color),
+            line.add_widget(MDLabel(text=name, adaptive_height=True, theme_text_color="Custom", text_color=theme.on_bg(color),
                                     bold=True))
             line.add_widget(MDLabel(text=str(res["totals"].get(k, 0)), halign="right", adaptive_height=True,
                                     theme_text_color="Custom", text_color=c(theme.INK)))
@@ -442,7 +442,7 @@ class YieldSet(YieldScreenBase):
             line = MDBoxLayout(adaptive_height=True)
             line.add_widget(Factory.Body(text=a))
             line.add_widget(MDLabel(text=v, halign="right", bold=True, adaptive_height=True,
-                                    theme_text_color="Custom", text_color=c(ACCENT)))
+                                    theme_text_color="Custom", text_color=theme.on_bg(ACCENT)))
             card.add_widget(line)
         if res["kg_ha"] is None:
             card.add_widget(Factory.Muted(text="Indique el peso del fruto y las plantas por hectárea para ver los kilos."))

@@ -113,7 +113,7 @@ KV = """
         size_hint_x: None
         width: dp(64)
         theme_text_color: "Custom"
-        text_color: c(root.accent)
+        text_color: theme.on_bg(root.accent)
 
 <ScoutScreenBase>:
     md_bg_color: 0, 0, 0, 0
@@ -194,7 +194,7 @@ class ScoutHome(ScoutScreenBase):
         for key, (name, _f, _code, color) in scout.SECTIONS.items():
             holder = MDBoxLayout(orientation="vertical", adaptive_height=True, spacing=dp(2))
             anchor = AnchorLayout(size_hint_y=None, height=dp(132))
-            b = Factory.StartIcon(source=icon(key), bubble=bubble(key), label=name, color=c(color),
+            b = Factory.StartIcon(source=icon(key), bubble=bubble(key), label=name, color=theme.on_bg(color),
                                   diameter=dp(80))
             b.bind(on_release=lambda *_, k=key: open_section(k))
             anchor.add_widget(b)
@@ -315,7 +315,7 @@ class ScoutSpecies(ScoutScreenBase):
             line = MDBoxLayout(adaptive_height=True, spacing=dp(8))
             line.add_widget(MDLabel(text=st, font_style="Caption", adaptive_height=True, size_hint_x=.48,
                                     theme_text_color="Custom", text_color=c(theme.INK)))
-            bar = MDProgressBar(max=scout.GOAL, value=min(n, scout.GOAL), color=c(color),
+            bar = MDProgressBar(max=scout.GOAL, value=min(n, scout.GOAL), color=theme.on_bg(color),
                                 back_color=c(color, .15), size_hint=(.36, None), height=dp(6),
                                 pos_hint={"center_y": .5})
             line.add_widget(bar)

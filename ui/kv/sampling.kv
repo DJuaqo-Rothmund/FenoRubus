@@ -201,9 +201,9 @@
         padding: dp(7)
         icon_size: "22sp"
         pos_hint: {"center_y": .5}
-        md_bg_color: 1, 1, 1, 1
+        md_bg_color: c(theme.NAV_TILE) if theme.is_dark() else (1, 1, 1, 1)
         theme_icon_color: "Custom"
-        icon_color: c(theme.LEAF_DARK)
+        icon_color: c(theme.FILL_DARK) if theme.is_dark() else c(theme.LEAF_DARK)
         on_release: root.open_measures()
 
 <WorkspacesScreen>:

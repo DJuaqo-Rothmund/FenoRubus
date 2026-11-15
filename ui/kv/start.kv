@@ -115,7 +115,7 @@
             id: scout
             logo: theme.SCOUT_LOGO
             app_name: "AeonScout"
-            accent: "#1D5E63"
+            accent: "#7CC9C4" if theme.is_dark() else "#1D5E63"
             side: dp(112)
             pos_hint: {"center_x": .5, "center_y": .21}
             on_release: app.open_scout()

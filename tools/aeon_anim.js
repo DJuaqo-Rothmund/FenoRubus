@@ -10,7 +10,8 @@ const path = require("path");
   fs.mkdirSync(out, { recursive: true });
   const svg = fs.readFileSync(path.join(__dirname, "..", "assets", "src", "AeonCrop.svg"), "utf8");
   const b = await chromium.launch();
-  const H = Math.round(W * 220.2 / 211.01);
+  const vbm = svg.match(/viewBox="([^"]+)"/)[1].split(/\s+/).map(Number);
+  const H = Math.round(W * vbm[3] / vbm[2]);
   const p = await b.newPage({ viewport: { width: Number(W), height: H } });
   await p.setContent(`<html><body style="margin:0;background:transparent">${svg}</body></html>`);
   await p.evaluate(({ W, H }) => {
@@ -18,16 +19,20 @@ const path = require("path");
     s.setAttribute("width", W); s.setAttribute("height", H);
     const NS = "http://www.w3.org/2000/svg";
     const defs = s.querySelector("defs");
-    const green = [...s.querySelectorAll(".cls-3")];
+    const vb = s.viewBox.baseVal, k = vb.width / 211.01, cut = vb.y + vb.height * 0.8;  // el nombre, abajo
+    // Huella: las líneas verdes de arriba (no las letras).
+    const green = [...s.querySelectorAll(".cls-3")].filter((el) => el.getBBox().y < cut);
     // Orden de dibujo: de afuera hacia adentro (distancia al centro de la huella).
-    const cx = 105, cy = 85;
+    let x0 = 1e9, y0 = 1e9, x1 = -1e9, y1 = -1e9;
+    green.forEach((el) => { const b = el.getBBox(); x0 = Math.min(x0, b.x); y0 = Math.min(y0, b.y); x1 = Math.max(x1, b.x + b.width); y1 = Math.max(y1, b.y + b.height); });
+    const cx = (x0 + x1) / 2, cy = (y0 + y1) / 2;
     green.forEach((el) => { const bb = el.getBBox(); el._d = -Math.hypot(bb.x + bb.width / 2 - cx, bb.y + bb.height / 2 - cy); });
     green.sort((a, b) => a._d - b._d);
     window._green = green.map((el, i) => {
       const m = document.createElementNS(NS, "mask");
       m.setAttribute("id", "m" + i); m.setAttribute("maskUnits", "userSpaceOnUse");
       const st = el.cloneNode(); st.removeAttribute("class");
-      st.setAttribute("fill", "none"); st.setAttribute("stroke", "#fff"); st.setAttribute("stroke-width", "9");
+      st.setAttribute("fill", "none"); st.setAttribute("stroke", "#fff"); st.setAttribute("stroke-width", String(9 * k));
       st.setAttribute("stroke-linecap", "round");
       const L = el.getTotalLength ? el.getTotalLength() : 0;
       st.setAttribute("stroke-dasharray", `${L} ${L}`);
@@ -37,9 +42,14 @@ const path = require("path");
     });
     // Planta: piezas rosadas sobre la base del reloj (no las letras «Aeon»).
     const cp = document.createElementNS(NS, "clipPath"); cp.setAttribute("id", "grow");
-    const r = document.createElementNS(NS, "rect"); r.setAttribute("x", 0); r.setAttribute("width", 211);
+    const r = document.createElementNS(NS, "rect"); r.setAttribute("x", vb.x); r.setAttribute("width", vb.width);
     cp.appendChild(r); defs.appendChild(cp); window._growRect = r;
-    [...s.querySelectorAll(".cls-2")].forEach((el) => { if (el.getBBox().y < 150) el.setAttribute("clip-path", "url(#grow)"); });
+    let pTop = 1e9, pBase = -1e9;
+    [...s.querySelectorAll(".cls-2")].forEach((el) => {
+      const b = el.getBBox();
+      if (b.y < cut) { el.setAttribute("clip-path", "url(#grow)"); pTop = Math.min(pTop, b.y); pBase = Math.max(pBase, b.y + b.height); }
+    });
+    window._plant = { base: pBase + 1, top: pTop - 2 };
   }, { W: Number(W), H });
   const N = Math.round(SECS * FPS);
   const ease = (x) => 1 - Math.pow(1 - Math.min(1, Math.max(0, x)), 3);
@@ -55,7 +65,7 @@ const path = require("path");
       }
       const q = Math.min(1, Math.max(0, (t - 0.45) / 1.6));
       const e = 1 - Math.pow(1 - q, 3);
-      const base = 136.5, top = 0;
+      const base = window._plant.base, top = window._plant.top;
       const y = base - (base - top) * e;
       window._growRect.setAttribute("y", y); window._growRect.setAttribute("height", base - y + 1);
     }, t);
