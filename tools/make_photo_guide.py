@@ -292,6 +292,62 @@ def row(contents, labels, w=900):
     return svg(w, int(fh + 100), "".join(out))
 
 
+# ----------------------------------------------------------------- láminas con las ilustraciones de Flow
+# Si están las viñetas generadas en Flow (assets/src/guia_flow/<viñeta>.jpg, cuadradas), la lámina
+# se arma con ellas (marco de visor, ✓/✗ y etiqueta dibujados encima) y sale en JPEG.
+FLOW = os.path.join(ROOT, "assets", "src", "guia_flow")
+FLOW_SHEETS = {   # lámina: ([(viñeta, etiqueta, ✓/✗/None)…])
+    "g_enfoque": [("g_enfoque_ok", "Nítida", True), ("g_enfoque_bad", "Movida o borrosa", False)],
+    "g_luz": [("g_luz_ok", "Sombra suave", True), ("g_luz_bad", "Sol directo o flash", False)],
+    "g_llenar": [("g_llenar_ok", "Que llene la foto", True), ("g_llenar_bad", "Muy lejos", False)],
+    "g_fondo": [("g_fondo_ok", "Fondo simple", True), ("g_fondo_bad", "Fondo recargado", False)],
+    "g_escala": [("g_escala_ok", "Con moneda o regla", True), ("g_escala_bad", "Sin escala", False)],
+    "g_contexto": [("g_contexto_ok", "La planta y el lugar", None), ("g_contexto_bad", "Solo el detalle", None)],
+    "p_set": [("p_set_dorsal", "Dorsal", None), ("p_set_lateral", "Lateral", None),
+              ("p_set_ventral", "Ventral", None), ("p_set_dano", "Daño", None)],
+    "p_larva": [("p_larva_patas", "Con patas: pololo", None), ("p_larva_sinpatas", "Sin patas: gorgojo", None)],
+    "p_frio": [("p_frio_ok", "5 min al refrigerador", None), ("p_frio_ok2", "Luego sobre papel", True)],
+    "p_dano": [("p_dano_ok", "Insecto y su daño", None), ("p_dano_ok2", "Solo el daño", None)],
+    "m_set": [("m_set_planta", "Planta completa", None), ("m_set_haz", "Hoja (haz)", None),
+              ("m_set_enves", "Hoja (envés)", None), ("m_set_flor", "Flor / semilla", None)],
+    "m_raiz": [("m_raiz_ok", "Con raíz o base", True), ("m_raiz_bad", "Solo lo de arriba", None)],
+    "m_graminea": [("m_graminea_ligula", "Unión hoja-tallo", None), ("m_graminea_espiga", "La espiga", None)],
+    "e_set": [("e_set_organo", "Órgano completo", None), ("e_set_detalle", "Detalle de la lesión", None)],
+    "e_borde": [("e_borde_ok", "Con borde sano", True), ("e_borde_bad", "Solo lo podrido", False)],
+    "e_moho_raiz": [("e_moho", "Moho: muy de cerca", None), ("e_cuello", "Cuello cortado", None)],
+}
+
+
+def flow_img(name, x, y, w, h):
+    import base64
+    with open(os.path.join(FLOW, name + ".jpg"), "rb") as f:
+        b64 = base64.b64encode(f.read()).decode()
+    return (f"<image x='{x}' y='{y}' width='{w}' height='{h}' preserveAspectRatio='xMidYMid slice' "
+            f"href='data:image/jpeg;base64,{b64}'/>")
+
+
+def flow_sheet(panels) -> str:
+    n = len(panels)
+    gap, margin, w = 20, 30, 900
+    fw = (w - 2 * margin - gap * (n - 1)) / n
+    fh = fw if n > 2 else fw * .92
+    out = []
+    for i, (name, label, ok) in enumerate(panels):
+        x = margin + i * (fw + gap)
+        out.append(frame(x, 30, fw, fh, flow_img(name, x, 30, fw, fh), ok, label))
+    h = int(fh + 100)
+    return (f"<svg xmlns='http://www.w3.org/2000/svg' viewBox=\"0 0 {w} {h}\" width='{w}' height='{h}'>"
+            f"<rect width='{w}' height='{h}' fill='{BG}'/>{''.join(out)}</svg>")
+
+
+def flow_sheets() -> dict[str, str]:
+    out = {}
+    for sheet, panels in FLOW_SHEETS.items():
+        if all(os.path.exists(os.path.join(FLOW, p + ".jpg")) for p, _l, _o in panels):
+            out[sheet] = flow_sheet(panels)
+    return out
+
+
 def sheets() -> dict[str, str]:
     C = (40 + FW / 2, 30 + FH / 2)
     D = (480 + FW / 2, 30 + FH / 2)
@@ -390,19 +446,30 @@ def sheets() -> dict[str, str]:
 def main():
     os.makedirs(TMP, exist_ok=True)
     os.makedirs(OUT, exist_ok=True)
+    flow = flow_sheets()
     files = []
-    for name, data in sheets().items():
+    for name, data in {**sheets(), **flow}.items():
         p = os.path.join(TMP, name + ".svg")
         with open(p, "w", encoding="utf-8") as f:
             f.write(data)
         files.append(p)
     subprocess.run(["node", os.path.join(ROOT, "tools", "render_svgs.js"), "900", OUT, *files], check=True)
     from PIL import Image
-    for f in files:   # PNG con paleta: livianos
-        png = os.path.join(OUT, os.path.basename(f)[:-4] + ".png")
+    for f in files:
+        name = os.path.basename(f)[:-4]
+        png = os.path.join(OUT, name + ".png")
         im = Image.open(png).convert("RGBA")
-        im.quantize(colors=128, method=Image.Quantize.FASTOCTREE).save(png, optimize=True)
-    print("listo:", OUT, len(files))
+        if name in flow:      # ilustraciones: JPEG (el PNG de paleta las ensucia)
+            bg = Image.new("RGB", im.size, BG)
+            bg.paste(im, mask=im.getchannel("A"))
+            bg.save(os.path.join(OUT, name + ".jpg"), quality=86, optimize=True)
+            os.remove(png)
+        else:                 # dibujos planos: PNG con paleta (livianos)
+            jpg = os.path.join(OUT, name + ".jpg")
+            if os.path.exists(jpg):
+                os.remove(jpg)
+            im.quantize(colors=128, method=Image.Quantize.FASTOCTREE).save(png, optimize=True)
+    print("listo:", OUT, len(files), "con Flow:", len(flow))
 
 
 if __name__ == "__main__":

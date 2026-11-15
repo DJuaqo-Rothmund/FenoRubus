@@ -457,7 +457,10 @@ class ScoutGuide(ScoutScreenBase):
         for img, title, text in scout_guide.photo_cards(self.section):
             card = _card()
             card.add_widget(Factory.Body(text=f"[b]{title}[/b]", markup=True))
-            pic = Image(source=resource_path("assets", "ui", "guia", f"{img}.png"), size_hint_y=None,
+            src = resource_path("assets", "ui", "guia", f"{img}.jpg")     # ilustraciones de Flow
+            if not os.path.exists(src):
+                src = resource_path("assets", "ui", "guia", f"{img}.png")
+            pic = Image(source=src, size_hint_y=None,
                         fit_mode="contain", mipmap=True)
 
             def fit(w, *_):
