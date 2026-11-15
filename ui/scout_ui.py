@@ -147,7 +147,10 @@ class ScoutScreenBase(MDScreen):
     title = StringProperty("AeonScout")
 
     def clear(self):
-        self.ids.body.clear_widgets()
+        # fast_clear: el clear_widgets de KivyMD 1.2 recorre todos los observadores del tema
+        # y con ~50 filas tardaba más de un segundo al volver a entrar.
+        from ui.common import fast_clear
+        fast_clear(self.ids.body)
         return self.ids.body
 
     def gap(self, h=8):
@@ -268,13 +271,34 @@ class ScoutHome(ScoutScreenBase):
 class ScoutSection(ScoutScreenBase):
     section = StringProperty("malezas")
 
+    _built_key = None
+    _batch_ev = None
+    FIRST_ROWS = 10      # filas que se dibujan al entrar; el resto, de a poco en los cuadros siguientes
+    BATCH = 6
+
     def on_pre_enter(self, *_):
         self.title = scout.SECTIONS[self.section][0]
         self.ids.bar.right_action_items = [["plus", lambda x: add_species_dialog(self.section, self.refresh),
                                             "Agregar especie"]]
-        self.refresh()
+        self.refresh(only_if_changed=True)
 
-    def refresh(self):
+    def _data(self):
+        sec = self.section
+        unknown = [s for s in db().species(sec, unidentified=True) if s["records"]]
+        catalog = db().species(sec, unidentified=False)
+        ai = db().query_one("SELECT COUNT(*) AS n, MAX(updated_at) AS t FROM scout_ai")
+        key = (sec, tuple((s["id"], s["name"], s["scientific"], s["kind"], s["records"], s["photos"])
+                          for s in unknown + catalog), ai["n"], ai["t"])
+        return unknown, catalog, key
+
+    def refresh(self, only_if_changed: bool = False):
+        unknown, catalog, key = self._data()
+        if only_if_changed and key == self._built_key:
+            return                  # nada cambió: la lista ya armada sirve tal cual (entrada al instante)
+        self._built_key = key
+        if self._batch_ev is not None:
+            self._batch_ev.cancel()
+            self._batch_ev = None
         body = self.clear()
         sec = self.section
         color = scout.SECTIONS[sec][3]
@@ -285,16 +309,32 @@ class ScoutSection(ScoutScreenBase):
         b = Factory.GhostButton(icon="camera-iris", text="Cómo sacar las fotos para la IA")
         b.bind(on_release=lambda *_: ai.photo_guide(sec))
         body.add_widget(b)
-        unknown = [s for s in db().species(sec, unidentified=True) if s["records"]]
+        items: list = []
         if unknown:
-            body.add_widget(Factory.SectionLabel(text="POR IDENTIFICAR"))
-            for s in unknown:
-                body.add_widget(self._row(s, color))
-        body.add_widget(Factory.SectionLabel(text="CATÁLOGO · tocar para ver sus fotos"))
-        for s in db().species(sec, unidentified=False):
-            body.add_widget(self._row(s, color))
-        body.add_widget(Factory.Muted(
+            items.append(Factory.SectionLabel(text="POR IDENTIFICAR"))
+            items += [s for s in unknown]
+        items.append(Factory.SectionLabel(text="CATÁLOGO · tocar para ver sus fotos"))
+        items += catalog
+        items.append(Factory.Muted(
             text="Las especies con más fotos van primero. «+» arriba agrega una especie al catálogo."))
+
+        def add(it):
+            body.add_widget(self._row(it, color) if isinstance(it, dict) else it)
+
+        rows = 0
+        while items and rows < self.FIRST_ROWS:
+            it = items.pop(0)
+            add(it)
+            rows += isinstance(it, dict)
+
+        def more(*_):
+            for _i in range(self.BATCH):
+                if not items:
+                    self._batch_ev = None
+                    return False
+                add(items.pop(0))
+        if items:
+            self._batch_ev = Clock.schedule_interval(more, 0)
 
     def _row(self, s: dict, color: str):
         sub = f"[i]{s['scientific']}[/i]" if s["scientific"] else ""
@@ -937,6 +977,8 @@ def open_home():
 
 def open_section(section: str):
     s = _screen(ScoutSection, "scout_section")
+    if s.section != section:
+        s._built_key = None
     s.section = section
     if app().sm.current == "scout_section":
         s.on_pre_enter()
