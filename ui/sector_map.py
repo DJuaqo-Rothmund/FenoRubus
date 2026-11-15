@@ -270,7 +270,7 @@ class SectorMap(StencilView):
             xs, ys = [p[0] for p in pts], [p[1] for p in pts]
             bw, bh = max(xs) - min(xs) or 1, max(ys) - min(ys) or 1
             fill = .92 if whole else .62
-            target_zoom = max(1.0, min(self.MAX_ZOOM, fill * min(self.width / bw, self.height / bh)))
+            target_zoom = max(1.0, min(self._max_zoom(), fill * min(self.width / bw, self.height / bh)))
             self.zoom = target_zoom
             pts = [self._local(r[k], r[k + 1]) for r in rings for k in range(0, len(r), 2)]
             cx = (min(p[0] for p in pts) + max(p[0] for p in pts)) / 2
@@ -319,6 +319,14 @@ class SectorMap(StencilView):
         for ty in range(int(ty0), int(ty1) + 1):
             for tx in range(int(tx0), int(tx1) + 1):
                 tex = self._tiles.get(z, tx, ty, "sat")
+                for up in (1, 2, 3):        # mientras baja: la tesela de un nivel menos, ampliada
+                    if tex is not None:
+                        break
+                    parent = self._tiles.get(z - up, tx >> up, ty >> up, "sat")
+                    if parent is not None:
+                        k = 2 ** up
+                        sub = parent.width / k
+                        tex = parent.get_region((tx % k) * sub, (k - 1 - ty % k) * sub, sub, sub)
                 if tex is None:
                     continue
                 pts = []
@@ -555,9 +563,20 @@ class SectorMap(StencilView):
         (x0, y0), (x1, y1) = list(self._touches.values())[:2]
         return math.hypot(x1 - x0, y1 - y0) or 1.0
 
+    def _max_zoom(self) -> float:
+        """Zoom máximo: con fondo satelital, hasta la resolución real de las imágenes (nivel
+        SAT_MAX_ZOOM + 1); más cerca la imagen se pixelaba y quedaba en blanco."""
+        g = self.plan.get("geo")
+        if not (self.satellite and g and self.width and self.height):
+            return self.MAX_ZOOM
+        import geo
+        lat_c = (self.plan["h"] / 2 + g["y0"]) / g["ky"]
+        per_z = 156543.03 * math.cos(math.radians(lat_c)) * self._base()   # 2**z a zoom 1
+        return max(1.0, min(self.MAX_ZOOM, 2 ** (geo.SAT_MAX_ZOOM + 1) / per_z))
+
     def _zoom_at(self, factor, pos):
         old = self.zoom
-        new = max(1.0, min(self.MAX_ZOOM, old * factor))
+        new = max(1.0, min(self._max_zoom(), old * factor))
         if new == old:
             return
         # El punto bajo los dedos queda fijo.

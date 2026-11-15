@@ -205,15 +205,21 @@
     # Mediciones: el contador manual dibujado, sobre un círculo claro (en todos los estilos).
     canvas:
         Color:
-            rgba: 0, 0, 0, .18
+            rgba: 0, 0, 0, .45
         Ellipse:
-            pos: self.x, self.y - dp(2)
+            pos: self.x - dp(1), self.y - dp(4)
             size: self.size
         Color:
             rgba: c(theme.NAV_TILE) if theme.is_dark() else (1, 1, 1, 1)
         Ellipse:
             pos: self.pos
             size: self.size
+        # anillo del color de la fruta: se distingue de las tarjetas de abajo
+        Color:
+            rgba: c(theme.BERRY)
+        Line:
+            circle: self.center_x, self.center_y, self.width / 2 - dp(1.5)
+            width: dp(2.2)
         Color:
             rgba: (1, 1, 1, 1 if self.state == "normal" else .65)
         Rectangle:

@@ -12,6 +12,8 @@
 #:set NB_OCHRE "#C8963E"
 #:set NB_SOFT "#EEDAB8"
 #:set NB_PAPER "#FBF6EC"
+#:set NB_INK "#2E2A24"
+#:set NB_HINT "#9A8E7C"
 
 <NotebookScreen>:
     md_bg_color: 0, 0, 0, 0
@@ -366,8 +368,10 @@
                         background_normal: ""
                         background_active: ""
                         background_color: 0, 0, 0, 0
-                        foreground_color: c(theme.INK)
-                        hint_text_color: c(theme.MUTED, .8)
+                        # La hoja es siempre papel claro: tinta oscura en todos los estilos
+                        # (con el color del estilo, en los oscuros el texto salía blanco).
+                        foreground_color: c(NB_INK)
+                        hint_text_color: c(NB_HINT)
                         cursor_color: c(NB_BROWN)
                         selection_color: c(NB_OCHRE, .35)
                         padding: dp(4), dp(8)

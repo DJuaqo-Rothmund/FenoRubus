@@ -102,7 +102,9 @@ class MapPicker(StencilView):
 
     def zoom_at(self, new_zoom: float, focus=None):
         """Cambia el zoom dejando fijo el punto bajo `focus` (posición en pantalla)."""
-        new_zoom = max(MIN_ZOOM, min(MAX_ZOOM, new_zoom))
+        # Satelital: hasta un nivel más que el de las imágenes (más cerca se veía en blanco).
+        top = min(MAX_ZOOM, geo.SAT_MAX_ZOOM + 1 if self.layer == "sat" else MAX_TILE_ZOOM)
+        new_zoom = max(MIN_ZOOM, min(top, new_zoom))
         fx, fy = focus or self.center
         s0 = self._scale()
         ax = self.wx + (fx - self.center_x) / s0
