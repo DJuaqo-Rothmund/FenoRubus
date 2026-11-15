@@ -290,7 +290,7 @@ _pick_open = None   # diálogo de selección abierto (evita abrir varios con toq
 
 
 def pick_dialog(title: str, items: list[tuple], dark: bool = False, subtitle: str = "",
-                footer: list[tuple] | None = None, empty: str = ""):
+                footer: list[tuple] | None = None, empty: str = "", image: str | None = None):
     """
     Lista de selección en un diálogo CENTRADO y a lo ancho (reemplaza al menú
     desplegable, que se abría desplazado y cortaba los nombres largos).
@@ -335,8 +335,18 @@ def pick_dialog(title: str, items: list[tuple], dark: bool = False, subtitle: st
         from kivy.factory import Factory
         content = MDBoxLayout(orientation="vertical", adaptive_height=True, spacing=dp(10))
         if subtitle:
-            content.add_widget(MDLabel(text=subtitle, font_style="Body2", adaptive_height=True,
-                                       theme_text_color="Custom", text_color=c(theme.MUTED)))
+            sub = MDLabel(text=subtitle, font_style="Body2", adaptive_height=True,
+                          theme_text_color="Custom", text_color=c(theme.MUTED))
+            if image:                   # dibujo del módulo junto a la bajada (p. ej. Mediciones)
+                from kivy.uix.image import Image
+                head = MDBoxLayout(adaptive_height=True, spacing=dp(10))
+                head.add_widget(Image(source=image, size_hint=(None, None), size=(dp(52), dp(52)),
+                                      fit_mode="contain", mipmap=True))
+                sub.pos_hint = {"center_y": .5}
+                head.add_widget(sub)
+                content.add_widget(head)
+            else:
+                content.add_widget(sub)
         if items:
             content.add_widget(rv)
         elif empty:

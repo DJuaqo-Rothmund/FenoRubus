@@ -72,7 +72,7 @@ def open_measures_menu():
     span = (f"{start.day} {ph.MESES[start.month - 1][:3]} – "
             f"{end.day} {ph.MESES[end.month - 1][:3]} {end.year}")
     pick_dialog("Mediciones", items, subtitle=f"{ph.week_title(week)} · {span}", footer=footer,
-                empty="Aún no hay mediciones en este ensayo.")
+                empty="Aún no hay mediciones en este ensayo.", image=theme.MEASURES_ICON)
 
 
 def delete_measure_dialog(m: dict, week: dict):

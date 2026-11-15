@@ -194,17 +194,32 @@
         theme_text_color: "Custom"
         text_color: 1, 1, 1, 1
     # Mediciones de la semana: círculo flotante (tocar el nombre cambia de ensayo o predio)
-    MDIconButton:
-        icon: "clipboard-plus-outline"
+    # (más grande que la franja y algo más abajo: cuelga sobre el contenido, como un sello)
+    MeasuresCounterButton:
         size_hint: None, None
-        size: dp(40), dp(40)
-        padding: dp(7)
-        icon_size: "22sp"
-        pos_hint: {"center_y": .5}
-        md_bg_color: c(theme.NAV_TILE) if theme.is_dark() else (1, 1, 1, 1)
-        theme_icon_color: "Custom"
-        icon_color: c(theme.FILL_DARK) if theme.is_dark() else c(theme.LEAF_DARK)
+        size: dp(54), dp(54)
+        pos_hint: {"center_y": .12}
         on_release: root.open_measures()
+
+<MeasuresCounterButton@ButtonBehavior+Widget>:
+    # Mediciones: el contador manual dibujado, sobre un círculo claro (en todos los estilos).
+    canvas:
+        Color:
+            rgba: 0, 0, 0, .18
+        Ellipse:
+            pos: self.x, self.y - dp(2)
+            size: self.size
+        Color:
+            rgba: c(theme.NAV_TILE) if theme.is_dark() else (1, 1, 1, 1)
+        Ellipse:
+            pos: self.pos
+            size: self.size
+        Color:
+            rgba: (1, 1, 1, 1 if self.state == "normal" else .65)
+        Rectangle:
+            source: theme.MEASURES_ICON
+            pos: self.x + self.width * .1, self.y + self.height * .1
+            size: self.width * .8, self.height * .8
 
 <WorkspacesScreen>:
     md_bg_color: 0, 0, 0, 0
