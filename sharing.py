@@ -261,21 +261,37 @@ def _perms(drive, file_id: str) -> list[dict]:
         {"fields": "permissions(id,emailAddress,role,pendingOwner,type)"})).get("permissions", [])
 
 
-def accept_transfers(drive, limit: int = 200) -> int:
+XFER_SEEN = "share_xfer_seen"     # {id de archivo: hora} ya revisados sin traspaso pendiente
+XFER_MEMBERS = "share_xfer_members"
+
+
+def accept_transfers(drive, limit: int = 200, full: bool = True) -> int:
     """En el teléfono del DUEÑO: acepta la propiedad de lo que los demás subieron a la carpeta
-    común (fotos de la otra persona → quedan en este Drive). Devuelve cuántas se aceptaron."""
+    común (fotos de la otra persona → quedan en este Drive). Devuelve cuántas se aceptaron.
+
+    full=False (las pasadas frecuentes): no vuelve a pedir los permisos de los archivos ya
+    revisados (antes eran ~10 pedidos a Drive y ~4 s cada 2 minutos aunque no hubiera nada
+    nuevo) y usa la lista de integrantes guardada. full=True revisa todo de nuevo."""
+    import time as _time
     db = drive.db
     me = my_email(drive)
     folder = db.get_setting("share_folder")
     if not folder or not me or owner_of(db) != me:
         return 0
-    others = [m["email"] for m in members(drive, folder) if m["email"] and m["email"] != me]
+    others = None if full else db.get_setting(XFER_MEMBERS)
+    if others is None:
+        others = [m["email"] for m in members(drive, folder) if m["email"] and m["email"] != me]
+        db.set_setting(XFER_MEMBERS, others)
+    seen = {} if full else dict(db.get_setting(XFER_SEEN) or {})
+    now = _time.time()
     got = 0
     for email in others:
         q = f"'{email}' in owners and trashed=false and mimeType != '{FOLDER_MIME}'"
         res = drive._call("GET", f"{API}?" + urllib.parse.urlencode(
             {"q": q, "fields": "files(id)", "spaces": "drive", "pageSize": str(limit)}))
         for f in res.get("files", []):
+            if f["id"] in seen:
+                continue
             try:
                 mine = next((p for p in _perms(drive, f["id"])
                              if p.get("emailAddress", "").lower() == me and p.get("pendingOwner")), None)
@@ -284,6 +300,9 @@ def accept_transfers(drive, limit: int = 200) -> int:
                         {"transferOwnership": "true", "fields": "id"}),
                         json.dumps({"role": "owner"}).encode(), JSON)
                     got += 1
+                else:
+                    seen[f["id"]] = now      # sin traspaso pendiente: no se vuelve a preguntar hasta la revisión completa
             except DriveError:
                 continue           # la próxima sincronización lo intenta de nuevo
+    db.set_setting(XFER_SEEN, seen)
     return got

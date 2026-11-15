@@ -40,6 +40,8 @@ REORDER_EVERY = 3600        # s: orden completo de Drive al sincronizar a mano, 
 GIVE_UP_TRIES = 15          # foto que el otro equipo nunca subió: deja de contarse como pendiente
 
 
+XFER_EVERY = 20 * 60        # s: ensayo compartido sin novedades, revisar traspasos de fotos cada 20 min
+XFER_FULL_EVERY = 6 * 3600  # s: revisión completa de traspasos (todos los archivos) cada 6 h
 FULL_CHECK_EVERY = 7 * 24 * 3600   # s: sin cambios en el ensayo, el orden completo de Drive una vez por semana
 
 
@@ -370,7 +372,7 @@ class DriveSync:
             with perf.timed("sync.registros", lambda: f"{code}: +{res['received']} recibidos, {res['sent']} enviados"):
                 res = self.sync_db(db, folder, db.get_setting("share_sync") or None)
             if db.get_setting("share_folder"):
-                self._accept_transfers(db)
+                self._accept_transfers(db, received=res["received"], manual=manual)
             p(base + step * .3, f"{name}: fotos")
             with perf.timed("sync.subir fotos", lambda: f"{code}: {up} subidas, {mv} movidas"):
                 up, mv = self._backup_photos(db, manual, lambda f, t="", b=base, s=step, n=name:
@@ -463,17 +465,39 @@ class DriveSync:
             print("respaldo de fotos:", exc)
             return 0, 0
 
-    def _accept_transfers(self, db) -> int:
+    def _accept_transfers(self, db, received: int = 0, manual: bool = False) -> int:
         """Dueño de un ensayo compartido: acepta la propiedad de las fotos que subió la otra
-        persona (quedan en este Drive). Nunca frena la sincronización."""
+        persona (quedan en este Drive). Nunca frena la sincronización.
+
+        Se revisa solo cuando llegaron registros nuevos de la otra persona (sus fotos van con
+        ellos), al sincronizar a mano o cada XFER_EVERY; la revisión completa (todos los
+        archivos e integrantes) cada XFER_FULL_EVERY."""
+        import time as _time
+        last = db.get_setting("share_xfer_at")
+        try:
+            due = not last or _time.time() - float(last) >= XFER_EVERY
+        except (TypeError, ValueError):
+            due = True
+        if not (received or manual or due):
+            return 0
+        last_full = db.get_setting("share_xfer_full_at")
+        try:
+            full = not last_full or _time.time() - float(last_full) >= XFER_FULL_EVERY
+        except (TypeError, ValueError):
+            full = True
         try:
             import sharing
             from drive_backup import DriveBackup
             backup = self.drive if db is getattr(self.drive, "db", None) else DriveBackup(
                 db, authorizer=self.drive.authorizer, transport=self.drive.transport,
                 metered=self.drive.metered, crop=self.drive.crop)
-            with perf.timed("sync.compartido · aceptar fotos", getattr(db, "code", "")):
-                return sharing.accept_transfers(backup)
+            with perf.timed("sync.compartido · aceptar fotos",
+                            f"{getattr(db, 'code', '')}{' (completa)' if full else ''}"):
+                got = sharing.accept_transfers(backup, full=full)
+            db.set_setting("share_xfer_at", _time.time())
+            if full:
+                db.set_setting("share_xfer_full_at", _time.time())
+            return got
         except Exception as exc:  # noqa: BLE001
             print("compartido: aceptar traspasos:", exc)
             return 0

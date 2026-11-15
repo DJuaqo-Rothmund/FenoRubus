@@ -13,6 +13,9 @@ AeonScout · identificación con IA y guía (ver scout_ai y scout_guide):
 """
 from __future__ import annotations
 
+import threading
+import time
+
 from kivy.clock import Clock
 from kivy.factory import Factory
 from kivy.metrics import dp
@@ -24,7 +27,7 @@ import scout_ai
 import scout_guide
 
 AUTO_KEY = "scout_ai_auto"
-_running: set[int] = set()
+_running: dict[int, dict] = {}
 
 
 def app():
@@ -78,42 +81,71 @@ def keys_dialog(on_done=None):
 
 
 # ----------------------------------------------------------------- identificar
+STUCK_S = 150      # sin respuesta en este tiempo: se da por perdida y se puede reintentar
+
+
+def running(record_id: int) -> dict | None:
+    """{"t0", "step"} si la captura se está consultando ahora (y no quedó colgada)."""
+    st = _running.get(record_id)
+    if st and time.monotonic() - st["t0"] > STUCK_S:
+        return None
+    return st
+
+
+def _refresh_scout_screens():
+    """Al terminar una consulta, la pantalla de AeonScout que esté abierta muestra el
+    resultado (antes quedaba «Consultando…» hasta salir y volver a entrar)."""
+    a = app()
+    cur = a.sm.current
+    if cur in ("scout_species", "scout_section", "scout") and a.sm.has_screen(cur):
+        scr = a.sm.get_screen(cur)
+        try:
+            scr.refresh(only_if_changed=True) if cur == "scout_section" else scr.refresh()
+        except Exception as exc:  # noqa: BLE001
+            import crashguard
+            crashguard.quiet(exc, "AeonScout: refrescar tras la IA")
+
+
 def run(record_id: int, on_done=None, quiet: bool = False):
-    """Identifica la captura en segundo plano; al terminar muestra las candidatas (o
-    un aviso). on_done() se llama siempre al final (para refrescar la pantalla)."""
-    if record_id in _running:
+    """Identifica la captura en segundo plano (hilo propio: no espera detrás de las
+    miniaturas ni de la sincronización); al terminar muestra las candidatas (o un aviso)
+    y refresca la pantalla abierta. on_done() se llama siempre al final."""
+    if running(record_id):
         return
     a = app()
-    _running.add(record_id)
+    st = {"t0": time.monotonic(), "step": "preparando las fotos"}
+    _running[record_id] = st
     if not quiet:
         a.toast("Consultando a la IA…")
+
+    def progress(step: str):
+        st["step"] = step
 
     def work():
         res, err = None, None
         try:
-            res = scout_ai.identify(db(), record_id)
+            res = scout_ai.identify(db(), record_id, progress=progress)
         except Exception as exc:  # noqa: BLE001 (se muestra al usuario)
             err = exc
         Clock.schedule_once(lambda *_: finished(res, err))
 
     def finished(res, err):
-        _running.discard(record_id)
+        if _running.get(record_id) is st:
+            _running.pop(record_id, None)
         if isinstance(err, scout_ai.Offline):
-            if not quiet:
-                a.toast("Sin señal: se identifica sola cuando haya conexión.")
+            a.toast("IA: sin señal; se identifica sola cuando haya conexión.")
         elif err is not None:
-            if not quiet:
-                a.toast(str(err)[:160])
+            a.toast(f"IA: {str(err)[:150]}")
         elif res is not None and not quiet:
             result_dialog(record_id, on_done)
         elif res is not None:
             top = res["candidates"][0] if res["candidates"] else None
-            if top:
-                a.toast(f"IA: posible {top['name']} ({top['confidence']:.0%})")
+            a.toast(f"IA: posible {top['name']} ({top['confidence']:.0%})" if top else "IA: sin candidatas")
         if on_done:
             on_done()
+        _refresh_scout_screens()
 
-    a.workers.submit(work)
+    threading.Thread(target=work, daemon=True, name="scout-ia").start()
 
 
 def run_pending(on_done=None):
@@ -246,10 +278,25 @@ def ai_block(record_id: int, refresh):
         b = Factory.GhostButton(icon="robot-outline", text=txt)
         b.bind(on_release=lambda *_: result_dialog(record_id, refresh))
         box.add_widget(b)
-    elif job and job["status"] in ("pending", "error") or record_id in _running:
-        msg = ("Consultando…" if record_id in _running else
-               {"pending": "IA: pendiente (sin señal o sin cuota)",
-                "error": f"IA: {job['error'] or 'error'}"}[job["status"]])
+    elif running(record_id):
+        st = running(record_id)
+        b = Factory.GhostButton(icon="robot-outline", text="")
+
+        def tick(*_):
+            cur = running(record_id)
+            if b.parent is None:
+                return False
+            if cur is None:          # terminó (la pantalla se refresca sola) o quedó colgada
+                b.text = "IA: sin respuesta · tocar para reintentar"
+                return False
+            b.text = f"Consultando a {cur['step']}… {int(time.monotonic() - cur['t0'])} s"
+        tick()
+        Clock.schedule_interval(tick, 1)
+        b.bind(on_release=lambda *_: running(record_id) is None and run(record_id, refresh))
+        box.add_widget(b)
+    elif job and job["status"] in ("pending", "error"):
+        msg = {"pending": "IA: pendiente (sin señal o sin cuota)",
+               "error": f"IA: {job['error'] or 'error'}"}[job["status"]]
         b = Factory.GhostButton(icon="robot-confused-outline", text=msg + " · tocar para reintentar")
         b.bind(on_release=lambda *_: (scout_ai.queue(db(), record_id), run(record_id, refresh)))
         box.add_widget(b)

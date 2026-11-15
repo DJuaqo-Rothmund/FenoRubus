@@ -315,7 +315,7 @@ def ask_plantnet(key: str, images: list[bytes], organs: list[str]) -> tuple[dict
     return {"is_target": True, "candidates": cands, "photo_advice": "", "notes": ""}, remaining
 
 
-def ask_gemini(key: str, images: list[bytes], text: str, models=GEMINI_MODELS) -> dict:
+def ask_gemini(key: str, images: list[bytes], text: str, models=GEMINI_MODELS, progress=None) -> dict:
     """Prueba los modelos gratuitos en orden: si uno no existe (404) o se le agotó la cuota
     (429), pasa al siguiente."""
     parts = [{"inline_data": {"mime_type": "image/jpeg", "data": base64.b64encode(i).decode()}}
@@ -327,7 +327,9 @@ def ask_gemini(key: str, images: list[bytes], text: str, models=GEMINI_MODELS) -
     headers = {"Content-Type": "application/json", "x-goog-api-key": key}
     quota_msg = ""
     for model in models:
-        code, data = _post(GEMINI_URL.format(model=model), body, headers)
+        if progress:
+            progress(f"Gemini ({model.replace('gemini-', '').replace('-latest', '')})")
+        code, data = _post(GEMINI_URL.format(model=model), body, headers, timeout=60)
         if code == 404:                 # modelo retirado: el siguiente
             continue
         if code == 429:
@@ -423,7 +425,7 @@ def pending(db) -> list[int]:
     return [r["record_id"] for r in db.query("SELECT record_id FROM scout_ai WHERE status='pending' ORDER BY id")]
 
 
-def identify(db, record_id: int) -> dict:
+def identify(db, record_id: int, progress=None) -> dict:
     """Consulta los servicios en orden y guarda el resultado. Lanza Offline (queda
     pendiente), Quota/BadKey/AIError (queda con error)."""
     rec = db.get_record(record_id)
@@ -450,6 +452,8 @@ def identify(db, record_id: int) -> dict:
         if prov in usage(db)["out"]:
             continue
         try:
+            if progress:
+                progress(PROVIDERS[prov])
             if prov == "plantnet":
                 organs = [PLANTNET_ORGANS.get(v, "auto") for v in views]
                 raw, remaining = ask_plantnet(keys[prov], images, organs)
@@ -463,7 +467,7 @@ def identify(db, record_id: int) -> dict:
                 weak = res if res["candidates"] else weak      # segunda opinión con Gemini
                 continue
             text = text or prompt(section, rec, views)
-            raw = ask_gemini(keys[prov], images, text)
+            raw = ask_gemini(keys[prov], images, text, progress=progress)
             _count(db, prov)
             return _done(db, record_id, normalize(db, section, raw, prov))
         except Quota as exc:
