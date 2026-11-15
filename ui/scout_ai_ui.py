@@ -3,8 +3,8 @@ ui/scout_ai_ui.py
 =================
 AeonScout · identificación con IA y guía (ver scout_ai y scout_guide):
 
-* `keys_dialog`      — claves de Pl@ntNet, Gemini y Claude (quedan solo en el teléfono).
-* `run`              — identifica una captura en segundo plano (pide permiso antes de Claude).
+* `keys_dialog`      — claves de Pl@ntNet y Gemini (gratis; quedan solo en el teléfono).
+* `run`              — identifica una captura en segundo plano.
 * `run_pending`      — reintenta las que quedaron sin señal o sin cuota.
 * `result_dialog`    — candidatas con su confianza y rasgos: tocar una la acepta.
 * `photo_guide`      — cómo sacar las fotos para que la IA reconozca.
@@ -52,16 +52,14 @@ def keys_dialog(on_done=None):
     keys = scout_ai.load_keys(db())
     form = MDBoxLayout(orientation="vertical", adaptive_height=True, spacing=dp(6), padding=(0, dp(10), 0, 0))
     form.add_widget(Factory.Muted(
-        text="Se guardan solo en este teléfono (no van a Drive). Malezas: Pl@ntNet › Gemini › Claude "
-             "(este último pide permiso cada vez). Plagas y enfermedades: solo Gemini."))
+        text="Gratis. Se guardan solo en este teléfono (no van a Drive). Malezas: Pl@ntNet y, si no "
+             "alcanza, Gemini. Plagas y enfermedades: Gemini."))
     fields = {}
     for key, hint, help_text in (
             ("plantnet", "Clave de Pl@ntNet", "Gratis (500 consultas al día): my.plantnet.org › tu cuenta › "
                                                "API key."),
-            ("gemini", "Clave de Gemini", "Google AI Studio (aistudio.google.com) › Get API key. Tiene un "
-                                           "nivel gratuito; la suscripción de Gemini no incluye la API."),
-            ("claude", "Clave de Claude (opcional)", "console.anthropic.com › API keys. Se paga aparte de la "
-                                                      "suscripción de Claude; solo se usa si usted autoriza.")):
+            ("gemini", "Clave de Gemini", "Gratis: aistudio.google.com › «Crear clave de API» › copiar la "
+                                           "clave (empieza con AIza…) y pegarla aquí.")):
         f = Factory.Field(hint_text=hint, text=keys.get(key, ""), password=True)
         fields[key] = f
         form.add_widget(f)
@@ -80,7 +78,7 @@ def keys_dialog(on_done=None):
 
 
 # ----------------------------------------------------------------- identificar
-def run(record_id: int, on_done=None, allow_claude: bool = False, quiet: bool = False):
+def run(record_id: int, on_done=None, quiet: bool = False):
     """Identifica la captura en segundo plano; al terminar muestra las candidatas (o
     un aviso). on_done() se llama siempre al final (para refrescar la pantalla)."""
     if record_id in _running:
@@ -93,16 +91,14 @@ def run(record_id: int, on_done=None, allow_claude: bool = False, quiet: bool = 
     def work():
         res, err = None, None
         try:
-            res = scout_ai.identify(db(), record_id, allow_claude=allow_claude)
+            res = scout_ai.identify(db(), record_id)
         except Exception as exc:  # noqa: BLE001 (se muestra al usuario)
             err = exc
         Clock.schedule_once(lambda *_: finished(res, err))
 
     def finished(res, err):
         _running.discard(record_id)
-        if isinstance(err, scout_ai.NeedsClaude):
-            _ask_claude(record_id, on_done)
-        elif isinstance(err, scout_ai.Offline):
+        if isinstance(err, scout_ai.Offline):
             if not quiet:
                 a.toast("Sin señal: se identifica sola cuando haya conexión.")
         elif err is not None:
@@ -118,15 +114,6 @@ def run(record_id: int, on_done=None, allow_claude: bool = False, quiet: bool = 
             on_done()
 
     a.workers.submit(work)
-
-
-def _ask_claude(record_id: int, on_done):
-    from ui.screens import confirm
-    confirm("¿Usar Claude?",
-            "Hoy no quedan consultas en Pl@ntNet ni en Gemini. Claude puede identificarla, pero gasta "
-            "créditos de su cuenta de la API de Claude (unos pocos centavos de dólar por consulta). "
-            "Si no, queda pendiente y se identifica mañana.",
-            [("Usar Claude", lambda: run(record_id, on_done, allow_claude=True))])
 
 
 def run_pending(on_done=None):
@@ -259,9 +246,9 @@ def ai_block(record_id: int, refresh):
         b = Factory.GhostButton(icon="robot-outline", text=txt)
         b.bind(on_release=lambda *_: result_dialog(record_id, refresh))
         box.add_widget(b)
-    elif job and job["status"] in ("pending", "claude", "error") or record_id in _running:
+    elif job and job["status"] in ("pending", "error") or record_id in _running:
         msg = ("Consultando…" if record_id in _running else
-               {"pending": "IA: pendiente (sin señal o sin cuota)", "claude": "IA: falta autorizar Claude",
+               {"pending": "IA: pendiente (sin señal o sin cuota)",
                 "error": f"IA: {job['error'] or 'error'}"}[job["status"]])
         b = Factory.GhostButton(icon="robot-confused-outline", text=msg + " · tocar para reintentar")
         b.bind(on_release=lambda *_: (scout_ai.queue(db(), record_id), run(record_id, refresh)))

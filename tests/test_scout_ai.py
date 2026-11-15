@@ -87,33 +87,31 @@ def test_plantnet_weak_then_gemini(db, tmp_path, monkeypatch):
     assert scout_ai.job(db, rec)["status"] == "done"
 
 
-def test_plagas_only_gemini_and_claude_needs_permission(db, tmp_path, monkeypatch):
-    scout_ai.save_keys(db, plantnet="pn", gemini="gm", claude="cl")
+def test_gemini_free_models_and_quota(db, tmp_path, monkeypatch):
+    scout_ai.save_keys(db, plantnet="pn", gemini="gm")
     calls = []
-    monkeypatch.setattr(scout_ai, "_post", _fake({"generativelanguage": (429, {"error": {
-        "message": "Quota exceeded for GenerateRequestsPerDayPerProjectPerModel"}})}, calls))
+
+    def post(url, body, headers, timeout=90):
+        calls.append(url)
+        if "flash-latest" in url and "lite" not in url:      # primer modelo sin cuota: pasa al lite
+            return 429, json.dumps({"error": {"message": "Quota exceeded per minute"}}).encode()
+        if "lite" in url:
+            code, payload = _gemini_ok("Gorgojo negro de la vid", "Otiorhynchus sulcatus")
+            return code, json.dumps(payload).encode()
+        raise AssertionError(url)
+    monkeypatch.setattr(scout_ai, "_post", post)
     rec = _record(db, tmp_path, "plagas")
+    res = scout_ai.identify(db, rec)
+    assert res["candidates"][0]["name"] == "Gorgojo negro de la vid"
+    assert [u.split("/models/")[1].split(":")[0] for u in calls] == ["gemini-flash-latest", "gemini-flash-lite-latest"]
+    # todos sin cuota diaria: queda pendiente y Gemini se marca agotado hoy
+    monkeypatch.setattr(scout_ai, "_post", _fake({"generativelanguage": (429, {"error": {
+        "message": "Quota exceeded for GenerateRequestsPerDayPerProjectPerModel"}})}, []))
+    rec2 = _record(db, tmp_path, "plagas")
     with pytest.raises(scout_ai.Quota):
-        scout_ai.identify(db, rec)
-    assert all("anthropic" not in u for u, _h, _b in calls)        # plagas: nunca Claude
-    assert "gemini" in scout_ai.usage(db)["out"]
-    # malezas: PlantNet agotado y Gemini sin cuota -> pide permiso para Claude
-    scout_ai._count(db, "plantnet", 0, out=True)
-    rec2 = _record(db, tmp_path, "malezas")
-    with pytest.raises(scout_ai.NeedsClaude):
         scout_ai.identify(db, rec2)
-    assert scout_ai.job(db, rec2)["status"] == "claude"
-    txt = json.dumps({"is_target": True, "photo_advice": "", "notes": "", "candidates": [
-        {"common_name": "Vinagrillo", "scientific_name": "Rumex acetosella", "rank": "especie",
-         "catalog_name": "Vinagrillo", "stage": "", "confidence": .9, "features": "hoja en flecha"}]})
-    monkeypatch.setattr(scout_ai, "_post", _fake({"anthropic": (200, {
-        "stop_reason": "end_turn", "content": [{"type": "text", "text": txt}]})}, calls))
-    res = scout_ai.identify(db, rec2, allow_claude=True)
-    url, headers, body = calls[-1]
-    sent = json.loads(body)
-    assert res["provider"] == "claude" and res["candidates"][0]["name"] == "Vinagrillo"
-    assert sent["model"] == scout_ai.CLAUDE_MODEL and sent["output_config"]["format"]["type"] == "json_schema"
-    assert headers["x-api-key"] == "cl"
+    assert "gemini" in scout_ai.usage(db)["out"] and scout_ai.pending(db) == [rec2]
+    assert "claude" not in scout_ai.PROVIDERS and scout_ai.ORDER["malezas"] == ("plantnet", "gemini")
 
 
 def test_offline_stays_pending(db, tmp_path, monkeypatch):

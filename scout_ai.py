@@ -6,21 +6,20 @@ scout_guide). Puro Python (sin Kivy): urllib + Pillow.
 
 Orden de servicios (lo eligió el usuario):
 
-* MALEZAS: Pl@ntNet (gratis, hasta agotar su cuota diaria) → Gemini → Claude (solo con
-  autorización explícita cada vez: gasta créditos de la API de Claude).
+* MALEZAS: Pl@ntNet (gratis, hasta agotar su cuota diaria) → Gemini.
 * PLAGAS y ENFERMEDADES: solo Gemini.
 
+Todo gratis: Gemini se usa con su nivel gratuito y, si se agota la cuota de un modelo, se
+pasa al siguiente (flash → flash-lite, cada uno con su propia cuota diaria).
+
 Las claves (API keys) quedan en el teléfono, en «aeonscout/ia_claves.json»: nunca van a Drive
-ni a la sincronización. Las suscripciones a Gemini o Claude NO incluyen la API: la clave de
-Gemini se saca gratis en Google AI Studio y la de Claude en la consola de Anthropic (pagada).
+ni a la sincronización. La clave de Gemini se saca gratis en Google AI Studio.
 
 Cada consulta queda en la tabla `scout_ai` (una fila por captura): pendiente (sin señal o sin
 cuota: se reintenta sola), lista (con hasta 3 candidatas) o con error. Al aceptar una
 candidata, la captura pasa a esa especie (y se suma al catálogo si no estaba): esas
 confirmaciones son las etiquetas con que después se entrena la IA propia.
 
-Nota: la llamada a Claude es HTTP directo (no el SDK oficial) porque el SDK de Python depende
-de paquetes compilados que python-for-android no construye; el resto de la app usa urllib.
 """
 from __future__ import annotations
 
@@ -40,21 +39,19 @@ KEYS_FILE = "ia_claves.json"
 PROVIDERS = {
     "plantnet": "Pl@ntNet",
     "gemini": "Gemini",
-    "claude": "Claude",
 }
 ORDER = {
-    "malezas": ("plantnet", "gemini", "claude"),
+    "malezas": ("plantnet", "gemini"),
     "plagas": ("gemini",),
     "enfermedades": ("gemini",),
 }
 PLANTNET_URL = "https://my-api.plantnet.org/v2/identify/all"
 PLANTNET_DAILY = 500
 PLANTNET_MIN_SCORE = .15        # por debajo, se pide una segunda opinión (Gemini)
-GEMINI_MODEL = "gemini-2.5-flash"
-GEMINI_FALLBACK_MODEL = "gemini-flash-latest"
+# Modelos gratuitos de Gemini en orden (alias «latest»: siempre el vigente). Cada uno tiene su
+# propia cuota diaria gratuita: si se agota uno, se usa el siguiente.
+GEMINI_MODELS = ("gemini-flash-latest", "gemini-flash-lite-latest", "gemini-2.5-flash")
 GEMINI_URL = "https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
-CLAUDE_URL = "https://api.anthropic.com/v1/messages"
-CLAUDE_MODEL = "claude-opus-5-5"
 MAX_PHOTOS = 5
 MAX_SIDE = 1280
 
@@ -62,7 +59,7 @@ SCHEMA = """
 CREATE TABLE IF NOT EXISTS scout_ai (
     id          INTEGER PRIMARY KEY AUTOINCREMENT,
     record_id   INTEGER NOT NULL UNIQUE REFERENCES scout_records(id) ON DELETE CASCADE,
-    status      TEXT NOT NULL DEFAULT 'pending',   -- pending | done | error | claude (pide permiso)
+    status      TEXT NOT NULL DEFAULT 'pending',   -- pending | done | error
     provider    TEXT NOT NULL DEFAULT '',
     result      TEXT NOT NULL DEFAULT '',          -- JSON (ver normalize)
     error       TEXT NOT NULL DEFAULT '',
@@ -91,10 +88,6 @@ class Quota(AIError):
 
 class BadKey(AIError):
     """La clave no sirve (401/403)."""
-
-
-class NeedsClaude(AIError):
-    """Solo queda Claude: hay que pedir autorización."""
 
 
 def _now() -> str:
@@ -276,16 +269,6 @@ _CAND_PROPS = {
 }
 
 
-def claude_schema() -> dict:
-    cand = {"type": "object", "additionalProperties": False, "required": list(_CAND_PROPS),
-            "properties": {k: {"type": t} for k, t in _CAND_PROPS.items()}}
-    return {"type": "object", "additionalProperties": False,
-            "required": ["is_target", "candidates", "photo_advice", "notes"],
-            "properties": {"is_target": {"type": "boolean"},
-                           "candidates": {"type": "array", "items": cand},
-                           "photo_advice": {"type": "string"}, "notes": {"type": "string"}}}
-
-
 def gemini_schema() -> dict:
     up = {"string": "STRING", "number": "NUMBER"}
     cand = {"type": "OBJECT", "required": list(_CAND_PROPS),
@@ -332,7 +315,9 @@ def ask_plantnet(key: str, images: list[bytes], organs: list[str]) -> tuple[dict
     return {"is_target": True, "candidates": cands, "photo_advice": "", "notes": ""}, remaining
 
 
-def ask_gemini(key: str, images: list[bytes], text: str, model: str = GEMINI_MODEL) -> dict:
+def ask_gemini(key: str, images: list[bytes], text: str, models=GEMINI_MODELS) -> dict:
+    """Prueba los modelos gratuitos en orden: si uno no existe (404) o se le agotó la cuota
+    (429), pasa al siguiente."""
     parts = [{"inline_data": {"mime_type": "image/jpeg", "data": base64.b64encode(i).decode()}}
              for i in images]
     parts.append({"text": text})
@@ -340,56 +325,30 @@ def ask_gemini(key: str, images: list[bytes], text: str, model: str = GEMINI_MOD
                        "generationConfig": {"responseMimeType": "application/json",
                                             "responseSchema": gemini_schema()}}).encode()
     headers = {"Content-Type": "application/json", "x-goog-api-key": key}
-    code, data = _post(GEMINI_URL.format(model=model), body, headers)
-    if code == 404 and model != GEMINI_FALLBACK_MODEL:      # modelo retirado: el alias vigente
-        return ask_gemini(key, images, text, GEMINI_FALLBACK_MODEL)
-    if code == 429:
-        msg = _err_text(data)
-        raise Quota("Gemini: sin cuota (" + msg[:120] + ")", daily="day" in msg.lower())
-    if code in (401, 403) or (code == 400 and "API key" in _err_text(data)):
-        raise BadKey("Gemini: la clave no es válida.")
-    if code != 200:
-        raise AIError(f"Gemini ({code}): {_err_text(data)}")
-    j = _json(data)
-    try:
-        txt = "".join(p.get("text", "") for p in j["candidates"][0]["content"]["parts"])
-        return json.loads(txt)
-    except (KeyError, IndexError, ValueError) as exc:
-        reason = ((j.get("promptFeedback") or {}).get("blockReason")
-                  or ((j.get("candidates") or [{}])[0].get("finishReason")))
-        raise AIError(f"Gemini no dio una respuesta válida ({reason or exc}).") from exc
-
-
-def ask_claude(key: str, images: list[bytes], text: str) -> dict:
-    content = [{"type": "image", "source": {"type": "base64", "media_type": "image/jpeg",
-                                            "data": base64.b64encode(i).decode()}} for i in images]
-    content.append({"type": "text", "text": text})
-    body = json.dumps({
-        "model": CLAUDE_MODEL, "max_tokens": 16000,
-        "fallbacks": "default",
-        "output_config": {"effort": "medium",
-                          "format": {"type": "json_schema", "schema": claude_schema()}},
-        "messages": [{"role": "user", "content": content}],
-    }).encode()
-    headers = {"Content-Type": "application/json", "x-api-key": key, "anthropic-version": "2026-10-21",
-               "anthropic-beta": "server-side-fallback-2026-07-01"}
-    code, data = _post(CLAUDE_URL, body, headers, timeout=180)
-    if code == 429:
-        raise Quota("Claude: límite de uso alcanzado; intente más tarde.", daily=False)
-    if code in (401, 403):
-        raise BadKey("Claude: la clave no es válida o no tiene permisos.")
-    if code != 200:
-        raise AIError(f"Claude ({code}): {_err_text(data)}")
-    j = _json(data)
-    if j.get("stop_reason") == "refusal":
-        raise AIError("Claude no quiso responder esta consulta.")
-    if j.get("stop_reason") == "max_tokens":
-        raise AIError("Claude: respuesta incompleta.")
-    txt = "".join(b.get("text", "") for b in j.get("content", []) if b.get("type") == "text")
-    try:
-        return json.loads(txt)
-    except ValueError as exc:
-        raise AIError("Claude no dio una respuesta válida.") from exc
+    quota_msg = ""
+    for model in models:
+        code, data = _post(GEMINI_URL.format(model=model), body, headers)
+        if code == 404:                 # modelo retirado: el siguiente
+            continue
+        if code == 429:
+            quota_msg = _err_text(data)
+            continue
+        if code in (401, 403) or (code == 400 and "API key" in _err_text(data)):
+            raise BadKey("Gemini: la clave no es válida.")
+        if code != 200:
+            raise AIError(f"Gemini ({code}): {_err_text(data)}")
+        j = _json(data)
+        try:
+            txt = "".join(p.get("text", "") for p in j["candidates"][0]["content"]["parts"])
+            return json.loads(txt)
+        except (KeyError, IndexError, ValueError) as exc:
+            reason = ((j.get("promptFeedback") or {}).get("blockReason")
+                      or ((j.get("candidates") or [{}])[0].get("finishReason")))
+            raise AIError(f"Gemini no dio una respuesta válida ({reason or exc}).") from exc
+    if quota_msg:
+        raise Quota("Gemini: sin cuota gratuita por ahora (" + quota_msg[:100] + ")",
+                    daily="day" in quota_msg.lower())
+    raise AIError("Gemini: ningún modelo disponible.")
 
 
 # ----------------------------------------------------------------- resultado
@@ -464,9 +423,9 @@ def pending(db) -> list[int]:
     return [r["record_id"] for r in db.query("SELECT record_id FROM scout_ai WHERE status='pending' ORDER BY id")]
 
 
-def identify(db, record_id: int, allow_claude: bool = False) -> dict:
+def identify(db, record_id: int) -> dict:
     """Consulta los servicios en orden y guarda el resultado. Lanza Offline (queda
-    pendiente), NeedsClaude (pedir permiso), Quota/BadKey/AIError (queda con error)."""
+    pendiente), Quota/BadKey/AIError (queda con error)."""
     rec = db.get_record(record_id)
     if not rec:
         raise AIError("La captura ya no existe.")
@@ -490,12 +449,6 @@ def identify(db, record_id: int, allow_claude: bool = False) -> dict:
     for prov in providers:
         if prov in usage(db)["out"]:
             continue
-        if prov == "claude" and not allow_claude:
-            if weak:
-                break
-            _set(db, record_id, status="claude",
-                 error="Pl@ntNet y Gemini sin cuota hoy: falta autorizar Claude.")
-            raise NeedsClaude("Pl@ntNet y Gemini no están disponibles hoy. ¿Usar Claude?")
         try:
             if prov == "plantnet":
                 organs = [PLANTNET_ORGANS.get(v, "auto") for v in views]
@@ -510,7 +463,7 @@ def identify(db, record_id: int, allow_claude: bool = False) -> dict:
                 weak = res if res["candidates"] else weak      # segunda opinión con Gemini
                 continue
             text = text or prompt(section, rec, views)
-            raw = ask_gemini(keys[prov], images, text) if prov == "gemini" else ask_claude(keys[prov], images, text)
+            raw = ask_gemini(keys[prov], images, text)
             _count(db, prov)
             return _done(db, record_id, normalize(db, section, raw, prov))
         except Quota as exc:

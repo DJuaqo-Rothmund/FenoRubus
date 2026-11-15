@@ -232,7 +232,7 @@ class ScoutHome(ScoutScreenBase):
         from ui import scout_ai_ui as ai
         card = _card("IDENTIFICACIÓN CON IA")
         card.add_widget(Factory.Muted(
-            text="Malezas: Pl@ntNet › Gemini › Claude (con su permiso). Plagas y enfermedades: Gemini. "
+            text="Gratis. Malezas: Pl@ntNet y, si no alcanza, Gemini. Plagas y enfermedades: Gemini. "
                  "Lo que usted confirma queda como etiqueta para entrenar después la IA propia.\n"
                  + scout_ai.status_text(db())))
         b = Factory.GhostButton(icon="key-outline", text="Claves de IA y ajustes")
