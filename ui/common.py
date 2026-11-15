@@ -640,13 +640,14 @@ def thumb_widget(path: str | None, size: int = 320, icon: str = "image-off-outli
     return thumb
 
 
-def text_dialog(title: str, lines: list[str], highlight: str = "", actions=(), small=False):
+def text_dialog(title: str, lines: list[str], highlight: str = "", actions=(), small=False,
+                markup: bool = False):
     """Diálogo con texto largo que se ajusta (diagnósticos, errores)."""
     from kivymd.uix.scrollview import MDScrollView
     box = MDBoxLayout(orientation="vertical", adaptive_height=True, spacing=dp(8),
                       padding=(0, 0, 0, dp(8)))
     for text in lines:
-        box.add_widget(MDLabel(text=text, font_style="Caption" if small else "Body2",
+        box.add_widget(MDLabel(text=text, font_style="Caption" if small else "Body2", markup=markup,
                                adaptive_height=True, theme_text_color="Custom",
                                text_color=c(theme.BERRY if highlight and highlight in text else theme.INK)))
     sv = MDScrollView(size_hint_y=None, height=dp(380))

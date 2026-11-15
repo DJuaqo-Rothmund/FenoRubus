@@ -167,6 +167,18 @@ def _last_photo(species_id: int) -> str:
     return row["path"] if row and os.path.exists(row["path"]) else ""
 
 
+def _ai_hint(species_id: int) -> str:
+    """«Vinagrillo 82 %» si la IA ya sugirió algo para alguna captura de esta NI."""
+    import scout_ai
+    for r in db().query("SELECT a.result FROM scout_ai a JOIN scout_records r ON r.id = a.record_id "
+                        "WHERE r.species_id=? AND a.status='done' ORDER BY a.updated_at DESC", (species_id,)):
+        data = scout_ai._json(r["result"].encode())
+        if data.get("candidates"):
+            top = data["candidates"][0]
+            return f"{top['name']} {top['confidence']:.0%}"
+    return ""
+
+
 def _set_thumb(widget, path: str, size: int = 160):
     if path:
         app().thumb_async(path, size, lambda t: setattr(widget, "thumb", t))
@@ -216,6 +228,24 @@ class ScoutHome(ScoutScreenBase):
                 b.bind(on_release=lambda *_, k=key: open_section(k))
                 card.add_widget(b)
             body.add_widget(card)
+        import scout_ai
+        from ui import scout_ai_ui as ai
+        card = _card("IDENTIFICACIÓN CON IA")
+        card.add_widget(Factory.Muted(
+            text="Malezas: Pl@ntNet › Gemini › Claude (con su permiso). Plagas y enfermedades: Gemini. "
+                 "Lo que usted confirma queda como etiqueta para entrenar después la IA propia.\n"
+                 + scout_ai.status_text(db())))
+        b = Factory.GhostButton(icon="key-outline", text="Claves de IA y ajustes")
+        b.bind(on_release=lambda *_: ai.keys_dialog(self.refresh))
+        card.add_widget(b)
+        n_pend = len(scout_ai.pending(db()))
+        if n_pend:
+            b = Factory.GhostButton(icon="robot-outline", text=f"Identificar pendientes ({n_pend})")
+            b.bind(on_release=lambda *_: ai.run_pending(self.refresh))
+            card.add_widget(b)
+        body.add_widget(card)
+        if n_pend and ai.has_keys():
+            Clock.schedule_once(lambda *_: ai.run_pending(), 1.5)
         card = _card("RESPALDO EN GOOGLE DRIVE")
         from platform_utils import global_get
         on = bool(global_get("drive_enabled", False))
@@ -251,6 +281,10 @@ class ScoutSection(ScoutScreenBase):
         from ui.photo_buttons import photo_buttons      # nueva captura: cámara o galería
         body.add_widget(photo_buttons(lambda: open_capture(sec), lambda: open_capture(sec, source="gallery"),
                                       "Nueva captura", "Desde la galería"))
+        from ui import scout_ai_ui as ai
+        b = Factory.GhostButton(icon="camera-iris", text="Cómo sacar las fotos para la IA")
+        b.bind(on_release=lambda *_: ai.photo_guide(sec))
+        body.add_widget(b)
         unknown = [s for s in db().species(sec, unidentified=True) if s["records"]]
         if unknown:
             body.add_widget(Factory.SectionLabel(text="POR IDENTIFICAR"))
@@ -266,8 +300,15 @@ class ScoutSection(ScoutScreenBase):
         sub = f"[i]{s['scientific']}[/i]" if s["scientific"] else ""
         if s["kind"] == "benefico":
             sub = ("Benéfico · " + sub) if sub else "Benéfico"
+        from ui import scout_ai_ui as ai
+        crops_txt = ai.crops_label(s)
+        if crops_txt:
+            sub = f"{sub} · {crops_txt}" if sub else crops_txt
         if s["unidentified"]:
             sub = f"{s['records']} captura(s) · tocar para identificar"
+            hint = _ai_hint(s["id"])
+            if hint:
+                sub += f" · IA: {hint}"
         w = SpeciesRow(title=s["name"], subtitle=sub, count=f"{s['photos']} fotos" if s["photos"] else "—",
                        placeholder=icon(self.section), accent=color)
         _set_thumb(w, _last_photo(s["id"]))
@@ -308,6 +349,10 @@ class ScoutSpecies(ScoutScreenBase):
             b.bind(on_release=lambda *_: edit_species_dialog(sp, self.refresh))
         card.add_widget(b)
         body.add_widget(card)
+        from ui import scout_ai_ui as ai
+        ficha = ai.ficha_card(sp)
+        if ficha is not None:
+            body.add_widget(ficha)
         stages = db().stage_counts(sp["id"])
         card = _card(f"AVANCE PARA LA IA · meta {scout.GOAL} fotos por estadio")
         for st in scout.STAGES[sec]:
@@ -350,6 +395,8 @@ class ScoutSpecies(ScoutScreenBase):
             card.add_widget(Factory.Muted(text=where))
         if r["notes"]:
             card.add_widget(Factory.Muted(text=r["notes"]))
+        from ui import scout_ai_ui as ai
+        card.add_widget(ai.ai_block(r["id"], self._after_ai))
         grid = GridLayout(cols=4, spacing=dp(6), size_hint_y=None)
         grid.bind(minimum_height=grid.setter("height"))
         for p in r["photos"]:
@@ -369,6 +416,15 @@ class ScoutSpecies(ScoutScreenBase):
             self.refresh()
         confirm("Eliminar captura", f"Se borran del teléfono sus {len(r['photos'])} foto(s).",
                 [("Eliminar", go)])
+
+    def _after_ai(self, species_id: int | None = None):
+        """Tras consultar o aceptar una sugerencia de la IA: si la especie actual quedó vacía
+        (era una «No identificada»), se muestra la especie asignada."""
+        sp = db().get_species(self.species_id)
+        if species_id and sp and (not sp["active"] or not db().records(sp["id"])):
+            self.species_id = species_id
+        if app().sm.current == "scout_species":
+            self.refresh()
 
     def _identified(self, species_id: int):
         self.species_id = species_id
@@ -481,9 +537,19 @@ class ScoutCapture(ScoutScreenBase):
             b.bind(on_release=lambda *_: self._pick("Vista de la próxima foto",
                                                     [("Sin indicar", "")] + [(v, v) for v in views], "view"))
             card.add_widget(b)
+            row = MDBoxLayout(adaptive_height=True, spacing=dp(8))
+            b = Factory.GhostButton(icon="view-carousel-outline", text="Set guiado", size_hint_x=.5)
+            b.bind(on_release=lambda *_: self.guided_set())
+            row.add_widget(b)
+            from ui import scout_ai_ui as ai
+            b = Factory.GhostButton(icon="help-circle-outline", text="Cómo sacarlas", size_hint_x=.5)
+            b.bind(on_release=lambda *_: ai.photo_guide(sec))
+            row.add_widget(b)
+            card.add_widget(row)
             card.add_widget(Factory.Muted(
-                text="Para la IA sirven varias vistas del mismo individuo ("
-                     + ", ".join(v.lower() for v in views) + ") y, si puede, una moneda o regla al lado."))
+                text="Set guiado: una foto por vista del mismo individuo ("
+                     + " › ".join(v.lower() for v in views) + "); la cámara se abre una vez por vista. "
+                     "Si puede, ponga una moneda o regla al lado."))
         body.add_widget(card)
         # Qué es
         card = _card("QUÉ ES")
@@ -652,6 +718,28 @@ class ScoutCapture(ScoutScreenBase):
         else:
             a.media.pick_images(done)
 
+    def guided_set(self, i: int = 0):
+        """Set de fotos: abre la cámara para cada vista de la sección, en orden (se puede
+        terminar antes tocando «Listo» sin foto)."""
+        views = scout.VIEWS.get(self.section, [])
+        if i >= len(views):
+            self.st["view"] = ""
+            self.refresh()
+            app().toast("Set completo")
+            return
+
+        def done(result, origin):
+            paths = [p for p in (result if isinstance(result, list) else [result]) if p]
+            for p in paths:
+                self.st["photos"].append((p, views[i], origin))
+            self.refresh()
+            if paths:
+                Clock.schedule_once(lambda *_: self.guided_set(i + 1), .3)
+
+        from ui import camera_burst
+        self.st["view"] = views[i]
+        camera_burst.burst(done, "AeonScout", title=f"Set {i + 1}/{len(views)} · {views[i]}")
+
     def _photo_menu(self, i):
         from ui.screens import pick_dialog
         path, view, origin = self.st["photos"][i]
@@ -713,10 +801,18 @@ class ScoutCapture(ScoutScreenBase):
             Clock.schedule_once(lambda *_: finished(err))
 
         def finished(err):
+            from ui import scout_ai_ui as ai
+            use_ai = not st["species"] and ai.auto_on() and ai.has_keys(sec)
             if err:
                 a.toast(f"No se pudo guardar alguna foto: {err}")
+            elif use_ai:
+                a.toast(f"Captura guardada: {name} · la IA la está identificando…")
             else:
                 a.toast(f"Captura guardada: {name}" + (" (identifíquela después)" if not st["species"] else ""))
+            if use_ai and not err:
+                import scout_ai
+                scout_ai.queue(d, rec)
+                ai.run(rec, quiet=True)
             a.scout_backup()
             self._notes_text = ""
             a.back()

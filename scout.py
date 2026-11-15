@@ -180,6 +180,10 @@ class ScoutDB(Database):
             self.conn.executescript(SCHEMA)
             self.conn.commit()
         self.seed_catalog()
+        import scout_ai
+        import scout_guide
+        scout_ai.ensure(self)
+        scout_guide.seed(self)
 
     # ------------------------------------------------------------- catálogo
     def seed_catalog(self) -> None:
@@ -316,6 +320,7 @@ class ScoutDB(Database):
                 os.remove(p["path"])
             except OSError:
                 pass
+        self.execute("DELETE FROM scout_ai WHERE record_id=?", (record_id,))
         self.execute("DELETE FROM scout_records WHERE id=?", (record_id,))
 
     def missing_view(self, section: str, species_id: int) -> str | None:
@@ -327,6 +332,49 @@ class ScoutDB(Database):
         return min(views, key=lambda v: have.get(v, 0)) if views else None
 
     # ------------------------------------------------------------- identificar
+    def move_record(self, record_id: int, species_id: int, old_name: str | None = None) -> int:
+        """La captura pasa a `species_id`: sus fotos se renombran (si el nombre llevaba la
+        especie anterior) y en Drive se MUEVEN las ya subidas (estado «move»; ver ScoutDrive);
+        las pendientes suben directo a la carpeta nueva. Devuelve cuántas fotos tenía."""
+        rec = self.get_record(record_id)
+        old = self.get_species(rec["species_id"])
+        sp = self.get_species(species_id)
+        if not sp or sp["section"] != rec["section"]:
+            raise ValueError("Elija una especie de la misma sección.")
+        old_name = old_name or (old["name"] if old else "")
+        old_slug = slug(old_name) if old_name else ""
+        self.execute("UPDATE scout_records SET species_id=? WHERE id=?", (species_id, record_id))
+        rec = self.get_record(record_id)
+        n = 0
+        for p in self.photos(record_id):
+            n += 1
+            new_path = p["path"]
+            base = os.path.basename(p["path"])
+            for token in (old_name, old_slug):
+                if token and token in base:     # el nombre del archivo lleva la especie
+                    cand = os.path.join(os.path.dirname(p["path"]), base.replace(token, slug(sp["name"]), 1))
+                    if not os.path.exists(cand):
+                        try:
+                            os.rename(p["path"], cand)
+                            new_path = cand
+                        except OSError:
+                            pass
+                    break
+            if new_path != p["path"]:
+                self.execute("UPDATE scout_photos SET path=? WHERE id=?", (new_path, p["id"]))
+            if not p["queue_id"]:
+                continue
+            q = self.query_one("SELECT * FROM drive_queue WHERE id=?", (p["queue_id"],))
+            if not q:
+                continue
+            status = "move" if q["status"] == "done" and q["drive_id"] else q["status"]
+            self.execute("UPDATE drive_queue SET path=?, name=?, status=? WHERE id=?",
+                         (new_path, self.remote_name(rec, new_path), status, q["id"]))
+        if old and old["unidentified"] and old["id"] != species_id and not self.query_one(
+                "SELECT 1 FROM scout_records WHERE species_id=?", (old["id"],)):
+            self.execute("UPDATE scout_species SET active=0 WHERE id=?", (old["id"],))
+        return n
+
     def identify(self, ni_id: int, species_id: int) -> dict:
         """La no identificada `ni_id` resultó ser `species_id`: sus capturas y fotos pasan a
         esa especie; en Drive, las fotos ya subidas se MUEVEN a la carpeta de la especie
@@ -336,34 +384,8 @@ class ScoutDB(Database):
             raise ValueError("Solo se identifica una «No identificada».")
         if not sp or sp["unidentified"] or sp["section"] != ni["section"]:
             raise ValueError("Elija una especie del catálogo de la misma sección.")
-        recs = self.query("SELECT * FROM scout_records WHERE species_id=?", (ni_id,))
-        self.execute("UPDATE scout_records SET species_id=? WHERE species_id=?", (species_id, ni_id))
-        n_photos = 0
-        for rec in recs:
-            rec = self.get_record(rec["id"])
-            for p in self.photos(rec["id"]):
-                n_photos += 1
-                new_path = p["path"]
-                base = os.path.basename(p["path"])
-                if ni["name"] in base:     # el nombre del archivo lleva la especie
-                    cand = os.path.join(os.path.dirname(p["path"]), base.replace(ni["name"], slug(sp["name"])))
-                    if not os.path.exists(cand):
-                        try:
-                            os.rename(p["path"], cand)
-                            new_path = cand
-                        except OSError:
-                            pass
-                if new_path != p["path"]:
-                    self.execute("UPDATE scout_photos SET path=? WHERE id=?", (new_path, p["id"]))
-                if not p["queue_id"]:
-                    continue
-                q = self.query_one("SELECT * FROM drive_queue WHERE id=?", (p["queue_id"],))
-                if not q:
-                    continue
-                remote = self.remote_name(rec, new_path)
-                status = "move" if q["status"] == "done" and q["drive_id"] else q["status"]
-                self.execute("UPDATE drive_queue SET path=?, name=?, status=? WHERE id=?",
-                             (new_path, remote, status, q["id"]))
+        recs = self.query("SELECT id FROM scout_records WHERE species_id=?", (ni_id,))
+        n_photos = sum(self.move_record(r["id"], species_id, old_name=ni["name"]) for r in recs)
         self.execute("UPDATE scout_species SET active=0 WHERE id=?", (ni_id,))
         self.log("update", "scout_identify", species_id, f"{ni['name']} -> {sp['name']}: {n_photos} fotos")
         return {"records": len(recs), "photos": n_photos}
