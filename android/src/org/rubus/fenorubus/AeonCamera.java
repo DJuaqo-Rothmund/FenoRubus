@@ -68,7 +68,7 @@ import java.util.concurrent.TimeUnit;
  * - Abajo: miniatura de la última foto (tocarla muestra todas; tocar una la quita), el
  *   disparador y «Listo» (varias fotos seguidas).
  *
- * Botones de un estabilizador o control Bluetooth: volumen toque = foto, mantener = zoom;
+ * Botones de un estabilizador o control Bluetooth: volumen = foto;
  * cámara/Enter/reproducir = foto; siguiente/anterior/← → = cambiar de zoom; enfoque = enfocar.
  *
  * Devuelve (RESULT_OK) en el extra «paths» las rutas de las fotos (en la caché de la app).
@@ -304,7 +304,7 @@ public class AeonCamera extends ComponentActivity {
         keyInfo.setTextSize(12);
         keyInfo.setGravity(Gravity.CENTER_HORIZONTAL);
         keyInfo.setShadowLayer(dp(3), 0, dp(1), 0xCC000000);
-        keyInfo.setText("Control o volumen: toque = foto · mantener = zoom");
+        keyInfo.setText("Botón del control o de volumen: foto");
         top.addView(keyInfo);
         root.addView(top, new FrameLayout.LayoutParams(-1, -2, Gravity.TOP));
 
@@ -729,11 +729,9 @@ public class AeonCamera extends ComponentActivity {
     }
 
     // ------------------------------------------------------------------ estabilizador / control
-    // Volumen (lo que envían la mayoría de los estabilizadores y controles Bluetooth):
-    //   toque = foto · mantener + = acercar · mantener − = alejar.
+    // Volumen (lo que envían la mayoría de los estabilizadores y controles Bluetooth): foto.
     // Otras teclas: cámara, Enter, OK, reproducir/pausa, auricular, botones de mando = foto;
     // siguiente/anterior, ← →, zoom = cambiar de píldora de zoom; enfoque = enfocar al centro.
-    private boolean held;          // la tecla de volumen se mantuvo (hizo zoom): al soltar, sin foto
 
     private static boolean isVolume(int k) {
         return k == KeyEvent.KEYCODE_VOLUME_UP || k == KeyEvent.KEYCODE_VOLUME_DOWN;
@@ -790,12 +788,10 @@ public class AeonCamera extends ComponentActivity {
         if (k == KeyEvent.KEYCODE_BACK) return super.dispatchKeyEvent(e);
         String name = KeyEvent.keyCodeToString(k).replace("KEYCODE_", "");
         if (e.getAction() == KeyEvent.ACTION_DOWN) {
-            if (isVolume(k)) {
+            if (isVolume(k)) {                             // volumen: foto al presionar (sin repetir)
                 if (e.getRepeatCount() == 0) {
-                    held = false;
-                } else {                                   // mantenido: zoom continuo
-                    held = true;
-                    zoomStep(k == KeyEvent.KEYCODE_VOLUME_UP ? 1.06f : 1 / 1.06f);
+                    shoot();
+                    keyInfo.setText("Botón " + name + " → foto");
                 }
                 return true;
             }
@@ -814,14 +810,7 @@ public class AeonCamera extends ComponentActivity {
             keyInfo.setText("Botón " + name + (what != null ? " → " + what : " (sin uso)"));
             if (what != null) return true;
         } else if (e.getAction() == KeyEvent.ACTION_UP) {
-            if (isVolume(k)) {
-                if (!held) {                               // toque corto: foto
-                    shoot();
-                    keyInfo.setText("Botón " + name + " → foto");
-                }
-                held = false;
-                return true;
-            }
+            if (isVolume(k)) return true;
             if (isShutter(k) || presetStep(k) != 0 || k == KeyEvent.KEYCODE_FOCUS) return true;
         }
         return super.dispatchKeyEvent(e);
