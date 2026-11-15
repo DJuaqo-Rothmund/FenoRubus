@@ -566,6 +566,50 @@ PHOTO_GUIDE = {
 }
 
 
+# Guía ilustrada (láminas en assets/ui/guia, ver tools/make_photo_guide.py):
+# (lámina, título, texto corto). Primero las de la sección, después las generales.
+PHOTO_CARDS = {
+    "plagas": [
+        ("p_set", "Un set por individuo", "Cuatro fotos del mismo bicho: de arriba, de lado, de abajo y el "
+                                         "daño que hace. «Set guiado» abre la cámara para cada una."),
+        ("p_frio", "Insectos que se arrancan", "Unos minutos en un frasco en el refrigerador los deja "
+                                               "quietos; después, sobre papel blanco."),
+        ("p_larva", "Larvas: muestre cabeza y patas", "Gusano blanco con 3 pares de patas = pololo; sin "
+                                                      "patas = gorgojo (burrito, cabrito)."),
+        ("p_dano", "El daño también cuenta", "Mordeduras en media luna, hojas enrolladas, fruta picada: "
+                                             "con el insecto al lado es mejor."),
+    ],
+    "malezas": [
+        ("m_set", "Un set por planta", "Planta completa, hoja por arriba, hoja por abajo y flor o semilla. "
+                                       "La flor es lo que más ayuda."),
+        ("m_raiz", "Si puede, con la raíz", "Rizomas, bulbitos y estolones distinguen especies "
+                                            "parecidas."),
+        ("m_graminea", "Gramíneas (pastos)", "Acerque la unión de la hoja con el tallo (lígula y aurículas) "
+                                             "y la espiga."),
+    ],
+    "enfermedades": [
+        ("e_set", "Completo y de cerca", "Primero la hoja, caña o fruta entera; después el detalle de la "
+                                         "lesión."),
+        ("e_borde", "Con el borde sano", "La IA reconoce mejor el avance de la lesión con tejido sano al "
+                                         "lado."),
+        ("e_moho_raiz", "Moho, puntitos y cuello", "Moho o puntitos negros: zoom máximo o lupa. En raíz y "
+                                                   "cuello: lave la tierra y corte la corteza."),
+    ],
+    "_": [
+        ("g_enfoque", "Nítida", "Toque la pantalla sobre el objeto antes de disparar y no se mueva."),
+        ("g_llenar", "Que llene la foto", "Acérquese o use zoom 2×: el objeto debe ocupar buena parte."),
+        ("g_luz", "Luz pareja", "Sombra suave o día nublado. Evite el sol directo y el flash."),
+        ("g_fondo", "Fondo simple", "Una hoja, la mano o un papel detrás ayudan mucho a la IA."),
+        ("g_escala", "Escala", "Una moneda, regla o el dedo al lado en al menos una foto."),
+        ("g_contexto", "Y una de contexto", "La planta completa o el lugar donde estaba."),
+    ],
+}
+
+
+def photo_cards(section: str) -> list[tuple[str, str, str]]:
+    return PHOTO_CARDS.get(section, []) + PHOTO_CARDS["_"]
+
+
 # ----------------------------------------------------------------- búsqueda
 def _norm(text: str) -> str:
     t = unicodedata.normalize("NFKD", text or "")

@@ -440,6 +440,35 @@ class _Thumb(ButtonBehavior, Image):
         self.fit_mode = "cover"
 
 
+# ============================================================================ guía de fotos
+class ScoutGuide(ScoutScreenBase):
+    """Cómo sacar las fotos: láminas dibujadas (así ✓ / así no ✗) con un texto corto."""
+    section = StringProperty("malezas")
+
+    def on_pre_enter(self, *_):
+        self.title = f"Cómo sacar las fotos · {scout.SECTIONS[self.section][0]}"
+        self.refresh()
+
+    def refresh(self):
+        import scout_guide
+        body = self.clear()
+        body.add_widget(Factory.Muted(
+            text="Fotos buenas = la IA acierta más. Verde: así. Rojo: así no."))
+        for img, title, text in scout_guide.photo_cards(self.section):
+            card = _card()
+            card.add_widget(Factory.Body(text=f"[b]{title}[/b]", markup=True))
+            pic = Image(source=resource_path("assets", "ui", "guia", f"{img}.png"), size_hint_y=None,
+                        fit_mode="contain", mipmap=True)
+
+            def fit(w, *_):
+                tw, th = w.texture_size if w.texture else (900, 400)
+                w.height = w.width * th / max(tw, 1)
+            pic.bind(width=fit, texture=fit)
+            card.add_widget(pic)
+            card.add_widget(Factory.Muted(text=text))
+            body.add_widget(card)
+
+
 # ============================================================================ captura
 class ScoutCapture(ScoutScreenBase):
     """Nueva captura. Lo último usado (cultivo, lugar, sector, estadio) queda elegido."""
@@ -917,6 +946,14 @@ def open_species(species_id: int):
     if app().sm.current == "scout_species":
         s.refresh()
     app().go("scout_species")
+
+
+def open_guide(section: str):
+    s = _screen(ScoutGuide, "scout_guide")
+    s.section = section
+    if app().sm.current == "scout_guide":
+        s.on_pre_enter()
+    app().go("scout_guide")
 
 
 def open_capture(section: str, species_id: int | None = None, source: str = "camera"):

@@ -219,10 +219,9 @@ def _wants_sid(fn) -> bool:
 
 # ----------------------------------------------------------------- guía
 def photo_guide(section: str):
-    from ui.screens import text_dialog
-    name = scout.SECTIONS[section][0]
-    tips = [f"• {t}" for t in scout_guide.photo_tips(section)]
-    text_dialog(f"Cómo sacar las fotos · {name}", tips)
+    """Guía ilustrada de cómo sacar las fotos (pantalla con láminas)."""
+    from ui import scout_ui
+    scout_ui.open_guide(section)
 
 
 def ficha_card(sp: dict):
