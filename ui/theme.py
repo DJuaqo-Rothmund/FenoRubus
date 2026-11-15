@@ -352,8 +352,10 @@ def configure(crop: str | None = None, style_name: str | None = None) -> None:
     else:
         BACKGROUND = START_BG = resource_path("assets", "styles", style, "background.jpg")
     BLOB_ID = _crop_asset("blob_id.png", crop_id)
-    global START_PREDIO
+    global START_PREDIO, START_YIELD
     START_PREDIO = _crop_asset("start_predio.png", crop_id)     # campo con la fruta del cultivo
+    # Rendimiento: uno general (assets/ui) o uno por cultivo si existe assets/crops/<cultivo>/.
+    START_YIELD = _crop_asset("start_yield.png", crop_id)
     # Íconos de Drive: trazo claro en los estilos oscuros (el verde oscuro no se veía).
     suffix = "_dark" if style in DARK_STYLES else ""
     for name in ("UP", "OK", "OFF"):
