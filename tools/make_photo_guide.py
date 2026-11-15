@@ -318,15 +318,15 @@ FLOW_SHEETS = {   # lámina: ([(viñeta, etiqueta, ✓/✗/None)…])
 }
 
 
-def flow_img(name, x, y, w, h):
+def flow_img(name, x, y, w, h, src=None):
     import base64
-    with open(os.path.join(FLOW, name + ".jpg"), "rb") as f:
+    with open(os.path.join(src or FLOW, name + ".jpg"), "rb") as f:
         b64 = base64.b64encode(f.read()).decode()
     return (f"<image x='{x}' y='{y}' width='{w}' height='{h}' preserveAspectRatio='xMidYMid slice' "
             f"href='data:image/jpeg;base64,{b64}'/>")
 
 
-def flow_sheet(panels) -> str:
+def flow_sheet(panels, src=None) -> str:
     n = len(panels)
     gap, margin, w = 20, 30, 900
     fw = (w - 2 * margin - gap * (n - 1)) / n
@@ -334,10 +334,47 @@ def flow_sheet(panels) -> str:
     out = []
     for i, (name, label, ok) in enumerate(panels):
         x = margin + i * (fw + gap)
-        out.append(frame(x, 30, fw, fh, flow_img(name, x, 30, fw, fh), ok, label))
+        out.append(frame(x, 30, fw, fh, flow_img(name, x, 30, fw, fh, src), ok, label))
     h = int(fh + 100)
     return (f"<svg xmlns='http://www.w3.org/2000/svg' viewBox=\"0 0 {w} {h}\" width='{w}' height='{h}'>"
             f"<rect width='{w}' height='{h}' fill='{BG}'/>{''.join(out)}</svg>")
+
+
+# Guía de inicio: láminas «así / así no» de las fotos de fenología (assets/src/inicio_flow)
+# y las ilustraciones de cada tarjeta (se copian tal cual a assets/ui/inicio).
+INICIO_SRC = os.path.join(ROOT, "assets", "src", "inicio_flow")
+INICIO_OUT = os.path.join(ROOT, "assets", "ui", "inicio")
+INICIO_SHEETS = {
+    "f_marcada": [("f_marcada_ok", "Siempre la caña marcada", True), ("f_marcada_bad", "Una caña cualquiera", False)],
+    "f_general": [("f_general_ok", "Foto 1: caña completa", True), ("f_general_bad", "Cortada", False)],
+    "f_detalle": [("f_detalle_ok", "Foto 2: que llene la foto", True), ("f_detalle_bad", "Perdida entre hojas", False)],
+    "f_luz": [("f_luz_ok", "Sol a su espalda", True), ("f_luz_bad", "A contraluz", False)],
+    "f_fondo": [("f_fondo_ok", "La mano detrás", True), ("f_sombra_bad", "Su sombra encima", False)],
+}
+
+
+def build_inicio():
+    from PIL import Image
+    os.makedirs(INICIO_OUT, exist_ok=True)
+    files = []
+    for sheet, panels in INICIO_SHEETS.items():
+        p = os.path.join(TMP, sheet + ".svg")
+        with open(p, "w", encoding="utf-8") as f:
+            f.write(flow_sheet(panels, INICIO_SRC))
+        files.append(p)
+    subprocess.run(["node", os.path.join(ROOT, "tools", "render_svgs.js"), "900", INICIO_OUT, *files], check=True)
+    for f in files:
+        png = os.path.join(INICIO_OUT, os.path.basename(f)[:-4] + ".png")
+        im = Image.open(png).convert("RGBA")
+        bg = Image.new("RGB", im.size, BG)
+        bg.paste(im, mask=im.getchannel("A"))
+        bg.save(png[:-4] + ".jpg", quality=86, optimize=True)
+        os.remove(png)
+    for name in os.listdir(INICIO_SRC):      # ilustraciones sueltas (i_…, f_semanas, f_avanzada_ok)
+        if name.startswith("i_") or name in ("f_semanas.jpg", "f_avanzada_ok.jpg"):
+            im = Image.open(os.path.join(INICIO_SRC, name)).convert("RGB")
+            im.thumbnail((720, 720))
+            im.save(os.path.join(INICIO_OUT, name), quality=84, optimize=True)
 
 
 def flow_sheets() -> dict[str, str]:
@@ -469,6 +506,8 @@ def main():
             if os.path.exists(jpg):
                 os.remove(jpg)
             im.quantize(colors=128, method=Image.Quantize.FASTOCTREE).save(png, optimize=True)
+    if os.path.isdir(INICIO_SRC):
+        build_inicio()
     print("listo:", OUT, len(files), "con Flow:", len(flow))
 
 

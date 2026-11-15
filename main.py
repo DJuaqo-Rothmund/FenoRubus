@@ -864,6 +864,10 @@ class FenoRubusApp(MDApp):
             Clock.schedule_once(lambda *_: self._show_safe_mode(), 1.5)
             Clock.schedule_once(lambda *_: self._finish_start(), 20)
             return
+        # Primera vez en este teléfono: la guía de inicio.
+        from platform_utils import global_get
+        if not global_get("onboarding_seen", False):
+            Clock.schedule_once(lambda *_: self.open_onboarding(), 1.2)
         # La apertura termina cuando acabó la primera sincronización (o a los 45 s).
         Clock.schedule_once(lambda *_: self._finish_start(), 45)
 
@@ -1046,6 +1050,11 @@ class FenoRubusApp(MDApp):
     def open_variety(self, variety_id: int):
         self.variety.load(variety_id)
         self.go("variety")
+
+    def open_onboarding(self):
+        """Guía de inicio ilustrada (ui/onboarding.py)."""
+        from ui import onboarding
+        onboarding.open_screen()
 
     def open_settings(self, general_only: bool = False):
         """general_only: desde el inicio, solo los ajustes generales (sin la pestaña de
