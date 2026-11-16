@@ -575,6 +575,45 @@ def _done(db, record_id: int, res: dict) -> dict:
     return res
 
 
+# ----------------------------------------------------------------- desde la web
+WEB_FILE = "identificaciones-web.json"     # en «AeonCrop/AeonScout» (lo escribe AeonCrop Web)
+
+
+def import_web(db, entries: list) -> int:
+    """Resultados de IA hechos en la web (sobre fotos ya respaldadas): quedan en la captura
+    como si se hubieran hecho aquí, para aceptarlos en la app. No pisa uno aceptado ni uno
+    más nuevo. entries: [{"photo", "at", "provider", "result": {is_target, advice, notes,
+    candidates: [{name, scientific, rank, stage, confidence, features}]}}]. Devuelve cuántos."""
+    n = 0
+    for e in entries or []:
+        if not isinstance(e, dict) or not e.get("photo"):
+            continue
+        name = os.path.basename(str(e["photo"]))
+        row = next((r for r in db.query(
+            "SELECT p.record_id, p.path, r.section FROM scout_photos p JOIN scout_records r ON r.id = p.record_id "
+            "WHERE p.path LIKE ?", ("%" + name,)) if os.path.basename(r["path"]) == name), None)
+        if not row:
+            continue
+        cur = job(db, row["record_id"])
+        at = str(e.get("at") or "")
+        if cur and (cur["accepted"] or (cur["status"] == "done" and str(cur["data"].get("at") or "") >= at)):
+            continue
+        raw = e.get("result") or {}
+        cands = [{"catalog_name": c.get("name", ""), "common_name": c.get("name", ""),
+                  "scientific_name": c.get("scientific", ""), "rank": c.get("rank", ""),
+                  "stage": c.get("stage", ""), "confidence": c.get("confidence", 0),
+                  "features": c.get("features", "")} for c in raw.get("candidates") or [] if isinstance(c, dict)]
+        res = normalize(db, row["section"], {"is_target": raw.get("is_target", True), "candidates": cands,
+                                             "photo_advice": raw.get("advice", ""), "notes": raw.get("notes", "")},
+                        f"web · {PROVIDERS.get(e.get('provider'), e.get('provider') or 'IA')}")
+        res["at"] = at or res["at"]
+        if cur is None:
+            queue(db, row["record_id"])
+        _done(db, row["record_id"], res)
+        n += 1
+    return n
+
+
 def accept(db, record_id: int, cand: dict) -> int:
     """La captura es `cand`: pasa a esa especie (la crea en el catálogo si no estaba) y toma su
     estadio si no tenía. Devuelve el id de la especie."""

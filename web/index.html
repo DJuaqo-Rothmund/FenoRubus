@@ -52,6 +52,13 @@
           (carpeta «AeonCrop/AeonScout» de su Drive). Toque una foto para verla grande.</div></div>
       <button id="screload" class="ghost" title="Volver a leer Drive">⟳</button>
     </section>
+    <section class="card scoutai">
+      <div class="grow"><div class="label">IDENTIFICAR CON IA</div>
+        <div class="muted small">Toque una foto y «Identificar con IA», o suba fotos de este computador. Malezas: Pl@ntNet y luego Gemini; plagas y enfermedades: Gemini. Gratis, con sus propias claves.</div></div>
+      <button id="skeys" class="ghost">🔑 Claves de IA</button>
+      <button id="sguidebtn" class="ghost">📷 Cómo sacar las fotos</button>
+      <label class="primary filebtn">＋ Identificar fotos<input id="snew" type="file" accept="image/*" multiple hidden></label>
+    </section>
     <nav id="ssections" class="scoutsec"></nav>
     <div id="smsg" class="muted small"></div>
     <section id="sspecies" class="rows"></section>
@@ -559,6 +566,26 @@
     <div class="thint small"><span class="mouse">Arrastre para crear una caja · clic en una caja para elegirla, moverla o cambiarle la clase (0–9) · esquinas para ajustar · rueda: zoom · clic derecho o espacio + arrastre: mover · Ctrl+Z deshacer · Ctrl+Y rehacer</span><span class="touch">Un dedo: crear o mover cajas · dos dedos: acercar y mover · toque una clase arriba</span></div>
   </dialog>
 
+  <dialog id="sdlg" class="sdlg">
+    <div class="detail">
+      <div class="dhead"><div><h2 id="sdtitle"></h2><div id="sdsub" class="muted small"></div></div>
+        <form method="dialog"><button class="round" aria-label="Cerrar">✕</button></form></div>
+      <img id="sdimg" class="sdimg" alt="">
+      <div id="sdactions" class="actions"><button id="sdguide" class="ghost">📷 Cómo sacar las fotos</button><button id="sdai" class="primary">✨ Identificar con IA</button></div>
+      <div id="sdbody"></div>
+    </div>
+  </dialog>
+  <dialog id="kdlg">
+    <form method="dialog" class="detail">
+      <div class="dhead"><div><h2>Claves de IA</h2><div class="muted small">Se guardan solo en este navegador (no van a Drive). Son las mismas que usa en el teléfono.</div></div>
+        <button value="cancel" class="round" aria-label="Cerrar">✕</button></div>
+      <label class="field">Pl@ntNet (malezas) · my.plantnet.org › su cuenta › API<input id="kplantnet" autocomplete="off" spellcheck="false"></label>
+      <p class="muted small">Para usar Pl@ntNet desde esta página, en su cuenta de Pl@ntNet agregue este sitio a «Authorized domains».</p>
+      <label class="field">Gemini · aistudio.google.com › Get API key<input id="kgemini" autocomplete="off" spellcheck="false"></label>
+      <pre id="kmsg" class="small kmsg"></pre>
+      <div class="actions"><button value="cancel" class="ghost">Cerrar</button><button id="ksave" type="button" class="primary">Guardar y probar</button></div>
+    </form>
+  </dialog>
   <dialog id="viewer"><img id="vimg" alt=""><form method="dialog"><button class="round">✕</button></form></dialog>
 
   <script type="module" src="app.js"></script>

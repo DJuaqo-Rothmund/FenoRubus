@@ -167,3 +167,59 @@ def test_gemini_model_without_free_tier_is_skipped(db, tmp_path, monkeypatch):
     rec = _record(db, tmp_path, "plagas")
     assert scout_ai.identify(db, rec)["candidates"][0]["name"] == "Trips"
     assert "gemini" not in scout_ai.usage(db)["out"]       # no se marca «sin cuota» todo el día
+
+
+def test_import_web_results(db, tmp_path):
+    rec = _record(db, tmp_path)
+    photo = os.path.basename(db.photos(rec)[0]["path"])
+    entry = {"photo": photo, "at": "2026-11-16T10:00:00", "provider": "gemini",
+             "result": {"is_target": True, "advice": "Saque la flor.", "notes": "",
+                        "candidates": [{"name": "Junquillo", "scientific": "Juncus effusus", "rank": "especie",
+                                        "stage": "Floración", "confidence": .7, "features": "tallos"}]}}
+    assert scout_ai.import_web(db, [entry, {"photo": "otra.jpg"}]) == 1
+    j = scout_ai.job(db, rec)
+    assert j["status"] == "done" and j["provider"] == "web · Gemini"
+    c = j["data"]["candidates"][0]
+    assert c["species_id"] == scout_ai.catalog_id(db, "malezas", "Junquillo", "") and c["stage"] == "Floración"
+    assert scout_ai.import_web(db, [entry]) == 0                  # el mismo: no se repite
+    scout_ai.accept(db, rec, c)
+    assert scout_ai.import_web(db, [dict(entry, at="2026-11-17T00:00:00")]) == 0   # ya aceptada
+
+
+def test_web_scout_ai_matches_app(db, tmp_path):
+    """web/scout_ai.js: misma ficha, misma consulta y mismo resultado normalizado que la app."""
+    import importlib.util
+    import shutil
+    import subprocess
+    node = shutil.which("node")
+    if not node:
+        pytest.skip("sin Node.js")
+    root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    spec = importlib.util.spec_from_file_location("mwd", os.path.join(root, "tools", "make_web_data.py"))
+    mwd = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mwd)
+    mwd.scout_data()
+    finds = [["plagas", "", "Otiorhynchus sulcatus"], ["malezas", "", "Rumex acetosa"], ["malezas", "Junquillo", ""],
+             ["malezas", "", "Juncus bufonius"], ["plagas", "Nada", "Xus yus"]]
+    recs = [["malezas", {"crop": "cranberry", "organ": "Hoja", "notes": "en el dique"}, ["Planta completa", "Hoja (haz)"]],
+            ["plagas", {"crop": "", "organ": "", "notes": ""}, []],
+            ["enfermedades", {"crop": "frambuesa", "organ": "Fruto", "notes": ""}, ["", "Detalle de la lesión"]]]
+    raw = {"is_target": True, "photo_advice": " Acerque ", "notes": "", "candidates": [
+        {"common_name": "Acedera", "scientific_name": "Rumex acetosa", "rank": "especie", "catalog_name": "",
+         "stage": "floración", "confidence": .4, "features": "x"},
+        {"common_name": "", "scientific_name": "Juncus effusus", "rank": "especie", "catalog_name": "",
+         "stage": "", "confidence": 1.3, "features": ""}]}
+    pn = {"results": [{"score": .61, "species": {"scientificNameWithoutAuthor": "Juncus effusus", "commonNames": ["junco"],
+                                                 "family": {"scientificNameWithoutAuthor": "Juncaceae"}}}]}
+    src, out = tmp_path / "in.json", tmp_path / "out.json"
+    src.write_text(json.dumps({"finds": finds, "prompts": recs, "norm": [["malezas", raw, "gemini"]], "plantnet": pn}))
+    subprocess.run([node, os.path.join(root, "tests", "web_scout.mjs"), str(src), str(out)], check=True, cwd=root)
+    res = json.loads(out.read_text())
+    assert res["finds"] == [(scout_guide.find(*f) or {}).get("name") for f in finds]
+    assert res["prompts"] == [scout_ai.prompt(sec, r, v) for sec, r, v in recs]
+    py = scout_ai.normalize(db, "malezas", raw, "gemini")
+    for c in py["candidates"]:
+        c.pop("species_id")
+    assert res["norm"][0]["candidates"] == py["candidates"] and res["norm"][0]["advice"] == "Acerque"
+    assert res["plantnet"]["candidates"][0]["scientific_name"] == "Juncus effusus"
+    assert res["merged"] == [{"photo": "a"}, {"photo": "b", "at": 2}]

@@ -59,7 +59,34 @@ def main():
         if name.endswith(".json"):
             shutil.copy(os.path.join(ROOT, "assets", "maps", name), os.path.join(maps, name))
     print("report.css y", len(os.listdir(maps)), "plano(s)")
+    scout_data()
     py_zip()
+
+
+def scout_data():
+    """AeonScout en la web: fichas de la guía, láminas de cómo sacar las fotos y el texto de la
+    consulta a Gemini (el mismo de la app, con §VISTAS§, §ORGANO§ y §NOTAS§ por rellenar)."""
+    import shutil
+
+    import scout
+    import scout_ai
+    import scout_guide as G
+    out = os.path.join(ROOT, "web", "scout")
+    os.makedirs(os.path.join(out, "guia"), exist_ok=True)
+    src = os.path.join(ROOT, "assets", "ui", "guia")
+    for name in os.listdir(src):
+        shutil.copy(os.path.join(src, name), os.path.join(out, "guia", name))
+    prompts = {sec: {crop or "": scout_ai.prompt(sec, {"crop": crop, "organ": "§ORGANO§", "notes": "§NOTAS§"},
+                                                 ["§VISTAS§"])
+                     for crop in (None, *G.CROP_NAMES)} for sec in scout.STAGES}
+    data = {"region": G.REGION, "crops": G.CROPS, "crop_names": G.CROP_NAMES, "species": G.SPECIES,
+            "cards": G.PHOTO_CARDS, "tips": G.PHOTO_GUIDE, "stages": scout.STAGES, "views": scout.VIEWS,
+            "organs": scout.ORGANS, "plantnet_organs": scout_ai.PLANTNET_ORGANS,
+            "plantnet_min": scout_ai.PLANTNET_MIN_SCORE, "gemini_models": list(scout_ai.GEMINI_MODELS),
+            "schema": scout_ai.gemini_schema(), "prompts": prompts, "web_file": scout_ai.WEB_FILE}
+    with open(os.path.join(out, "guia.json"), "w", encoding="utf-8") as f:
+        json.dump(data, f, ensure_ascii=False)
+    print("scout/guia.json:", len(G.SPECIES), "fichas,", len(os.listdir(src)), "láminas")
 
 
 def images():

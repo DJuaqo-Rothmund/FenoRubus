@@ -552,4 +552,29 @@ class ScoutDrive:
             self.backup.put_file(self.db.export_csv(), "registro.csv")
         except Exception:  # noqa: BLE001 (la planilla se repone en la próxima subida)
             pass
+        try:
+            self.import_web()
+        except Exception as exc:  # noqa: BLE001 (se reintenta en el próximo respaldo)
+            print("AeonScout: identificaciones de la web:", exc)
+        return n
+
+    def import_web(self) -> int:
+        """Identificaciones con IA hechas en AeonCrop Web («identificaciones-web.json»)."""
+        import json
+        import urllib.parse
+
+        import scout_ai
+        from drive_backup import API
+        b = self.backup
+        q = f"name='{scout_ai.WEB_FILE}' and '{b.root_id()}' in parents and trashed=false"
+        found = b._call("GET", f"{API}?" + urllib.parse.urlencode(
+            {"q": q, "fields": "files(id, modifiedTime)", "spaces": "drive"})).get("files", [])
+        if not found:
+            return 0
+        stamp = found[0].get("modifiedTime") or ""
+        if stamp and self.db.get_setting("scout_web_seen") == stamp:
+            return 0
+        entries = json.loads(b._download(found[0]["id"]).decode("utf-8"))
+        n = scout_ai.import_web(self.db, entries)
+        self.db.set_setting("scout_web_seen", stamp)
         return n

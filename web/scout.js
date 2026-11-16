@@ -1,7 +1,9 @@
 // AeonCrop Web · visor de AeonScout: el banco de imágenes de plagas, malezas y enfermedades
 // que la app sube a «AeonCrop/AeonScout/<Plagas|Malezas|Enfermedades>/<especie>/<estadio>/»
 // (las no identificadas en «…/No identificadas/NI-003/…») y «registro.csv» (= scout.py).
-// Solo lectura: las capturas se hacen en la app.
+// Las capturas se hacen en la app; aquí además se identifican con IA (scout_ai.js), con la
+// ficha de la guía y la guía ilustrada de cómo sacar las fotos.
+import * as AI from "./scout_ai.js";
 const FOLDER = "application/vnd.google-apps.folder";
 const DRIVE_FOLDER = "AeonScout", UNIDENTIFIED = "No identificadas";
 export const SECTIONS = [          // (= scout.SECTIONS) clave, carpeta en Drive, color
@@ -118,6 +120,10 @@ async function photoUrl(p) {
 export async function open(ctx) {
   X = ctx;
   $("screload").onclick = () => { tree.clear(); render(true); };
+  $("skeys").onclick = openKeys;
+  $("sguidebtn").onclick = () => openGuide(section);
+  $("snew").onchange = (e) => { const f = [...e.target.files]; e.target.value = ""; if (f.length) identifyNew(f); };
+  AI.guide().catch(() => {});
   observer ||= new IntersectionObserver((entries) => {
     for (const e of entries) {
       if (!e.isIntersecting) continue;
@@ -144,6 +150,7 @@ export async function open(ctx) {
 }
 
 async function render(fresh = false) {
+  await AI.guide().catch(() => {});
   const nav = $("ssections");
   nav.innerHTML = "";
   for (const [key, name, color] of SECTIONS) {
@@ -166,8 +173,16 @@ async function render(fresh = false) {
     card.className = "card scoutsp";
     const h = document.createElement("div");
     h.className = "scouth";
-    h.innerHTML = `<b></b><span class="badge"></span>`;
+    h.innerHTML = `<b></b><span class="grow"></span><span class="badge"></span>`;
     h.querySelector("b").textContent = sp.unidentified ? `${sp.name} · no identificada` : sp.name;
+    const g = !sp.unidentified && AI.loaded() ? AI.find(section, sp.name) : null;
+    if (g) {
+      const fb = document.createElement("button");
+      fb.className = "ghost small";
+      fb.textContent = "📖 Ficha";
+      fb.onclick = () => showFicha(g);
+      h.insertBefore(fb, h.querySelector(".badge"));
+    }
     h.querySelector(".badge").textContent = `${sp.stages.reduce((n, s) => n + s.photos.length, 0)} FOTO(S)`;
     card.appendChild(h);
     for (const st of sp.stages) {
@@ -182,13 +197,7 @@ async function render(fresh = false) {
         t.className = "sthumb";
         t.dataset.p = JSON.stringify({ id: p.id, name: p.name });
         t.title = [p.name, describe(info.get(p.name))].filter(Boolean).join("\n");
-        t.onclick = async () => {
-          const u = await photoUrl(p).catch(() => null);
-          if (!u) return;
-          $("vimg").src = u;
-          $("vimg").alt = t.title;
-          $("viewer").showModal();
-        };
+        t.onclick = () => openPhoto(sp, st, p);
         grid.appendChild(t);
         observer.observe(t);
       }
@@ -199,3 +208,146 @@ async function render(fresh = false) {
 }
 
 function count(list) { return list.reduce((n, sp) => n + sp.stages.reduce((m, s) => m + s.photos.length, 0), 0); }
+
+// ------------------------------------------------------------------ IA y guía
+const esc = (t) => String(t ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+
+function fichaHtml(g) {
+  const parts = [["Cómo reconocerla", g.look], ["Estadios", g.stages], ["Daño / síntoma", g.damage],
+    ["Se confunde con", g.confuse], ["Cultivos", AI.cropsText(g)]];
+  return `<div class="ficha"><div><b>${esc(g.name)}</b> <i>${esc(g.scientific)}</i></div>` +
+    parts.filter(([, v]) => v).map(([k, v]) => `<p><b>${k}:</b> ${esc(v)}</p>`).join("") + "</div>";
+}
+function showFicha(g) {
+  $("sdtitle").textContent = g.name;
+  $("sdsub").textContent = g.scientific;
+  $("sdimg").hidden = true;
+  $("sdactions").hidden = true;
+  $("sdbody").innerHTML = fichaHtml(g) + `<p class="muted small">Ficha de campo de la guía de AeonScout: una ayuda, no reemplaza a un especialista o laboratorio.</p>`;
+  $("sdlg").showModal();
+}
+
+function openKeys() {
+  const k = AI.loadKeys();
+  $("kplantnet").value = k.plantnet || "";
+  $("kgemini").value = k.gemini || "";
+  $("kmsg").textContent = "";
+  $("kdlg").showModal();
+  $("ksave").onclick = async () => {
+    AI.saveKeys({ plantnet: $("kplantnet").value, gemini: $("kgemini").value });
+    $("kmsg").textContent = "Guardadas en este navegador. Probando…";
+    $("kmsg").textContent = (await AI.testKeys((t) => { $("kmsg").textContent = t; })).join("\n");
+  };
+}
+
+async function openGuide(sec) {
+  const G = await AI.guide();
+  const cards = [...(G.cards[sec] || []), ...G.cards._];
+  $("sdtitle").textContent = `Cómo sacar las fotos · ${SECTIONS.find((s) => s[0] === sec)[1]}`;
+  $("sdsub").textContent = "Así la IA (y quien revise) reconoce mejor lo fotografiado.";
+  $("sdimg").hidden = true;
+  $("sdactions").hidden = true;
+  $("sdbody").innerHTML = `<div class="sguide">${cards.map(([img, t, d]) =>
+    `<figure><img src="scout/guia/${img}.jpg" alt="" loading="lazy" onerror="this.src='scout/guia/${img}.png'"><figcaption><b>${esc(t)}</b><span>${esc(d)}</span></figcaption></figure>`).join("")}</div>`;
+  $("sdlg").showModal();
+}
+
+// Fotos de la misma captura: misma fecha y hora en registro.csv (la app guarda una fila por foto).
+function recordOf(sp, st, p) {
+  const row = info.get(p.name);
+  const photos = [];
+  if (row) {
+    const all = sp.stages.flatMap((s) => s.photos);
+    for (const q of all) { const r = info.get(q.name); if (r && r.Fecha === row.Fecha && r.Especie === row.Especie) photos.push({ p: q, view: r.Vista || "" }); }
+  }
+  if (!photos.length) photos.push({ p, view: row?.Vista || "" });
+  return { rec: { section, crop: row?.Cultivo || "", organ: row?.["Órgano"] || "", notes: row?.Notas || "" }, photos, row };
+}
+
+async function openPhoto(sp, st, p) {
+  const { rec, photos, row } = recordOf(sp, st, p);
+  $("sdtitle").textContent = sp.unidentified ? `${sp.name} · no identificada` : sp.name;
+  $("sdsub").textContent = [st.name, describe(row)].filter(Boolean).join(" · ");
+  $("sdimg").hidden = false;
+  $("sdimg").src = "";
+  $("sdactions").hidden = false;
+  $("sdbody").innerHTML = photos.length > 1 ? `<p class="muted small">La consulta usa las ${photos.length} fotos de esta captura.</p>` : "";
+  $("sdlg").showModal();
+  photoUrl(p).then((u) => { $("sdimg").src = u; $("sdimg").onclick = () => window.open(u, "_blank"); }).catch(() => {});
+  $("sdai").onclick = async () => {
+    const blobs = [];
+    for (const x of photos) { const u = await photoUrl(x.p); blobs.push({ blob: await (await fetch(u)).blob(), view: x.view }); }
+    runAI(rec, blobs, photos.map((x) => x.p.name));
+  };
+  $("sdguide").onclick = () => openGuide(section);
+}
+
+async function identifyNew(files) {
+  $("sdtitle").textContent = `Identificar · ${SECTIONS.find((s) => s[0] === section)[1]}`;
+  $("sdsub").textContent = `${files.length} foto(s) de este computador (no se guardan: para el registro, tómelas con la app).`;
+  $("sdimg").hidden = false;
+  $("sdimg").src = URL.createObjectURL(files[0]);
+  $("sdactions").hidden = true;
+  $("sdbody").innerHTML = "";
+  $("sdlg").showModal();
+  runAI({ section, crop: "", organ: "", notes: "" }, files.map((f) => ({ blob: f, view: "" })), null);
+}
+
+async function runAI(rec, blobs, names) {
+  const box = $("sdbody");
+  box.innerHTML = `<p class="aiwait">Preparando…</p>`;
+  const wait = box.querySelector(".aiwait");
+  const t0 = Date.now();
+  let step = "Preparando…";
+  const tick = setInterval(() => { wait.textContent = `${step} ${Math.round((Date.now() - t0) / 1000)} s`; }, 1000);
+  try {
+    const res = await AI.identify(rec, blobs, (t) => { step = t; wait.textContent = t; });
+    clearInterval(tick);
+    showResult(res, rec.section, names);
+  } catch (e) {
+    clearInterval(tick);
+    box.innerHTML = `<p class="warn">${esc(e.message)}</p>` + (["key", "nokey", "cors"].includes(e.kind) ? `<button class="ghost" id="sdkeys">🔑 Revisar claves de IA</button>` : "");
+    const kb = $("sdkeys");
+    if (kb) kb.onclick = () => { $("sdlg").close(); openKeys(); };
+  }
+}
+
+function showResult(res, sec, names) {
+  const box = $("sdbody");
+  const head = `<p class="muted small">Según ${esc(AI.PROVIDERS[res.provider] || res.provider)}${res.remaining != null ? ` · Pl@ntNet: quedan ${res.remaining} consultas hoy` : ""}</p>`;
+  const warn = res.is_target ? "" : `<p class="warn">La IA no ve en la foto lo que se busca (${esc(sec)}). Revise la guía de fotos.</p>`;
+  const cands = res.candidates.map((c, i) => {
+    const g = AI.find(sec, c.name, c.scientific);
+    return `<div class="aicand"><div class="aitop"><b>${i + 1}. ${esc(c.name)}</b> <i>${esc(c.scientific)}</i>
+      <span class="badge">${Math.round(c.confidence * 100)} %</span></div>
+      <div class="aibar"><span style="width:${Math.round(c.confidence * 100)}%"></span></div>
+      ${c.stage ? `<div class="small">Estadio: <b>${esc(c.stage)}</b></div>` : ""}
+      ${c.features ? `<div class="small muted">${esc(c.features)}</div>` : ""}
+      ${g ? `<details><summary>Ficha de la guía</summary>${fichaHtml(g)}</details>` : `<div class="small muted">No está en la guía de la zona.</div>`}</div>`;
+  }).join("") || `<p class="muted">Sin candidatas.</p>`;
+  const advice = res.advice ? `<p class="small"><b>Para confirmar:</b> ${esc(res.advice)}</p>` : "";
+  const send = names ? `<div class="actions"><span id="sdsent" class="muted small grow"></span><button id="sdsend" class="primary">Enviar a la app</button></div>
+    <p class="muted small">En la app, la captura queda con este resultado para aceptarlo (Sincronizar o Respaldar AeonScout).</p>` : "";
+  box.innerHTML = head + warn + cands + advice + send;
+  if (names) $("sdsend").onclick = () => sendToApp(res, names);
+}
+
+async function sendToApp(res, names) {
+  const btn = $("sdsend"), msg = $("sdsent");
+  btn.disabled = true;
+  msg.textContent = "Guardando en Drive…";
+  try {
+    const G = await AI.guide();
+    const found = (await X.list(`name='${G.web_file}' and '${top}' in parents and trashed=false`, "files(id,name)"))[0];
+    const old = found ? await (await X.download(found.id)).json().catch(() => []) : [];
+    const { provider, at, is_target, advice, notes, candidates } = res;
+    const entries = names.map((photo) => ({ photo, at, provider, result: { is_target, advice, notes, candidates } }));
+    const blob = new Blob([JSON.stringify(AI.mergeEntries(old, entries))], { type: "application/json" });
+    if (found) await X.updateFile(found.id, blob, "application/json");
+    else await X.upload(top, G.web_file, blob, "application/json");
+    msg.textContent = "Enviado: aparece en la app en el próximo respaldo de AeonScout.";
+  } catch (e) {
+    msg.textContent = `No se pudo guardar: ${e.message}`;
+    btn.disabled = false;
+  }
+}

@@ -571,3 +571,25 @@ dialog.rcfg { width: min(720px, 96vw); background: #FBF8F1; }
   .ytable td, .ytable th { padding: 6px 4px; }
   .ytable .yr { display: none; }
 }
+
+/* AeonScout · IA (scout_ai.js) */
+.scoutai { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin-top: 12px; }
+.scoutai .grow { flex: 1 1 280px; }
+.filebtn { cursor: pointer; display: inline-flex; align-items: center; }
+.scouth .grow { flex: 1; }
+.sdlg { width: min(760px, 96vw); }
+.sdimg { max-width: 100%; max-height: 52vh; object-fit: contain; border-radius: 12px; background: #111; cursor: zoom-in; justify-self: center; }
+.aiwait { color: var(--muted); }
+.aicand { border: 1px solid var(--line); border-radius: 14px; padding: 10px 12px; background: #fff; display: grid; gap: 4px; margin-bottom: 8px; }
+.aitop { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px; }
+.aitop .badge { margin-left: auto; }
+.aibar { height: 6px; border-radius: 3px; background: #E6E8E3; overflow: hidden; }
+.aibar span { display: block; height: 100%; background: #2E7D32; }
+.aicand details summary { cursor: pointer; font-size: 13px; color: var(--leaf-dark); font-weight: 600; }
+.ficha p { margin: 6px 0; font-size: 14px; }
+.sguide { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 12px; }
+.sguide figure { margin: 0; border: 1px solid var(--line); border-radius: 14px; overflow: hidden; background: #fff; }
+.sguide img { width: 100%; height: auto; display: block; }
+.sguide figcaption { padding: 8px 10px; display: grid; gap: 2px; font-size: 13px; }
+.sguide figcaption span { color: var(--muted); }
+.kmsg { white-space: pre-wrap; font-family: inherit; margin: 0; }

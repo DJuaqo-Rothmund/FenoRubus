@@ -9,3 +9,5 @@ bin/
 version.txt
 google_client.py
 web/py.zip
+web/scout/guia/
+web/scout/guia.json

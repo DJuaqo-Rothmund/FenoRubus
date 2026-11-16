@@ -2258,7 +2258,7 @@ async function openScout() {
   ["sync", "ws", "profiles"].forEach((id) => ($(id).hidden = true));
   $("cropbtn").textContent = "AeonScout ▾";
   $("cropbtn").hidden = false;
-  await SC.open({ api, list, folder, download, root: () => folder(TOP, null, false), cacheGet, cachePut, status });
+  await SC.open({ api, list, folder, download, upload, updateFile, root: () => folder(TOP, null, false), cacheGet, cachePut, status });
 }
 
 // I+D y Predio separados (como el menú de la app): botones arriba y la lista solo del perfil.
