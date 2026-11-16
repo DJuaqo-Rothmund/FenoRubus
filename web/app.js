@@ -1168,44 +1168,80 @@ function renderMeasureBody() {
 }
 
 // Conteos con cajas de las fotos de esta semana -> planilla «<medición> · conteos» (= Database.counts_to_table):
-// una fila por foto con su tratamiento/variedad; si se vuelve a pasar, se actualiza la fila de esa foto.
+// una fila por detalle y estructura («Medio 3» · Botón, Flor… y Total) y una columna por tratamiento
+// (si un tratamiento repite detalle en varias parcelas, una por parcela). Se vuelve a pasar: se actualiza.
 async function countsToTable() {
   const M = S.meas;
   await TR.ensureLabels(CROP);
   const classes = TR.cropClasses(CROP);
-  const rows = [];
+  const names = Object.fromEntries(C.rows(S.state, "treatments").filter((t) => (t.name || "").trim()).map((t) => [Number(t.num), t.name.trim()]));
+  const vmap = new Map(C.rows(S.state, "varieties").map((v) => [v.uid, v]));
+  const title = (vid) => {
+    const v = vmap.get(vid);
+    if (!v) return "General";
+    const t = v.treatment == null ? -1 : Number(v.treatment);
+    return t >= 0 && names[t] ? names[t] : v.name;
+  };
+  const photos = [];
   for (const r of M.rows.filter((x) => !x.gone && x.e && x.e.path)) {
-    const name = base(r.e.path);
-    const n = TR.countsOf(name);
-    if (n) rows.push({ r, name, n });
+    const n = TR.countsOf(base(r.e.path));
+    if (n) photos.push({ det: (r.caption || "").trim() || base(r.e.path), vid: r.variety_id || null, n });
   }
-  if (!rows.length) { $("mmsg").textContent = "Ninguna foto de esta semana tiene conteo: use «Contar estructuras» primero."; return; }
-  const keys = classes.map(([k]) => k).filter((k) => rows.some((x) => x.n[k]));
+  if (!photos.length) { $("mmsg").textContent = "Ninguna foto de esta semana tiene conteo: use «Contar estructuras» primero."; return; }
+  const seen = new Map();
+  for (const p of photos) { const k = `${p.det}|${title(p.vid)}`; if (!seen.has(k)) seen.set(k, new Set()); seen.get(k).add(p.vid); }
+  const split = [...seen.values()].some((v) => v.size > 1);
+  const col = (vid) => {
+    const v = vmap.get(vid);
+    if (!v) return "General";
+    const t = title(vid);
+    return split && t !== v.name ? `${t} (${v.name})` : t;
+  };
+  const order = new Map();
+  for (const p of photos) {
+    const v = vmap.get(p.vid) || {};
+    const t = v.treatment == null || Number(v.treatment) < 0 ? 999 : Number(v.treatment);
+    if (!order.has(col(p.vid))) order.set(col(p.vid), [t, v.name || ""]);
+  }
+  const tcols = [...order.keys()].sort((a, b) => order.get(a)[0] - order.get(b)[0] || order.get(a)[1].localeCompare(order.get(b)[1]));
+  const keys = classes.map(([k]) => k).filter((k) => photos.some((p) => p.n[k]));
   const nameOf = Object.fromEntries(classes.map(([k, n]) => [k, n]));
-  const want = ["Foto", "Descripción", ...keys.map((k) => nameOf[k]), "Total estructuras"];
+  const cells = new Map();
+  for (const p of photos) {
+    for (const k of [...keys, "__total"]) {
+      const v = k === "__total" ? Object.values(p.n).reduce((a, b) => a + b, 0) : p.n[k] || 0;
+      const key = `${p.det}\u0001${k}\u0001${col(p.vid)}`;
+      cells.set(key, (cells.get(key) || 0) + v);
+    }
+  }
   const tname = `${M.m.name} · conteos`;
   let t = C.measures(S.state).find((m) => m.kind === "table" && m.name === tname);
+  const want = ["Detalle", "Estructura", ...tcols];
   const changes = [...C.weekChange(S.state, S.week)];
   if (!t) {
-    const order = Math.max(0, ...C.measures(S.state).map((m) => Number(m.sort_order) || 0)) + 1;
-    const ch = C.measureChange(null, { name: tname, kind: "table", sort_order: order, columns: want });
+    const sortOrder = Math.max(0, ...C.measures(S.state).map((m) => Number(m.sort_order) || 0)) + 1;
+    const ch = C.measureChange(null, { name: tname, kind: "table", sort_order: sortOrder, columns: want });
     changes.push(ch);
     t = { uid: ch.uid, columns: want };
   } else {
     const missing = want.filter((c) => !t.columns.includes(c));
     if (missing.length) changes.push(C.measureChange(t, { columns: [...t.columns, ...missing] }));
   }
-  const mine = new Map(C.entriesFor(S.state, t.uid, S.week).map((e) => [e.data.Foto, e]));
-  for (const { r, name, n } of rows) {
-    const data = { Foto: name, "Descripción": r.caption || "" };
-    for (const k of keys) data[nameOf[k]] = n[k] || 0;
-    data["Total estructuras"] = Object.values(n).reduce((a, b) => a + b, 0);
-    const cur = mine.get(name);
-    changes.push(C.entryChange({ ...(cur || {}), measure_id: t.uid, week_id: S.week, variety_id: r.variety_id || null,
-      caption: "", data: { ...(cur ? cur.data : {}), ...data } }));
+  const mine = new Map(C.entriesFor(S.state, t.uid, S.week).map((e) => [`${e.data.Detalle}\u0001${e.data.Estructura}`, e]));
+  let n = 0;
+  for (const det of [...new Set(photos.map((p) => p.det))]) {
+    for (const k of [...keys, "__total"]) {
+      const label = k === "__total" ? "Total" : nameOf[k];
+      const data = { Detalle: det, Estructura: label };
+      for (const c of tcols) { const v = cells.get(`${det}\u0001${k}\u0001${c}`); if (v !== undefined) data[c] = v; }
+      const cur = mine.get(`${det}\u0001${label}`);
+      changes.push(C.entryChange({ ...(cur || {}), measure_id: t.uid, week_id: S.week, variety_id: null, caption: "",
+        data: { ...(cur ? cur.data : {}), ...data } }));
+      n++;
+    }
   }
   await send(changes);
-  $("mmsg").textContent = `${rows.length} fila(s) en la planilla «${tname}» (se ve en Mediciones; llega a la app al sincronizar).`;
+  $("mmsg").textContent = `${n} fila(s) en la planilla «${tname}» (detalle × estructura, una columna por tratamiento).`;
   render();
 }
 

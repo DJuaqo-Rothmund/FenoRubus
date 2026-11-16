@@ -120,24 +120,44 @@ def test_measure_photo_named_with_treatment_and_caption(tmp_path):
 
 
 def test_counts_to_table(tmp_path):
+    """Planilla de conteos: fila = detalle · estructura (y Total); columna = tratamiento."""
     tl.set_crop("frambuesa")
     db = Database(str(tmp_path / "t.sqlite3"))
     m = db.add_measure("Laterales flores", kind="images")
     w = db.week_for_date(dt.date(2026, 11, 9))
-    vid = db.add_variety("T2R1")
-    db.add_entry(m, w["id"], vid, path=str(tmp_path / "a.jpg"), caption="Medio 3")
-    db.add_entry(m, w["id"], path=str(tmp_path / "b.jpg"))                       # sin contar: no pasa
-    labels = {"a.jpg": {"boxes": [_box("boton"), _box("boton"), _box("flor")]}}
+    db.execute("INSERT OR REPLACE INTO treatments(num, name) VALUES (1, 'Testigo'), (2, '23 kg/ha')")
+    t1 = db.add_variety("T1R1")
+    t2 = db.add_variety("T2R1")
+    db.execute("UPDATE varieties SET treatment=1 WHERE id=?", (t1,))
+    db.execute("UPDATE varieties SET treatment=2 WHERE id=?", (t2,))
+    labels = {}
+    for i, (vid, cap, boxes) in enumerate([(t2, "Medio 3", ["boton", "boton", "flor"]),
+                                           (t1, "Medio 3", ["boton"]),
+                                           (t2, "Arriba", ["fruto_verde"])]):
+        name = f"f{i}.jpg"
+        db.add_entry(m, w["id"], vid, path=str(tmp_path / name), caption=cap)
+        labels[name] = {"boxes": [_box(b) for b in boxes]}
+    db.add_entry(m, w["id"], t1, path=str(tmp_path / "sin.jpg"), caption="Abajo")      # sin contar
     tid, n = db.counts_to_table(m, w["id"], labels)
     t = db.get_measure(tid)
-    assert n == 1 and t["name"] == "Laterales flores · conteos" and t["kind"] == "table"
-    assert t["columns"] == ["Foto", "Descripción", "Botón", "Flor", "Total estructuras"]
-    rows = db.list_entries(tid, week_id=w["id"])
-    assert len(rows) == 1 and rows[0]["variety_id"] == vid
-    assert rows[0]["data"] == {"Foto": "a.jpg", "Descripción": "Medio 3", "Botón": 2, "Flor": 1, "Total estructuras": 3}
-    # Se vuelve a contar (aparece un fruto): la misma fila se actualiza y se agrega la columna.
-    labels["a.jpg"]["boxes"].append(_box("fruto_verde"))
-    assert db.counts_to_table(m, w["id"], labels) == (tid, 1)
-    rows = db.list_entries(tid, week_id=w["id"])
-    assert len(rows) == 1 and rows[0]["data"]["Fruto verde"] == 1 and rows[0]["data"]["Total estructuras"] == 4
-    assert db.get_measure(tid)["columns"][-1] == "Fruto verde"
+    assert t["name"] == "Laterales flores · conteos"
+    assert t["columns"] == ["Detalle", "Estructura", "Testigo", "23 kg/ha"]
+    rows = {(r["data"]["Detalle"], r["data"]["Estructura"]): r["data"] for r in db.list_entries(tid, week_id=w["id"])}
+    assert n == len(rows) == 8                     # 2 detalles × (botón, flor, fruto verde, total)
+    assert rows[("Medio 3", "Botón")] == {"Detalle": "Medio 3", "Estructura": "Botón", "Testigo": 1, "23 kg/ha": 2}
+    assert rows[("Medio 3", "Total")]["23 kg/ha"] == 3 and rows[("Arriba", "Fruto verde")] == {
+        "Detalle": "Arriba", "Estructura": "Fruto verde", "23 kg/ha": 1}
+    # Se vuelve a pasar tras contar otra estructura: las filas se actualizan (no se duplican).
+    labels["f1.jpg"]["boxes"].append(_box("flor"))
+    db.counts_to_table(m, w["id"], labels)
+    rows2 = db.list_entries(tid, week_id=w["id"])
+    assert len(rows2) == 8 and next(r for r in rows2 if r["data"]["Detalle"] == "Medio 3"
+                                    and r["data"]["Estructura"] == "Flor")["data"]["Testigo"] == 1
+    # Dos parcelas del mismo tratamiento con el mismo detalle: una columna por parcela.
+    t2b = db.add_variety("T2R2")
+    db.execute("UPDATE varieties SET treatment=2 WHERE id=?", (t2b,))
+    db.add_entry(m, w["id"], t2b, path=str(tmp_path / "f9.jpg"), caption="Medio 3")
+    labels["f9.jpg"] = {"boxes": [_box("boton")]}
+    tid2, _n = db.counts_to_table(m, w["id"], labels, db.add_measure("Otra", kind="table", columns=["x"]))
+    assert db.get_measure(tid2)["columns"] == ["x", "Detalle", "Estructura", "Testigo (T1R1)", "23 kg/ha (T2R1)",
+                                                "23 kg/ha (T2R2)"]

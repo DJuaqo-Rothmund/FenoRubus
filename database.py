@@ -1542,51 +1542,81 @@ class Database:
         self.log("update", "measure_entries", entry_id, f"foto: {old_name} -> {new_name}")
         return old_name, new_name
 
-    COUNT_PHOTO_COL = "Foto"
+    COUNT_DETAIL_COL, COUNT_STAGE_COL, COUNT_TOTAL = "Detalle", "Estructura", "Total"
 
     def counts_to_table(self, image_measure_id: int, week_id: int, labels: dict,
                         table_measure_id: int | None = None) -> tuple[int, int]:
         """Pasa los conteos con cajas de las fotos de una medición de imágenes (esa semana) a
-        una medición de planilla: una fila por foto con su tratamiento/variedad y columnas
-        «Foto», «Descripción», una por estructura y «Total estructuras». Si no se indica la
-        planilla, se usa (o crea) «<medición> · conteos». Si se vuelve a pasar, la fila de esa
-        foto se actualiza (no se duplica). labels: marcas de IA+ por nombre de foto.
-        Devuelve (id de la planilla, filas escritas)."""
+        una planilla: UNA FILA POR DETALLE Y ESTRUCTURA («Medio 3» · Botón, Flor… y Total) y
+        UNA COLUMNA POR TRATAMIENTO (el de la foto; si un tratamiento tiene varias parcelas con
+        el mismo detalle, una columna por parcela: «23 kg/ha (T2R1)»). Si no se indica la planilla,
+        se usa (o crea) «<medición> · conteos». Si se vuelve a pasar, las filas se actualizan.
+        labels: marcas de IA+ por nombre de foto. Devuelve (id de la planilla, filas escritas)."""
         import training_labels as tl
         src = self.get_measure(image_measure_id)
         if table_measure_id is None:
             name = f"{src['name']} · conteos"
             have = self.query_one("SELECT id FROM measures WHERE name=? AND kind='table'", (name,))
-            table_measure_id = have["id"] if have else self.add_measure(name, kind="table",
-                                                                        columns=[self.COUNT_PHOTO_COL])
-        rows = []
+            table_measure_id = have["id"] if have else self.add_measure(
+                name, kind="table", columns=[self.COUNT_DETAIL_COL, self.COUNT_STAGE_COL])
+        names = self.treatment_names()
+        vmap = {v["id"]: v for v in self.list_varieties(include_archived=True)}
+        photos = []                                  # (detalle, variedad, conteo)
         for e in self.list_entries(image_measure_id, week_id=week_id):
             fname = os.path.basename(e["path"] or "")
             got = tl.counts(labels.get(fname)) if fname else None
             if got is not None:
-                rows.append((e, fname, got))
-        stages = [k for k, _n, _c in tl.CLASSES if any(k in g for _e, _f, g in rows)]
-        stages += sorted({k for _e, _f, g in rows for k in g} - set(stages))
-        want = [self.COUNT_PHOTO_COL, "Descripción"] + [tl.NAMES.get(k, k) for k in stages] + ["Total estructuras"]
+                photos.append(((e["caption"] or "").strip() or fname, e["variety_id"], got))
+        if not photos:
+            return table_measure_id, 0
+        # Columna de cada foto: el tratamiento; con parcela si el mismo tratamiento repite detalle.
+        def title(vid):
+            v = vmap.get(vid)
+            return self.parcel_labels(v, names)[0] if v else "General"
+        seen: dict = {}
+        for det, vid, _g in photos:
+            seen.setdefault((det, title(vid)), set()).add(vid)
+        split = any(len(vs) > 1 for vs in seen.values())
+        def col(vid):
+            v = vmap.get(vid)
+            return (self.display_name(v, names) if split else title(vid)) if v else "General"
+        details = list(dict.fromkeys(det for det, _v, _g in photos))
+        stages = [k for k, _n, _c in tl.CLASSES if any(k in g for _d, _v, g in photos)]
+        stages += sorted({k for _d, _v, g in photos for k in g} - set(stages))
+        order: dict = {}                             # columnas en orden de tratamiento (T0, T1…)
+        for _d, vid, _g in photos:
+            v = vmap.get(vid) or {}
+            t = v.get("treatment")
+            order.setdefault(col(vid), (t if t is not None and t >= 0 else 999, v.get("name") or ""))
+        tcols = sorted(order, key=order.get)
+        cells: dict = {}
+        for det, vid, got in photos:
+            for k in stages + [self.COUNT_TOTAL]:
+                n = sum(got.values()) if k == self.COUNT_TOTAL else got.get(k, 0)
+                key = (det, k, col(vid))
+                cells[key] = cells.get(key, 0) + n
+        want = [self.COUNT_DETAIL_COL, self.COUNT_STAGE_COL] + tcols
         cols = list(self.get_measure(table_measure_id)["columns"])
         missing = [c for c in want if c not in cols]
         if missing:
             self.update_measure(table_measure_id, columns=cols + missing)
-        mine = {(x["data"] or {}).get(self.COUNT_PHOTO_COL): x
+        mine = {((x["data"] or {}).get(self.COUNT_DETAIL_COL), (x["data"] or {}).get(self.COUNT_STAGE_COL)): x
                 for x in self.list_entries(table_measure_id, week_id=week_id)}
         n = 0
         with self.batch():
-            for e, fname, got in rows:
-                data = {self.COUNT_PHOTO_COL: fname, "Descripción": e["caption"] or ""}
-                for k in stages:
-                    data[tl.NAMES.get(k, k)] = got.get(k, 0)
-                data["Total estructuras"] = sum(got.values())
-                cur = mine.get(fname)
-                if cur:
-                    self.update_entry(cur["id"], data={**(cur["data"] or {}), **data}, variety_id=e["variety_id"])
-                else:
-                    self.add_entry(table_measure_id, week_id, e["variety_id"], data=data)
-                n += 1
+            for det in details:
+                for k in stages + [self.COUNT_TOTAL]:
+                    label = tl.NAMES.get(k, k) if k != self.COUNT_TOTAL else "Total"
+                    data = {self.COUNT_DETAIL_COL: det, self.COUNT_STAGE_COL: label}
+                    for c in tcols:
+                        if (det, k, c) in cells:
+                            data[c] = cells[(det, k, c)]
+                    cur = mine.get((det, label))
+                    if cur:
+                        self.update_entry(cur["id"], data={**(cur["data"] or {}), **data})
+                    else:
+                        self.add_entry(table_measure_id, week_id, None, data=data)
+                    n += 1
         return table_measure_id, n
 
     def update_entry(self, entry_id: int, **fields) -> None:
