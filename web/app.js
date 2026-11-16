@@ -2481,7 +2481,12 @@ async function boot() {
     crop: () => CROP, classes: () => TR.cropClasses(CROP), device: () => S.device });
   $("aifabs").hidden = !TR.enabled();
   document.body.classList.toggle("withfabs", TR.enabled());      // se activa abriendo la web con «#lab» una vez
-  TR.init({ S, photoUrl, loadLabels, saveLabels, cachedLabels: () => cacheGet(trainKey()), allStates, extraList, extraUrl, extraUpload, yieldList,
+  TR.init({ S, photoUrl, loadLabels, saveLabels, cachedLabels: () => cacheGet(trainKey()),
+    // Marcas hechas aquí que aún no confirman su guardado en Drive (sesión vencida, sin red…):
+    // quedan en el navegador y se vuelven a subir al abrir (no se pierden al recargar).
+    pendingGet: () => cacheGet(`${trainKey()}:pendientes`), pendingPut: (v) => cachePut(`${trainKey()}:pendientes`, v),
+    reconnect: () => signIn(""),
+    allStates, extraList, extraUrl, extraUpload, yieldList,
     setCrop: (mod) => { trainMod = mod; },
     crop: () => (S.workspaces.length && !$("app").hidden ? CROP : null),
     email: () => store.get("ac_email") });

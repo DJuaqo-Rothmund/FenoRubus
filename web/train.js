@@ -134,6 +134,7 @@ async function load(fresh) {
       const cached = await X.cachedLabels?.().catch(() => null);
       if (cached && cached.photos) data = { ...data, ...cached, classes: data.classes };
     }
+    await restorePending();
   }
   if (!photos || fresh) {
     const detail = detailPhotos(await X.allStates(say));
@@ -155,6 +156,29 @@ async function load(fresh) {
   renderWs();
   renderList();
 }
+// Marcas sin confirmar en Drive (se guardan también en el navegador): {nombre: marca}.
+let pending = {};
+function keepPending(name, rec) {
+  pending[name] = JSON.parse(JSON.stringify(rec));
+  X.pendingPut?.(pending);
+}
+// Al abrir: lo marcado aquí que no alcanzó a guardarse en Drive vuelve y se sube.
+async function restorePending() {
+  const got = (await X.pendingGet?.().catch(() => null)) || {};
+  let n = 0;
+  for (const [name, rec] of Object.entries(got)) {
+    const cur = data.photos[name];
+    if (!cur || (rec.ts || "") > (cur.ts || "")) { data.photos[name] = rec; n++; }
+  }
+  pending = got;
+  if (n) {
+    $("tsaved").textContent = `Se recuperaron ${n} foto(s) marcadas que no se habían guardado: guardando…`;
+    scheduleSave();
+  }
+  return n;
+}
+function unsaved() { return Object.keys(pending).length; }
+
 function scheduleSave() {
   clearTimeout(saveTimer);
   $("tsaved").textContent = "Sin guardar…";
@@ -164,12 +188,24 @@ function scheduleSave() {
 async function saveNow() {
   clearTimeout(saveTimer);
   if (!data) return;
-  if (loadError) { $("tsaved").textContent = "No se guardó: primero hay que leer las marcas de Drive (pulse ⟳)."; return; }
+  if (loadError) {
+    $("tsaved").textContent = `⚠ NO GUARDADO: primero hay que leer las marcas de Drive (pulse ⟳ o «Reconectar»). ${unsaved()} foto(s) quedan en este navegador.`;
+    $("tsaved").classList.add("terr");
+    return;
+  }
   $("tsaved").textContent = "Guardando en Drive…";
+  const sent = { ...pending };
   try {
     await X.saveLabels(data);
+    for (const [k, r] of Object.entries(sent)) if (pending[k] && (pending[k].ts || "") <= (r.ts || "")) delete pending[k];
+    X.pendingPut?.(pending);
     $("tsaved").textContent = "Guardado en Drive";
-  } catch (e) { $("tsaved").textContent = `No se guardó: ${e.message}`; }
+    $("tsaved").classList.remove("terr");
+  } catch (e) {
+    // Bien visible: lo marcado queda en este navegador y se sube al reconectar o al volver a abrir.
+    $("tsaved").textContent = `⚠ NO GUARDADO EN DRIVE (${unsaved()} foto(s) quedan en este navegador). Toque aquí para reconectar y guardar. ${e.message}`;
+    $("tsaved").classList.add("terr");
+  }
 }
 
 function detailPhotos(states) {
@@ -296,6 +332,20 @@ const Ed = {
     });
     $("tsuggest").onclick = () => this.suggest();
     $("tsave").onclick = () => saveNow();
+    // Aviso rojo «NO GUARDADO»: un toque reconecta la cuenta de Google y vuelve a guardar.
+    $("tsaved").onclick = async () => {
+      if (!$("tsaved").classList.contains("terr")) return;
+      $("tsaved").textContent = "Reconectando con Google…";
+      try {
+        await X.reconnect?.();
+        if (loadError) {                           // primero leer las de Drive (no pisar lo de otro equipo)
+          const got = await X.loadLabels();
+          for (const [k, v] of Object.entries(got?.photos || {})) if (!data.photos[k] || (v.ts || "") > (data.photos[k].ts || "")) data.photos[k] = v;
+          loadError = "";
+        }
+        await saveNow();
+      } catch (e) { $("tsaved").textContent = `⚠ NO GUARDADO: ${e.message}`; }
+    };
     this.cv.addEventListener("pointerdown", (e) => this.down(e));
     this.cv.addEventListener("pointermove", (e) => this.move(e));
     for (const ev of ["pointerup", "pointercancel"]) this.cv.addEventListener(ev, (e) => this.up(e));
@@ -414,6 +464,7 @@ const Ed = {
     this.rec.ts = C.nowTs();
     if (this.rec.boxes.length) this.rec.empty = false;
     data.photos[this.photo.name] = this.rec;
+    keepPending(this.photo.name, this.rec);
     if (record) this.record();
     this.undoButtons();
     this.summary(); this.draw(); this.progress(); scheduleSave();
@@ -649,7 +700,12 @@ export async function ensureLabels(mod) {
     try {
       const got = await X.loadLabels();
       if (got && got.photos) data = { ...data, ...got, classes: data.classes };
-    } catch (e) { loadError = e.message; }
+    } catch (e) {
+      loadError = e.message;
+      const cached = await X.cachedLabels?.().catch(() => null);
+      if (cached && cached.photos) data = { ...data, ...cached, classes: data.classes };
+    }
+    await restorePending();
     Ed.renderClasses();
   }
   return data;

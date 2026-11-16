@@ -598,3 +598,6 @@ dialog.rcfg { width: min(720px, 96vw); background: #FBF8F1; }
 .mcount { min-height: 1em; padding: 4px 10px 0; color: var(--leaf-dark, #1E5A45); }
 .mcount i { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 3px; }
 .mcountbtn { font-size: 13px; }
+/* Aviso de marcas NO guardadas en Drive: siempre visible (también en el teléfono) */
+#tsaved.terr { display: block !important; background: #B71C1C; color: #fff; padding: 6px 12px; border-radius: 10px;
+  font-weight: 700; cursor: pointer; white-space: normal; max-width: min(520px, 90vw); }
