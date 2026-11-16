@@ -120,44 +120,34 @@ def test_measure_photo_named_with_treatment_and_caption(tmp_path):
 
 
 def test_counts_to_table(tmp_path):
-    """Planilla de conteos: fila = detalle · estructura (y Total); columna = tratamiento."""
+    """Planilla de conteos: una fila por foto con su tratamiento (1.ª columna), detalle, cada
+    estructura y el total; si se vuelve a pasar (aunque la foto cambió de nombre) no se duplica."""
     tl.set_crop("frambuesa")
     db = Database(str(tmp_path / "t.sqlite3"))
     m = db.add_measure("Laterales flores", kind="images")
     w = db.week_for_date(dt.date(2026, 11, 9))
-    db.execute("INSERT OR REPLACE INTO treatments(num, name) VALUES (1, 'Testigo'), (2, '23 kg/ha')")
-    t1 = db.add_variety("T1R1")
-    t2 = db.add_variety("T2R1")
-    db.execute("UPDATE varieties SET treatment=1 WHERE id=?", (t1,))
-    db.execute("UPDATE varieties SET treatment=2 WHERE id=?", (t2,))
-    labels = {}
-    for i, (vid, cap, boxes) in enumerate([(t2, "Medio 3", ["boton", "boton", "flor"]),
-                                           (t1, "Medio 3", ["boton"]),
-                                           (t2, "Arriba", ["fruto_verde"])]):
-        name = f"f{i}.jpg"
-        db.add_entry(m, w["id"], vid, path=str(tmp_path / name), caption=cap)
-        labels[name] = {"boxes": [_box(b) for b in boxes]}
+    t1, t2 = db.add_variety("T1R1"), db.add_variety("T2R1")
+    labels, n_photos = {}, 0
+    for vid in (t1, t2):
+        for cap, boxes in (("Arriba 1", ["boton", "boton", "flor"]), ("Medio 1", ["fruto_verde"])):
+            name = f"f{n_photos}.jpg"
+            n_photos += 1
+            db.add_entry(m, w["id"], vid, path=str(tmp_path / name), caption=cap)
+            labels[name] = {"boxes": [_box(b) for b in boxes]}
     db.add_entry(m, w["id"], t1, path=str(tmp_path / "sin.jpg"), caption="Abajo")      # sin contar
     tid, n = db.counts_to_table(m, w["id"], labels)
     t = db.get_measure(tid)
-    assert t["name"] == "Laterales flores · conteos"
-    assert t["columns"] == ["Detalle", "Estructura", "Testigo", "23 kg/ha"]
-    rows = {(r["data"]["Detalle"], r["data"]["Estructura"]): r["data"] for r in db.list_entries(tid, week_id=w["id"])}
-    assert n == len(rows) == 8                     # 2 detalles × (botón, flor, fruto verde, total)
-    assert rows[("Medio 3", "Botón")] == {"Detalle": "Medio 3", "Estructura": "Botón", "Testigo": 1, "23 kg/ha": 2}
-    assert rows[("Medio 3", "Total")]["23 kg/ha"] == 3 and rows[("Arriba", "Fruto verde")] == {
-        "Detalle": "Arriba", "Estructura": "Fruto verde", "23 kg/ha": 1}
-    # Se vuelve a pasar tras contar otra estructura: las filas se actualizan (no se duplican).
-    labels["f1.jpg"]["boxes"].append(_box("flor"))
-    db.counts_to_table(m, w["id"], labels)
-    rows2 = db.list_entries(tid, week_id=w["id"])
-    assert len(rows2) == 8 and next(r for r in rows2 if r["data"]["Detalle"] == "Medio 3"
-                                    and r["data"]["Estructura"] == "Flor")["data"]["Testigo"] == 1
-    # Dos parcelas del mismo tratamiento con el mismo detalle: una columna por parcela.
-    t2b = db.add_variety("T2R2")
-    db.execute("UPDATE varieties SET treatment=2 WHERE id=?", (t2b,))
-    db.add_entry(m, w["id"], t2b, path=str(tmp_path / "f9.jpg"), caption="Medio 3")
-    labels["f9.jpg"] = {"boxes": [_box("boton")]}
-    tid2, _n = db.counts_to_table(m, w["id"], labels, db.add_measure("Otra", kind="table", columns=["x"]))
-    assert db.get_measure(tid2)["columns"] == ["x", "Detalle", "Estructura", "Testigo (T1R1)", "23 kg/ha (T2R1)",
-                                                "23 kg/ha (T2R2)"]
+    assert n == 4 and t["name"] == "Laterales flores · conteos"
+    assert t["columns"] == ["Detalle", "Botón", "Flor", "Fruto verde", "Total estructuras", "Foto"]
+    rows = db.list_entries(tid, week_id=w["id"])
+    assert len(rows) == 4 and {r["variety_id"] for r in rows} == {t1, t2}            # el tratamiento queda
+    r0 = next(r for r in rows if r["variety_id"] == t1 and r["data"]["Detalle"] == "Arriba 1")
+    assert r0["data"] == {"Detalle": "Arriba 1", "Botón": 2, "Flor": 1, "Fruto verde": 0,
+                          "Total estructuras": 3, "Foto": "f0.jpg"}
+    # La foto cambia de nombre y se cuenta otra cosa: la misma fila se actualiza.
+    db.execute("UPDATE measure_entries SET path=? WHERE path=?", (str(tmp_path / "nuevo.jpg"), str(tmp_path / "f0.jpg")))
+    labels["nuevo.jpg"] = {"boxes": [_box("flor")]}
+    assert db.counts_to_table(m, w["id"], labels) == (tid, 4)
+    rows = db.list_entries(tid, week_id=w["id"])
+    r0 = next(r for r in rows if r["variety_id"] == t1 and r["data"]["Detalle"] == "Arriba 1")
+    assert len(rows) == 4 and r0["data"]["Flor"] == 1 and r0["data"]["Botón"] == 0 and r0["data"]["Foto"] == "nuevo.jpg"

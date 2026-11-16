@@ -714,7 +714,7 @@ class MeasureScreen(MDScreen):
         items += [(m["name"], "Planilla existente: se agregan las columnas que falten", lambda m=m: go(m["id"]))
                   for m in tables if m["name"] != auto]
         pick_dialog("Pasar los conteos a una planilla", items,
-                    subtitle="Una fila por foto de esta semana, con su tratamiento, descripción y cada estructura. "
+                    subtitle="Una fila por foto de esta semana: su tratamiento, el detalle (Arriba 1, Medio 3…), cada estructura y el total. "
                              "Si la vuelve a pasar, las filas se actualizan.")
 
     # ------------------------------------------------- contar estructuras
