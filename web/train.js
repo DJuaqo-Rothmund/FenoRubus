@@ -4,6 +4,7 @@
 // PhenoCran): se trabaja con las fotos de TODOS sus ensayos y predios y las marcas van a un
 // solo archivo en su carpeta de Drive («…/<módulo>/Entrenamiento IA/marcas.json»).
 import * as C from "./core.js";
+import * as BOX from "./box_ai.js";
 
 // Clases de cajas de cada cultivo (= training_labels.py de AeonCrop). La tecla de cada
 // clase es su posición (0–9). IA+ entrena cada cultivo por separado (su carpeta en Drive).
@@ -277,7 +278,12 @@ const Ed = {
     $("tcopy").onclick = () => this.copyPrev();
     $("tfit").onclick = () => { this.fitView(); this.draw(); };
     $("tclose").onclick = () => this.close();
-    $("tdialog").addEventListener("close", () => { saveNow(); renderList(); });
+    $("tdialog").addEventListener("close", () => {
+      saveNow(); renderList();
+      const cb = this.onClose; this.onClose = null;          // «Contar» desde una medición
+      if (cb) cb();
+    });
+    $("tsuggest").onclick = () => this.suggest();
     this.cv.addEventListener("pointerdown", (e) => this.down(e));
     this.cv.addEventListener("pointermove", (e) => this.move(e));
     for (const ev of ["pointerup", "pointercancel"]) this.cv.addEventListener(ev, (e) => this.up(e));
@@ -332,6 +338,28 @@ const Ed = {
     $("tprogress").innerHTML = `Foto <b>${pos}</b> de <b>${all.length}</b> · <b>${done}</b> analizadas · <b>${all.length - done}</b> por ver`;
   },
   close() { $("tdialog").close(); },
+  // Cajas automáticas con Gemini (= box_ai.py): se suman a las que ya hay.
+  async suggest() {
+    const btn = $("tsuggest");
+    if (!this.img || btn.disabled) return;
+    const p = this.photo;
+    btn.disabled = true;
+    const label = btn.textContent;
+    try {
+      const blob = await (await fetch(this.img.src)).blob();
+      const got = await BOX.suggest(blob, CLASSES, (CROP_NAMES[crop] || "").toLowerCase(), (t) => { btn.textContent = t; });
+      if (this.photo !== p) return;
+      const before = this.rec.boxes.length;
+      this.rec.boxes = BOX.merge(this.rec.boxes, got);
+      const n = this.rec.boxes.length - before;
+      this.sel = null;
+      this.changed();
+      $("tsaved").textContent = n ? `${n} caja(s) sugerida(s): revise el tipo de cada una y borre las que sobren`
+        : "La IA no encontró estructuras nuevas";
+    } catch (e) {
+      $("tsaved").textContent = `IA: ${e.message}`;
+    } finally { btn.disabled = false; btn.textContent = label; }
+  },
   go(d) {
     const j = this.i + d;
     if (j < 0 || j >= list.length) return;
@@ -586,3 +614,47 @@ const Ed = {
 };
 
 window.addEventListener("keyup", (e) => { if (e.key === " ") Ed.space = false; });
+
+
+// ------------------------------------------------------------------ contar desde una medición
+// Abre el editor para UNA foto (de una medición): las marcas van al mismo marcas.json del
+// cultivo (sirven también para entrenar la IA). onClose() al cerrar (se guarda en Drive).
+export async function countPhoto(p, mod, onClose) {
+  await ensureLabels(mod);
+  list = [p];
+  Ed.onClose = onClose;
+  Ed.open(0);
+}
+
+// Marcas del cultivo `mod` en memoria (una vez): para mostrar los conteos de las fotos.
+export async function ensureLabels(mod) {
+  if (mod !== crop || !data) {
+    useCrop(mod);
+    X.setCrop(crop);
+    data = { version: 1, classes: CLASSES.map(([k]) => k), photos: {} };
+    photos = null;
+    loadError = "";
+    try {
+      const got = await X.loadLabels();
+      if (got && got.photos) data = { ...data, ...got, classes: data.classes };
+    } catch (e) { loadError = e.message; }
+    Ed.renderClasses();
+  }
+  return data;
+}
+
+// Conteo de una foto: {clase: n} (null si no está marcada) = training_labels.counts.
+export function countsOf(name) {
+  const r = data?.photos?.[name];
+  if (!r || !(r.empty || (r.boxes || []).length)) return null;
+  const n = {};
+  for (const b of r.boxes || []) n[b.c] = (n[b.c] || 0) + 1;
+  return n;
+}
+export function countText(name) {
+  const n = countsOf(name);
+  if (!n) return "";
+  const parts = CLASSES.filter(([k]) => n[k]).map(([k, nm, c]) => `<i style="background:${c}"></i>${esc(nm)} ${n[k]}`);
+  return parts.length ? `${parts.join(" · ")} <b>(${Object.values(n).reduce((a, b) => a + b, 0)})</b>` : "Sin estructuras";
+}
+export function labelsData() { return data; }

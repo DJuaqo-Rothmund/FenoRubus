@@ -193,16 +193,13 @@
         pos_hint: {"center_y": .5}
         theme_text_color: "Custom"
         text_color: 1, 1, 1, 1
-    # Mediciones de la semana: círculo flotante (tocar el nombre cambia de ensayo o predio)
-    # (más grande que la franja y algo más abajo: cuelga sobre el contenido, como un sello)
-    MeasuresCounterButton:
-        size_hint: None, None
-        size: dp(54), dp(54)
-        pos_hint: {"center_y": .12}
-        on_release: root.open_measures()
 
-<MeasuresCounterButton@ButtonBehavior+Widget>:
+<MeasuresFab>:
     # Mediciones: el contador manual dibujado, sobre un círculo claro (en todos los estilos).
+    # Flota sobre toda la pantalla del muestreo (ui/measures_fab.py): mantenerlo presionado
+    # llena el anillo y después se arrastra adonde se quiera.
+    size_hint: None, None
+    size: (dp(62), dp(62)) if self.dragging else (dp(54), dp(54))
     canvas:
         Color:
             rgba: 0, 0, 0, .45
@@ -220,6 +217,12 @@
         Line:
             circle: self.center_x, self.center_y, self.width / 2 - dp(1.5)
             width: dp(2.2)
+        # mantener presionado: el anillo se llena (verde) hasta poder moverlo
+        Color:
+            rgba: (0.18, 0.80, 0.44, 1) if self.hold > 0 else (0, 0, 0, 0)
+        Line:
+            circle: self.center_x, self.center_y, self.width / 2 + dp(2.5), 0, 360 * self.hold
+            width: dp(3)
         Color:
             rgba: (1, 1, 1, 1 if self.state == "normal" else .65)
         Rectangle:

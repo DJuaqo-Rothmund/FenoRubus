@@ -335,7 +335,7 @@ def gemini_order(db=None) -> list[str]:
 
 
 def ask_gemini(key: str, images: list[bytes], text: str, models=GEMINI_MODELS, progress=None,
-               db=None) -> dict:
+               db=None, schema: dict | None = None):
     """Prueba los modelos gratuitos en orden (el último que funcionó primero): si uno no
     existe, no acepta la consulta o no tiene cuota gratuita, pasa al siguiente."""
     parts = [{"inline_data": {"mime_type": "image/jpeg", "data": base64.b64encode(i).decode()}}
@@ -343,7 +343,7 @@ def ask_gemini(key: str, images: list[bytes], text: str, models=GEMINI_MODELS, p
     parts.append({"text": text})
     body = json.dumps({"contents": [{"role": "user", "parts": parts}],
                        "generationConfig": {"responseMimeType": "application/json",
-                                            "responseSchema": gemini_schema()}}).encode()
+                                            "responseSchema": schema or gemini_schema()}}).encode()
     headers = {"Content-Type": "application/json", "x-goog-api-key": key}
     if db is not None and models is GEMINI_MODELS:
         models = gemini_order(db)

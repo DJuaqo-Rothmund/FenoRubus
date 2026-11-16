@@ -46,6 +46,7 @@ self.onmessage = async ({ data: m }) => {
     wr.use_crop(m.crop || "PhenoRubus");
     wr.load(m.ws.code, JSON.stringify(m.ws), JSON.stringify(m.bundles));
     for (const x of m.extra || []) wr.load(x.ws.code, JSON.stringify(x.ws), JSON.stringify(x.bundles));   // el predio (temperaturas)
+    if (m.labels) wr.set_labels(JSON.stringify(m.labels));      // cajas de IA+: conteos en el Excel
     const paths = ["treatments", "excel", "degree_days"].includes(m.kind) ? [] : JSON.parse(wr.photos(m.ws.code, m.kind, m.arg, m.season, m.cfg ? JSON.stringify(m.cfg) : ""));
     const need = [...new Set(paths)].filter((p) => !py.FS.analyzePath(`/data/${p}`).exists);
     if (need.length) {

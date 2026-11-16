@@ -46,6 +46,20 @@ def _db(code: str, workspace: dict) -> tuple[Database, set]:
     return _dbs[key]
 
 
+_LABELS: dict = {}
+
+
+def set_labels(labels_json: str) -> int:
+    """Marcas de cajas del cultivo (marcas.json de IA+): el Excel de mediciones cuenta las
+    estructuras de cada foto. Devuelve cuántas fotos marcadas llegaron."""
+    global _LABELS
+    try:
+        _LABELS = (json.loads(labels_json or "{}") or {}).get("photos") or {}
+    except ValueError:
+        _LABELS = {}
+    return len(_LABELS)
+
+
 def load(code: str, workspace_json: str, bundles_json: str) -> int:
     """Aplica los paquetes nuevos ([[nombre, paquete], …], en orden). Devuelve cuántos."""
     db, seen = _db(code, json.loads(workspace_json))
@@ -275,9 +289,11 @@ def report(code: str, kind: str, arg: str, season: int, plain: bool = False, cfg
             raise ValueError(f"No hay temperaturas de {p.get('name')} desde el 1 de septiembre.")
         res = r.season_compare(season, w, refs, predio=p.get("name", ""), package="pdf")
     elif kind == "excel":
+        import training_labels
         from measures_export import export_measures
+        training_labels.set_crop(_crop)
         ids = [m["id"] for m in db.list_measures()]
-        return export_measures(db, ids, season, os.path.join(DATA, "reports"))
+        return export_measures(db, ids, season, os.path.join(DATA, "reports"), labels=_LABELS)
     else:
         res = r.matrix(season, package="pdf")
     return res.path

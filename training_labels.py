@@ -99,6 +99,32 @@ def is_marked(rec: dict | None) -> bool:
     return bool(rec and (rec.get("empty") or rec.get("boxes")))
 
 
+def counts(rec: dict | None) -> dict[str, int] | None:
+    """Estructuras contadas en una foto: {clase: n} en el orden de CLASSES (solo las que hay).
+    None si la foto no está marcada; {} si se marcó «sin estructuras»."""
+    if not is_marked(rec):
+        return None
+    n: dict[str, int] = {}
+    for b in rec.get("boxes") or []:
+        n[b.get("c")] = n.get(b.get("c"), 0) + 1
+    order = [k for k, _, _ in CLASSES] + sorted(k for k in n if k not in NAMES)
+    return {k: n[k] for k in order if n.get(k)}
+
+
+def count_text(rec: dict | None, markup: bool = False) -> str:
+    """«Botón 10 · Flor 6 · Fruto verde 4 (20)» para mostrar junto a la foto."""
+    got = counts(rec)
+    if got is None:
+        return ""
+    if not got:
+        return "Sin estructuras"
+    parts = []
+    for k, v in got.items():
+        name = NAMES.get(k, k)
+        parts.append(f"[color={COLORS[k]}][b]•[/b][/color] {name} {v}" if markup and k in COLORS else f"{name} {v}")
+    return " · ".join(parts) + f"  ({sum(got.values())})"
+
+
 class LabelStore:
     """Copia local de las marcas (data/training/marcas.json) y su sincronización con Drive."""
 

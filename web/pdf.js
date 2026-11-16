@@ -34,7 +34,7 @@ export async function py(fn, args, { extra = [], crop, file = null, text = "", p
 // ctx: {ws, bundles, crop (módulo), plain (PDF simple), cfg (configuración de informes): [[nombre, paquete]…], photoBlob(path) -> Blob|null, progress(texto)}
 export async function makePdf(ctx, kind, arg, season) {
   const r = await call({ op: "pdf", ws: ctx.ws, bundles: ctx.bundles, extra: ctx.extra || [], kind, arg, season,
-    crop: ctx.crop, plain: !!ctx.plain, cfg: ctx.cfg || null }, {
+    crop: ctx.crop, plain: !!ctx.plain, cfg: ctx.cfg || null, labels: ctx.labels || null }, {
     progress: ctx.progress,
     need: async (paths, jid) => {
       const out = [];

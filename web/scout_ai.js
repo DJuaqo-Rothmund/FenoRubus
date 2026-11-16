@@ -120,11 +120,11 @@ export function chain(section) {
 }
 
 // ------------------------------------------------------------------ servicios
-export async function prepare(blobs) {        // JPEG, lado mayor ≤ 1280 (= scout_ai.prepare)
+export async function prepare(blobs, maxSide = MAX_SIDE) {   // JPEG, lado mayor ≤ 1280 (= scout_ai.prepare)
   const out = [];
   for (const b of blobs.slice(0, MAX_PHOTOS)) {
     const bmp = await createImageBitmap(b);
-    const k = Math.min(1, MAX_SIDE / Math.max(bmp.width, bmp.height));
+    const k = Math.min(1, maxSide / Math.max(bmp.width, bmp.height));
     const c = document.createElement("canvas");
     c.width = Math.round(bmp.width * k); c.height = Math.round(bmp.height * k);
     c.getContext("2d").drawImage(bmp, 0, 0, c.width, c.height);
@@ -154,12 +154,13 @@ function geminiOrder() {
 
 const toB64 = (blob) => new Promise((res) => { const fr = new FileReader(); fr.onload = () => res(String(fr.result).split(",")[1]); fr.readAsDataURL(blob); });
 
-async function askGemini(key, images, text, progress) {   // = scout_ai.ask_gemini
+export async function askGemini(key, images, text, progress = () => {}, schema = null) {   // = scout_ai.ask_gemini
+  await guide();
   const parts = [];
   for (const img of images) parts.push({ inline_data: { mime_type: "image/jpeg", data: await toB64(img) } });
   parts.push({ text });
   const body = JSON.stringify({ contents: [{ role: "user", parts }],
-    generationConfig: { responseMimeType: "application/json", responseSchema: G.schema } });
+    generationConfig: { responseMimeType: "application/json", responseSchema: schema || G.schema } });
   let quota = "";
   const errors = [];
   for (const model of geminiOrder()) {

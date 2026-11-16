@@ -554,3 +554,7 @@
                 text: "Vista previa"
                 active: tabs.current == "preview"
                 on_release: root.on_tab("preview")
+    # Mediciones: botón flotante encima de todo (se mueve manteniéndolo presionado)
+    MeasuresFab:
+        id: measures_fab
+        on_release: root.ids.ws_banner.open_measures()

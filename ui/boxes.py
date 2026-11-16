@@ -836,6 +836,9 @@ class BoxEditor(ModalView):
                            halign="left", valign="middle", markup=True)
         self.count.bind(size=lambda w, s: setattr(w, "text_size", s))
         tools.add_widget(self.count)
+        self.ai_b = _Pill("IA: sugerir cajas")
+        self.ai_b.bind(on_release=lambda *_: self.suggest())
+        tools.add_widget(self.ai_b)
         for label, fn in (("Copiar anterior", self.copy_prev), ("Sin estructuras", self.toggle_empty),
                           ("Encuadrar", lambda: self.canvas_w.fit()), ("Borrar caja", self.delete_sel)):
             b = _Pill(label)
@@ -966,6 +969,57 @@ class BoxEditor(ModalView):
             self.rec["boxes"] = []
             self.sel = None
         self.changed()
+
+    def suggest(self):
+        """Cajas automáticas con Gemini (gratis, la clave de AeonScout): se agregan a las que ya
+        hay y la persona corrige el tipo o borra las que sobran."""
+        a = app()
+        import scout_ai
+        try:
+            key = scout_ai.load_keys(a.scout).get("gemini")
+        except Exception:  # noqa: BLE001
+            key = None
+        if not key:
+            a.toast("Falta la clave de Gemini: AeonScout › Claves de IA (es gratis).")
+            return
+        p = self.photo
+        if not p.get("path") or not os.path.exists(p["path"]):
+            a.toast("La foto aún no está en el teléfono.")
+            return
+        if getattr(self, "_suggesting", False):
+            return
+        self._suggesting = True
+        self.ai_b.text = "IA: buscando…"
+        import crops
+        crop_name = crops.current().fruit
+        classes = list(CLASSES)
+
+        def work():
+            import box_ai
+            try:
+                got = box_ai.suggest(key, p["path"], classes, crop_name, db=a.scout)
+                err = None
+            except Exception as exc:  # noqa: BLE001
+                got, err = [], exc
+            Clock.schedule_once(lambda *_: done(got, err))
+
+        def done(got, err):
+            self._suggesting = False
+            self.ai_b.text = "IA: sugerir cajas"
+            if err is not None:
+                a.toast(f"IA: {err}")
+                return
+            if self.photo is not p:
+                return
+            import box_ai
+            before = len(self.rec["boxes"])
+            self.rec["boxes"] = box_ai.merge(self.rec["boxes"], got)
+            n = len(self.rec["boxes"]) - before
+            self.sel = None
+            self.changed()
+            a.toast(f"{n} caja(s) sugerida(s): revise el tipo de cada una y borre las que sobren"
+                    if n else "La IA no encontró estructuras nuevas en esta foto")
+        threading.Thread(target=work, daemon=True).start()
 
     def copy_prev(self):
         if self.i <= 0:

@@ -7,6 +7,7 @@ Mediciones: planillas de datos y registros de imágenes.
 from __future__ import annotations
 
 import datetime as _dt
+import os
 from kivy.clock import Clock
 from kivy.metrics import dp
 from kivy.properties import BooleanProperty, ObjectProperty, StringProperty
@@ -28,6 +29,8 @@ from ui.common import app, confirm, fast_clear, form_dialog, pick_dialog, thumb_
 class EntryRow(MDBoxLayout):
     title = StringProperty()
     subtitle = StringProperty()
+    counts = StringProperty()               # conteo con cajas (fotos de mediciones)
+    can_count = BooleanProperty(False)      # botón «Contar estructuras»
     has_thumb = BooleanProperty(False)
     item = ObjectProperty(None, allownone=True)
     screen = ObjectProperty()
@@ -171,6 +174,14 @@ def new_measure_dialog():
     form_dialog("Nueva medición", _measure_form(), ok, "CREAR")
 
 
+# Planilla con colores propios (como una hoja de cálculo), iguales en todos los estilos: con los
+# del estilo, en los oscuros quedaba texto claro sobre celdas blancas (no se leía).
+SHEET_HEAD, SHEET_HEAD_FG = "#1E5A45", "#FFFFFF"     # encabezados
+SHEET_NUM, SHEET_NUM_FG = "#DCEFE4", "#1B2A23"       # n.º de fila
+SHEET_CELL, SHEET_INK = "#FFFFFF", "#1B2A23"         # celdas
+SHEET_FIRST_FG = "#1E5A45"                           # 1.ª columna (tratamiento / variedad)
+
+
 def _cell_button(text, width, bold=False, bg=None, fg=None, on_release=None):
     """Celda-botón de la grilla (encabezados, n.º de fila, variedad). Un texto en dos
     líneas va más chico y sin cortar."""
@@ -179,7 +190,7 @@ def _cell_button(text, width, bold=False, bg=None, fg=None, on_release=None):
     b = Button(text=text, size_hint=(None, None), size=(width, dp(42)),
                font_size="11.5sp" if two else "13sp", line_height=.95 if two else 1,
                bold=bold, background_normal="", background_down="",
-               background_color=bg or c(theme.LEAF_SOFT), color=fg or c(theme.INK),
+               background_color=bg or c(SHEET_NUM), color=fg or c(SHEET_NUM_FG),
                halign="center", valign="middle", shorten=not two, shorten_from="right")
     b.bind(size=lambda w, sz: setattr(w, "text_size", (sz[0] - dp(8), sz[1])))
     if on_release:
@@ -227,10 +238,14 @@ class MeasureScreen(MDScreen):
             self._build_grid(entries)
             return
         varieties = a.db.list_varieties(include_archived=True)
+        from training_labels import count_text
+        from ui import boxes
         for e in entries:
+            rec = boxes.store().get(os.path.basename(e["path"] or ""))
             row = EntryRow(title=e["caption"] or "Sin descripción",
                            subtitle=_variety_label(e["variety_id"], varieties), item=e,
-                           screen=self, has_thumb=True)
+                           screen=self, has_thumb=True, can_count=bool(e["path"]),
+                           counts=count_text(rec, markup=True))
             row.ids.thumb_box.add_widget(thumb_widget(e["path"], 160))
             box.add_widget(row)
         if not entries:
@@ -254,7 +269,7 @@ class MeasureScreen(MDScreen):
         self._cells = []
         grid = GridLayout(cols=len(cols) + 2, size_hint=(None, None), spacing=dp(2), padding=dp(2))
         grid.bind(minimum_width=grid.setter("width"), minimum_height=grid.setter("height"))
-        head_bg, head_fg = c(theme.LEAF_DARK), c("#FFFFFF")
+        head_bg, head_fg = c(SHEET_HEAD), c(SHEET_HEAD_FG)
         grid.add_widget(_cell_button("#", self.NUM_W, True, head_bg, head_fg))
         self.var_w = dp(150) if a.db.is_predio else self.VAR_W   # predio: variedad y año
         self._first = a.db.sheet_first()
@@ -265,7 +280,7 @@ class MeasureScreen(MDScreen):
         for col in cols:
             grid.add_widget(self._head_cell(col, self.COL_W, col))
         for i, e in enumerate(entries):
-            grid.add_widget(_cell_button(str(i + 1), self.NUM_W, bg=c(theme.LEAF_SOFT),
+            grid.add_widget(_cell_button(str(i + 1), self.NUM_W, bg=c(SHEET_NUM),
                                          on_release=lambda *_, e=e, n=i + 1: self.row_menu(e, n)))
             v = vmap.get(e["variety_id"])
             if not v:
@@ -274,15 +289,15 @@ class MeasureScreen(MDScreen):
                 label = a.db.sheet_label(v, names, self._first, two_lines=True)
             else:
                 label = _variety_label(e["variety_id"], varieties, two_lines=True)
-            grid.add_widget(_cell_button(label, self.var_w, bg=c("#FFFFFF"), fg=c(theme.LEAF_DARK),
+            grid.add_widget(_cell_button(label, self.var_w, bg=c(SHEET_CELL), fg=c(SHEET_FIRST_FG),
                                          on_release=lambda *_, e=e: self.pick_row_variety(e)))
             row_cells = []
             for col in cols:
                 ti = TextInput(text=str(e["data"].get(col, "")), multiline=False, write_tab=False,
                                size_hint=(None, None), size=(self.COL_W, dp(42)), font_size="14sp",
                                padding=(dp(8), dp(11)), background_normal="", background_active="",
-                               background_color=c("#FFFFFF"), foreground_color=c(theme.INK),
-                               cursor_color=c(theme.LEAF_DARK))
+                               background_color=c(SHEET_CELL), foreground_color=c(SHEET_INK),
+                               cursor_color=c(SHEET_HEAD))
                 ti.entry_id, ti.col = e["id"], col
                 ti.native_edit = False   # planilla: se escribe de corrido con el teclado de la app
                 ti.bind(focus=self._cell_focus)
@@ -307,7 +322,7 @@ class MeasureScreen(MDScreen):
         from kivy.uix.button import Button
         from kivy.uix.textinput import TextInput
         from kivymd.icon_definitions import md_icons
-        head_bg, head_fg = c(theme.LEAF_DARK), c("#FFFFFF")
+        head_bg, head_fg = c(SHEET_HEAD), c(SHEET_HEAD_FG)
         box = BoxLayout(size_hint=(None, None), size=(width, dp(42)))
         ti = TextInput(text=text, multiline=False, write_tab=False, font_size="13sp",
                        halign="center", padding=(dp(4), dp(12)), background_normal="",
@@ -620,6 +635,25 @@ class MeasureScreen(MDScreen):
             camera_burst.burst(done, base, exact=True, title=f"Medición\n{measure['name']}")
         else:
             a.media.pick_images(done)
+
+    # ------------------------------------------------- contar estructuras
+    def count_entry(self, entry: dict):
+        """Cajas sobre la foto (las mismas de IA+: sirven también para entrenar la IA): se
+        cuentan botones, flores y frutos por estadio; el conteo sale en el Excel."""
+        a = app()
+        from ui import boxes
+        varieties = a.db.list_varieties(include_archived=True)
+        ws = a.db.workspace or {}
+        photo = {"name": os.path.basename(entry["path"]), "path": entry["path"],
+                 "exists": os.path.exists(entry["path"]), "ws": ws.get("code") or "",
+                 "variety": entry.get("caption") or (_variety_label(entry["variety_id"], varieties)
+                                                     if entry["variety_id"] else self.measure["name"]),
+                 "week": self.week["start_date"]}
+
+        def closed():
+            self.refresh()
+            boxes.sync_now()           # a Drive (y a la web)
+        boxes.BoxEditor([photo], 0, on_close=closed).open()
 
     # --------------------------------------------------------- definición
     def edit(self):

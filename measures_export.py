@@ -132,8 +132,19 @@ def write_xlsx(path: str, sheets: list[tuple[str, list[list]]]) -> str:
     return path
 
 
-def measure_rows(db, measure: dict, season: int | None = None) -> list[list]:
-    """Filas (con encabezado) de una medición para toda la temporada."""
+def photo_marks() -> dict:
+    """Marcas de cajas del cultivo abierto (training_labels: marcas.json local)."""
+    try:
+        from platform_utils import get_data_dir
+        from training_labels import LabelStore
+        return LabelStore(get_data_dir()).data["photos"]
+    except Exception:  # noqa: BLE001 (sin marcas: el Excel sale sin conteos)
+        return {}
+
+
+def measure_rows(db, measure: dict, season: int | None = None, labels: dict | None = None) -> list[list]:
+    """Filas (con encabezado) de una medición para toda la temporada. labels: marcas de cajas
+    por nombre de foto (por defecto, las del teléfono)."""
     cfg = db.sheet_first()
     head = ["Semana del año", "Año", "Inicio de semana", cfg["title"]]
     names = db.treatment_names()
@@ -152,6 +163,15 @@ def measure_rows(db, measure: dict, season: int | None = None) -> list[list]:
     else:
         entries = db.list_entries(measure["id"], season=season)
         head += ["Descripción", "Archivo"]
+        # Conteo con cajas (IA+ / «Contar» en la foto): una columna por estructura y el total.
+        import training_labels as tl
+        marks = photo_marks() if labels is None else labels
+        counted = {os.path.basename(e["path"] or ""): tl.counts(marks.get(os.path.basename(e["path"] or "")))
+                   for e in entries}
+        seen = {k for got in counted.values() if got for k in got}
+        stages = [k for k, _n, _c in tl.CLASSES if k in seen] + sorted(seen - set(tl.NAMES))
+        if any(v is not None for v in counted.values()):
+            head += [tl.NAMES.get(k, k) for k in stages] + ["Total estructuras"]
     head.append("Registrado")
     rows = [head]
     for e in entries:
@@ -161,14 +181,19 @@ def measure_rows(db, measure: dict, season: int | None = None) -> list[list]:
         if measure["kind"] == "table":
             row += [e["data"].get(c, "") for c in head[4:-1]]
         else:
-            row += [e["caption"] or "", os.path.basename(e["path"] or "")]
+            name = os.path.basename(e["path"] or "")
+            row += [e["caption"] or "", name]
+            if "Total estructuras" in head:
+                got = counted.get(name)
+                row += ([got.get(k, 0) for k in stages] + [sum(got.values())] if got is not None
+                        else [""] * (len(stages) + 1))
         row.append(e["created_at"].replace("T", " ")[:16])
         rows.append(row)
     return rows
 
 
 def export_measures(db, measure_ids: list[int], season: int | None = None,
-                    dest_dir: str | None = None) -> str:
+                    dest_dir: str | None = None, labels: dict | None = None) -> str:
     """Un .xlsx con una hoja por medición. Devuelve la ruta."""
     measures = [m for m in (db.get_measure(i) for i in measure_ids) if m]
     if not measures:
@@ -177,6 +202,7 @@ def export_measures(db, measure_ids: list[int], season: int | None = None,
     stem = slugify(measures[0]["name"]) if len(measures) == 1 else "mediciones"
     code = f"{db.code}_" if getattr(db, "code", "") else ""
     path = os.path.join(dest_dir, f"{stem}_{code}{season or 'todas'}_{_dt.datetime.now():%Y%m%d_%H%M}.xlsx")
-    write_xlsx(path, [(m["name"], measure_rows(db, m, season)) for m in measures])
+    labels = photo_marks() if labels is None else labels
+    write_xlsx(path, [(m["name"], measure_rows(db, m, season, labels)) for m in measures])
     db.log("export", "measures", None, os.path.basename(path))
     return path

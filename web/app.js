@@ -1132,7 +1132,18 @@ function renderMeasureBody() {
       const del = document.createElement("button");
       del.type = "button"; del.className = "del"; del.textContent = "Quitar del registro";
       del.onclick = () => { r.gone = true; renderMeasureBody(); };
-      card.append(cap, sel, del);
+      // Contar estructuras con cajas (IA+): botones, flores y frutos por estadio; sale en el Excel.
+      const cnt = document.createElement("div");
+      cnt.className = "mcount small";
+      const cbtn = document.createElement("button");
+      cbtn.type = "button"; cbtn.className = "ghost mcountbtn"; cbtn.textContent = "🔢 Contar estructuras";
+      cbtn.title = "Marcar con cajas botones, flores y frutos (✨ la IA puede sugerirlas)";
+      const name = base(r.e.path);
+      const showCount = () => { cnt.innerHTML = TR.countText(name); };
+      TR.ensureLabels(CROP).then(showCount).catch(() => {});
+      cbtn.onclick = () => TR.countPhoto({ name, path: r.e.path, code: S.ws.code, wsName: S.ws.name || S.ws.code, week: S.week,
+        variety: r.caption || M.m.name }, CROP, showCount);
+      card.append(cap, sel, cnt, cbtn, del);
       grid.appendChild(card);
       const ph = card.querySelector(".ph");
       photoUrl(r.e.path).then((u) => {
@@ -1832,7 +1843,12 @@ async function runPdf(kind) {
   try {
     if (temps && !pr) throw new Error("No hay predio: cree uno en la app (perfil Predio) y elíjalo en el ensayo.");
     const extra = temps && pr.code !== S.ws.code ? [{ ws: pr, bundles: await bundlesOf(pr.code, (t) => { $("rmsg").textContent = t; }) }] : [];
-    const { name, blob } = await makePdf({ ws: S.ws, bundles: S.bundles, extra, photoBlob, crop: CROP, plain: rcfg().plain, cfg: rcfg(),
+    let labels = null;
+    if (kind === "excel") {           // conteos con cajas de las fotos de mediciones
+      $("rmsg").textContent = "Leyendo los conteos (cajas)…";
+      labels = await TR.ensureLabels(CROP).catch(() => null);
+    }
+    const { name, blob } = await makePdf({ ws: S.ws, bundles: S.bundles, extra, photoBlob, crop: CROP, plain: rcfg().plain, cfg: rcfg(), labels,
       progress: (t) => { $("rmsg").textContent = t; } }, kind, arg, season);
     const a = document.createElement("a");
     a.href = URL.createObjectURL(blob); a.download = name;

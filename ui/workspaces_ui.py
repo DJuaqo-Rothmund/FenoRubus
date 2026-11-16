@@ -18,6 +18,9 @@ from ui.theme import c
 from ui.common import GlassButton, SegButton, app, confirm, fast_clear, form_dialog, pick_dialog
 
 
+from ui.measures_fab import MeasuresFab  # noqa: E402,F401  (regla en sampling.kv)
+
+
 class WorkspaceBanner(GlassButton):
     text = StringProperty()
     icon = StringProperty("flask-outline")
