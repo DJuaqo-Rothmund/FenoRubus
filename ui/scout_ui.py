@@ -250,21 +250,56 @@ class ScoutHome(ScoutScreenBase):
         if n_pend and ai.has_keys():
             Clock.schedule_once(lambda *_: ai.run_pending(), 1.5)
         card = _card("RESPALDO EN GOOGLE DRIVE")
+        from app_flavor import is_scout
         from platform_utils import global_get
         on = bool(global_get("drive_enabled", False))
+        alone = is_scout()          # app AeonScout sola: la cuenta se conecta aquí
         st = db().query_one("SELECT COUNT(*) AS n FROM drive_queue WHERE status IN ('pending', 'move')")["n"]
         card.add_widget(Factory.Body(
             text=("Carpeta [b]AeonCrop/AeonScout[/b] › Plagas, Malezas y Enfermedades (una carpeta por "
                   "especie y estadio) y la planilla «registro.csv». " if on else
                   "Sin cuenta de Google: todo queda guardado en el teléfono hasta conectarla "
-                  "(pantalla principal). ")
+                  + ("(botón de abajo). " if alone else "(pantalla principal). "))
             + (f"{st} archivo(s) por subir (nube de arriba a la izquierda: respaldar ahora)." if st
                else "Todo respaldado." if on else ""), markup=True))
+        if alone:
+            who = global_get("drive_account") or ""
+            b = Factory.GhostButton(icon="google", text=(f"Cuenta: {who} (cambiar)" if on and who else
+                                                         "Cambiar cuenta de Google" if on else
+                                                         "Conectar cuenta de Google"))
+            b.bind(on_release=lambda *_: self._connect_google())
+            card.add_widget(b)
         body.add_widget(card)
-        # Respaldo: botoncito arriba a la izquierda (como en los demás módulos)
-        self.ids.bar.left_action_items = [["arrow-left", lambda x: app().back()],
-                                          [theme.DRIVE_UP, lambda x: app().scout_backup(manual=True),
-                                           "Respaldar en Google Drive"]]
+        if alone:
+            card = _card("AYUDA")
+            b = Factory.GhostButton(icon="camera-outline", text="Cómo sacar las fotos")
+            b.bind(on_release=lambda *_: open_guide("plagas"))
+            card.add_widget(b)
+            b = Factory.GhostButton(icon="bug-outline", text="Registro de errores")
+            b.bind(on_release=lambda *_: __import__("ui.common", fromlist=["x"]).show_error_log())
+            card.add_widget(b)
+            from platform_utils import app_version
+            card.add_widget(Factory.Muted(text=f"AeonScout {app_version()}"))
+            body.add_widget(card)
+        # Respaldo: botoncito arriba a la izquierda (como en los demás módulos). En la app
+        # AeonScout sola este es el inicio: sin flecha de volver.
+        self.ids.bar.left_action_items = ([] if alone else [["arrow-left", lambda x: app().back()]]) + [
+            [theme.DRIVE_UP, lambda x: app().scout_backup(manual=True), "Respaldar en Google Drive"]]
+
+    def _connect_google(self):
+        a = app()
+
+        def done(ok, msg):
+            def ui(*_):
+                a.toast(msg)
+                self.refresh()
+                if ok:
+                    a.scout_backup(manual=True)
+            Clock.schedule_once(ui)
+        if not a.drive.available:
+            a.toast("Esta copia de la app no trae la credencial de Google.")
+            return
+        a.drive.connect(done)
 
 
 # ============================================================================ sección
@@ -735,7 +770,14 @@ class ScoutCapture(ScoutScreenBase):
         from platform_utils import get_base_dir
         from ui.screens import pick_dialog
         items = []
-        for p in scout.places(get_base_dir(), self.st["crop"]) if self.st["crop"] in CROP_CODES else []:
+        from app_flavor import is_scout
+        if is_scout():
+            # App AeonScout sola: no hay ensayos ni predios de AeonCrop; los lugares ya usados.
+            for r in db().query("SELECT place, MAX(taken_at) AS t FROM scout_records WHERE place<>'' "
+                                "GROUP BY place ORDER BY t DESC LIMIT 12"):
+                items.append((r["place"], "Usado antes", lambda n=r["place"]: self._set_place(
+                    {"kind": "otro", "name": n, "code": ""})))
+        for p in scout.places(get_base_dir(), self.st["crop"]) if self.st["crop"] in CROP_CODES and not is_scout() else []:
             items.append((p["name"], f"{'Predio' if p['kind'] == 'predio' else 'Ensayo I+D'} · {p['code']}",
                           lambda p=p: self._set_place(p)))
         items.append(("Otro lugar…", "Escribir (campo, sector, potrero…)", self._other_place))

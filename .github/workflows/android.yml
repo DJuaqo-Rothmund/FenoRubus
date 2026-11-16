@@ -19,10 +19,16 @@ jobs:
       - name: Pruebas (BD, semanas, IA, PIN, recordatorios, informes)
         run: pytest -q
 
+  # Dos apps del mismo código, en paralelo: AeonCrop (release.env) y AeonScout sola
+  # (release_scout.env: abre directo en AeonScout, con su propio paquete).
   apk:
     needs: tests
     runs-on: ubuntu-24.04
     timeout-minutes: 120
+    strategy:
+      fail-fast: false
+      matrix:
+        variant: [release.env, release_scout.env]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -45,7 +51,7 @@ jobs:
         uses: actions/cache/restore@v4
         with:
           path: ~/.buildozer
-          key: buildozer-sdk-${{ runner.os }}-${{ github.run_id }}
+          key: buildozer-sdk-${{ runner.os }}-${{ github.run_id }}-${{ matrix.variant }}
           restore-keys: buildozer-sdk-${{ runner.os }}-
       # Firma estable: Google Drive (OAuth) reconoce la app por su huella SHA-1,
       # así que todas las compilaciones usan la misma clave de depuración del repo.
@@ -68,7 +74,7 @@ jobs:
       # el paquete y el nombre salen de release.env (1.1 estable; 1.2 «PhenoRubus Lab»).
       - name: Número de versión y canal
         run: |
-          source release.env
+          source ${{ matrix.variant }}
           VERSION="$SERIES.${{ github.run_number }}"
           sed -i "s/^version = .*/version = $VERSION/" buildozer.spec
           sed -i "s/^package.name = .*/package.name = $PACKAGE/" buildozer.spec
@@ -77,6 +83,13 @@ jobs:
           if [ -n "${ICON_FG:-}" ] && [ -n "${ICON_BG:-}" ]; then
             sed -i "s#^\#\?icon.adaptive_foreground.filename = .*#icon.adaptive_foreground.filename = %(source.dir)s/$ICON_FG#" buildozer.spec
             sed -i "s#^\#\?icon.adaptive_background.filename = .*#icon.adaptive_background.filename = %(source.dir)s/$ICON_BG#" buildozer.spec
+          fi
+          if [ -n "${PRESPLASH:-}" ]; then
+            sed -i "s#^presplash.filename = .*#presplash.filename = %(source.dir)s/$PRESPLASH#" buildozer.spec
+          fi
+          if [ -n "${FLAVOR:-}" ]; then
+            sed -i "s/^FLAVOR = .*/FLAVOR = \"$FLAVOR\"/" app_flavor.py
+            grep -n "^FLAVOR" app_flavor.py
           fi
           echo "$VERSION" > version.txt
           echo "Versión: $VERSION · paquete org.rubus.$PACKAGE · $TITLE"
@@ -143,11 +156,11 @@ jobs:
         uses: actions/cache/save@v4
         with:
           path: ~/.buildozer
-          key: buildozer-sdk-${{ runner.os }}-${{ github.run_id }}
+          key: buildozer-sdk-${{ runner.os }}-${{ github.run_id }}-${{ matrix.variant }}
       # Instalador con el nombre de la app (release.env › APK_NAME: «AeonCrop» en la Lab).
       - name: Nombre del instalador
         run: |
-          source release.env
+          source ${{ matrix.variant }}
           NAME="${APK_NAME:-fenorubus}"
           APK=$(ls bin/*.apk | head -1)
           mv "$APK" "bin/$NAME-$(cat version.txt).apk"

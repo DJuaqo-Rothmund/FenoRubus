@@ -766,12 +766,41 @@ class FenoRubusApp(MDApp):
         self._preloaded = False
         self._preload = self._preload_steps()
         self._crops_ready = False
+        from app_flavor import is_scout
+        if is_scout():
+            # App AeonScout sola: directo a su inicio (sin cultivos ni animación de AeonCrop).
+            Clock.schedule_once(self._scout_start, 0)
+            return
         Clock.schedule_once(self._add_crops, 0)
         # La pantalla de carga de Android es el primer cuadro de la animación de AeonCrop:
         # se quita y sigue la animación (la huella se dibuja, la planta crece).
         Clock.schedule_once(lambda *_: splash_native.remove(), 0)
         self._frame = 0
         self._anim_ev = Clock.schedule_interval(self._launch_frame, 1 / 20)
+
+    def _scout_start(self, *_):
+        """App AeonScout: su inicio apenas el diseño está listo; respaldo cada 10 minutos."""
+        from ui import kvload
+        if not kvload.ready():
+            Clock.schedule_once(self._scout_start, 1 / 20)
+            return
+        kvload.apply()
+        from ui import scout_ui
+        self.title = "AeonScout"
+        scout_ui.open_home()
+        self._history = []
+        splash_native.remove()
+        Clock.schedule_once(lambda *_: self.sm.has_screen("launch")
+                            and self.sm.remove_widget(self.sm.get_screen("launch")), 0.6)
+        _step("permisos")
+        request_runtime_permissions()
+        if self.safe_mode:
+            Clock.schedule_once(lambda *_: self._show_safe_mode(), 1.5)
+            Clock.schedule_once(lambda *_: self._finish_start(), 20)
+            return
+        Clock.schedule_once(lambda *_: self.scout_backup(), 8)
+        Clock.schedule_interval(lambda *_: self.scout_backup(), 600)
+        Clock.schedule_once(lambda *_: self._finish_start(), 30)
 
     def _add_crops(self, *_):
         """La pantalla de cultivos, apenas el diseño terminó de compilarse."""
@@ -1014,6 +1043,10 @@ class FenoRubusApp(MDApp):
                 return True
             if self.sm.current in ("splash", "launch"):
                 return True
+            from app_flavor import is_scout
+            if is_scout() and self.sm.current == "scout":
+                from android_bridge import to_background   # inicio de la app AeonScout
+                return bool(platform == "android" and to_background())
             if self.sm.current != "crops":
                 self.back()
                 return True

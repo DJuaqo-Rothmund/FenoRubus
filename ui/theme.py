@@ -58,6 +58,12 @@ SCOUT_ICON = resource_path("assets", "ui", "scout_aeonscout.png")      # AeonSco
 SCOUT_LOGO = resource_path("assets", "ui", "scout_logo.png")           # AeonScout estilo Pheno
 SCOUT_BUBBLE = resource_path("assets", "ui", "blob_scout_aeonscout.png")
 AEON_FRAMES = [resource_path("assets", "aeon_anim", f"f{i:03d}.png") for i in range(52)]
+
+
+def launch_image() -> str:
+    """Imagen de la pantalla de apertura: el logo de AeonScout en la app AeonScout sola."""
+    from app_flavor import is_scout
+    return SCOUT_LOGO if is_scout() else AEON_FRAMES[0]
 AEON_IA = resource_path("assets", "ui", "aeon_ia.png")
 AEON_IA_GLOW = resource_path("assets", "ui", "aeon_ia_glow.png")
 AEON_IAPLUS = resource_path("assets", "ui", "aeon_iaplus.png")
