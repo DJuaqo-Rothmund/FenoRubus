@@ -7,7 +7,7 @@ import * as TR from "./train.js";
 import { CLIENT_ID } from "./config.js";
 import { makeReports } from "./reports.js";
 import * as RC from "./reportcfg.js";
-import { warm as warmPdf, makePdf } from "./pdf.js";
+import { warm as warmPdf, makePdf, py as callPy } from "./pdf.js";
 import { weekCompleted } from "./celebrate.js";
 import { photoHeat, pickPoint, sectorMap } from "./maps.js";
 import * as SC from "./scout.js";
@@ -1821,12 +1821,17 @@ async function photoBlob(path) {
 
 async function runPdf(kind) {
   const season = Number($("rseason").value);
+  const temps = ["degree_days", "season_compare"].includes(kind);
+  const pr = temps ? predioWs() : null;
   const arg = { weekly: $("rweek").value, month: $("rmonth").value, variety: $("rvar").value,
-    period: `${$("rfrom").value}|${$("rto").value}` }[kind] || "";
+    period: `${$("rfrom").value}|${$("rto").value}`, degree_days: pr?.code || "",
+    season_compare: `${pr?.code || ""}|${$("rcmp").value}` }[kind] || "";
   const btns = document.querySelectorAll("[data-pdf]");
   btns.forEach((b) => (b.disabled = true));
   try {
-    const { name, blob } = await makePdf({ ws: S.ws, bundles: S.bundles, photoBlob, crop: CROP, plain: rcfg().plain, cfg: rcfg(),
+    if (temps && !pr) throw new Error("No hay predio: cree uno en la app (perfil Predio) y elíjalo en el ensayo.");
+    const extra = temps && pr.code !== S.ws.code ? [{ ws: pr, bundles: await bundlesOf(pr.code, (t) => { $("rmsg").textContent = t; }) }] : [];
+    const { name, blob } = await makePdf({ ws: S.ws, bundles: S.bundles, extra, photoBlob, crop: CROP, plain: rcfg().plain, cfg: rcfg(),
       progress: (t) => { $("rmsg").textContent = t; } }, kind, arg, season);
     const a = document.createElement("a");
     a.href = URL.createObjectURL(blob); a.download = name;
@@ -1837,6 +1842,130 @@ async function runPdf(kind) {
     console.error(e);
     $("rmsg").textContent = `No se pudo generar el PDF: ${String(e.message || e).split("\n").filter(Boolean).pop()}`;
   } finally { btns.forEach((b) => (b.disabled = false)); }
+}
+
+// ================================================================== temperaturas del predio
+// El predio del ensayo (ajuste «trial_predio», el mismo de la app); un predio usa las suyas.
+function predioWs() {
+  if (!S.ws) return null;
+  if (S.ws.profile === "predio") return S.ws;
+  const predios = S.workspaces.filter((w) => w.profile === "predio");
+  const code = C.setting(S.state, "trial_predio", "");
+  return predios.find((w) => w.code === code) || predios[0] || null;
+}
+
+// Paquetes de sincronización de otro ensayo/predio (lo guardado en el navegador + lo nuevo de Drive).
+async function bundlesOf(code, progress = () => {}) {
+  if (S.ws && code === S.ws.code) return S.bundles;
+  progress("Leyendo las temperaturas del predio…");
+  const out = [];
+  const names = (await cacheGet(`${code}/__index`)) || [];
+  const seen = new Set();
+  for (const n of names) { const b = await cacheGet(`${code}/${n}`); if (b) { out.push([n, b]); seen.add(n); } }
+  try {
+    const dir = S.sync && await folder(code, S.sync, false);
+    if (dir) {
+      const files = (await list(`'${dir}' in parents and trashed=false`))
+        .filter((f) => f.name.endsWith(".json")).sort((a, b) => a.name.localeCompare(b.name));
+      const todo = files.filter((f) => !seen.has(f.name));
+      const got = new Array(todo.length);
+      await pool(todo, 8, async (f, k) => {
+        let b = await cacheGet(`${code}/${f.name}`);
+        if (!b) { b = await (await download(f.id)).json(); cachePut(`${code}/${f.name}`, b); }
+        got[k] = b;
+      });
+      todo.forEach((f, k) => out.push([f.name, got[k]]));
+      cachePut(`${code}/__index`, files.map((f) => f.name));
+    }
+  } catch { /* sin conexión: lo guardado */ }
+  out.sort((a, b) => a[0].localeCompare(b[0]));
+  return out;
+}
+
+// Paquete hacia OTRO ensayo/predio (las temperaturas van al predio, no al ensayo abierto).
+async function sendTo(code, changes, settings = {}) {
+  if (S.ws && code === S.ws.code) return send(changes, settings);
+  const name = `${C.stamp()}-${S.device}.json`;
+  const bundle = C.bundle(S.device, code, changes, settings);
+  const dir = await folder(code, S.sync);
+  await upload(dir, name, new Blob([JSON.stringify(bundle)], { type: "application/json" }), "application/json");
+  cachePut(`${code}/${name}`, bundle);
+  const idx = (await cacheGet(`${code}/__index`)) || [];
+  cachePut(`${code}/__index`, [...idx, name]);
+}
+
+let wParsed = null;
+async function weatherExtra(pr) {
+  const out = [{ ws: S.ws, bundles: S.bundles }];
+  if (pr.code !== S.ws.code) out.push({ ws: pr, bundles: await bundlesOf(pr.code, (t) => { $("winfo").textContent = t; }) });
+  return out;
+}
+const fmt1 = (x) => (x === null || x === undefined ? "–" : Number(x).toLocaleString("es", { maximumFractionDigits: 1 }));
+
+async function renderWeather() {
+  const pr = predioWs();
+  const info = $("winfo");
+  if (!pr) { info.textContent = "No hay predios: cree uno en la app (perfil Predio) para cargar sus temperaturas."; $("wcard").classList.add("off"); return; }
+  info.textContent = `Predio ${pr.name || pr.code}: leyendo…`;
+  try {
+    const season = Number($("rseason").value) || C.seasonOf(C.parseDate(S.week));
+    const r = await callPy("weather_info", [S.ws.code, season, pr.code], { extra: await weatherExtra(pr), crop: CROP,
+      progress: (t) => { info.textContent = t; } });
+    if (r.error) { info.textContent = r.error; return; }
+    document.querySelectorAll('input[name="wmode"]').forEach((x) => (x.checked = x.value === r.mode));
+    const own = r.own ? `${r.own} día(s) de la estación, del ${r.first} al ${r.last}.` : "Aún sin datos de la estación.";
+    info.innerHTML = `Predio <b>${pr.name || pr.code}</b> · fuente: <b>${r.mode === "openmeteo" ? "Open-Meteo" : "estación del predio"}</b>. ${own}`
+      + (r.recent?.length ? `<table><tr><th>Día</th><th>T media</th><th>mín</th><th>máx</th><th>lluvia</th></tr>${r.recent.map((d) =>
+        `<tr><td>${d.day}</td><td>${fmt1(d.tmean)}</td><td>${fmt1(d.tmin)}</td><td>${fmt1(d.tmax)}</td><td>${fmt1(d.rain)}</td></tr>`).join("")}</table>` : "");
+  } catch (e) { info.textContent = `No se pudo leer: ${e.message}`; }
+}
+
+async function weatherCheck() {
+  const out = $("wpreview");
+  const f = $("wfile").files[0];
+  const text = $("wpaste").value.trim();
+  if (!f && !text) { out.textContent = "Elija un archivo o pegue los datos."; return; }
+  const pr = predioWs();
+  out.textContent = "Leyendo…";
+  try {
+    const file = f ? { name: f.name.replace(/[^\w.-]+/g, "_"), buf: await f.arrayBuffer() } : null;
+    const r = await callPy("parse_weather", [], { file, text: f ? "" : text, crop: CROP, progress: (t) => { out.textContent = t; } });
+    wParsed = r.days.filter((d) => d.tmean !== null || d.tmin !== null || d.tmax !== null || d.rain !== null);
+    $("wsave").disabled = !wParsed.length || !pr;
+    out.innerHTML = wParsed.length
+      ? `<b>${wParsed.length} día(s)</b> del ${wParsed[0].day} al ${wParsed[wParsed.length - 1].day}. Revise y toque «Guardar en el predio ${pr?.name || ""}».`
+        + `<table><tr><th>Día</th><th>T media</th><th>mín</th><th>máx</th><th>lluvia</th></tr>${[...wParsed.slice(0, 3), ...(wParsed.length > 6 ? [null] : []), ...wParsed.slice(Math.max(3, wParsed.length - 3))].map((d) => d
+          ? `<tr><td>${d.day}</td><td>${fmt1(d.tmean)}</td><td>${fmt1(d.tmin)}</td><td>${fmt1(d.tmax)}</td><td>${fmt1(d.rain)}</td></tr>` : `<tr><td>…</td><td></td><td></td><td></td><td></td></tr>`).join("")}</table>`
+      : "No se encontraron días con fecha y temperatura.";
+    if (r.warnings?.length) out.innerHTML += `<p>Avisos: ${r.warnings.slice(0, 5).map((w) => String(w).replace(/</g, "&lt;")).join(" · ")}</p>`;
+  } catch (e) { out.textContent = `No se pudo leer: ${e.message}`; }
+}
+
+async function weatherSave() {
+  const pr = predioWs();
+  if (!pr || !wParsed?.length) return;
+  const out = $("wpreview");
+  $("wsave").disabled = true;
+  try {
+    const ts = C.nowTs();
+    const changes = wParsed.map((d) => ({ entity: "weather_days", uid: d.day, ts, deleted: 0,
+      data: { day: d.day, tmean: d.tmean, tmin: d.tmin, tmax: d.tmax, rain: d.rain, source: "estación (web)", updated_at: ts } }));
+    out.textContent = "Guardando en el predio…";
+    await sendTo(pr.code, changes, { trial_weather_mode: JSON.stringify("propios") });
+    out.textContent = `Listo: ${changes.length} día(s) guardados en ${pr.name || pr.code}. La app los recibe al sincronizar.`;
+    wParsed = null; $("wfile").value = ""; $("wpaste").value = "";
+    renderWeather();
+  } catch (e) { out.textContent = `No se pudo guardar: ${e.message}`; $("wsave").disabled = false; }
+}
+
+async function weatherMode(mode) {
+  const pr = predioWs();
+  if (!pr) return;
+  try {
+    await sendTo(pr.code, [], { trial_weather_mode: JSON.stringify(mode) });
+    $("winfo").textContent = `Fuente cambiada a ${mode === "openmeteo" ? "Open-Meteo" : "la estación del predio"}.`;
+    renderWeather();
+  } catch (e) { $("winfo").textContent = `No se pudo cambiar: ${e.message}`; }
 }
 
 // Todos los informes semanales de la temporada (cada semana con datos, hasta hoy) en un ZIP.
@@ -2199,6 +2328,7 @@ async function boot() {
     for (const t of ["sampling", "matrix", "notebook", "reports", "settings"]) $(`tab-${t}`).hidden = t !== S.tab;
     if (S.tab === "reports") warmPdf().catch(() => {});     // el generador de PDF se precarga
     render();
+    if (S.tab === "reports") renderWeather();
   }));
   $("season").onchange = (e) => { goSeason(Number(e.target.value)); render(); };
   $("mseason").onchange = (e) => { S.mSeason = Number(e.target.value); S.mMonth = null; renderMatrix(); };
@@ -2206,6 +2336,11 @@ async function boot() {
   $("rweek").onchange = (e) => { e.target.dataset.touched = "1"; };
   document.querySelectorAll("[data-rep]").forEach((b) => (b.onclick = () => runReport(b.dataset.rep)));
   document.querySelectorAll("[data-pdf]").forEach((b) => (b.onclick = () => runPdf(b.dataset.pdf)));
+  $("wrefresh").onclick = () => renderWeather();
+  $("wcheck").onclick = () => weatherCheck();
+  $("wsave").onclick = () => weatherSave();
+  $("wfile").onchange = () => { $("wsave").disabled = true; $("wpreview").textContent = ""; };
+  document.querySelectorAll('input[name="wmode"]').forEach((x) => (x.onchange = () => x.checked && weatherMode(x.value)));
   $("rzip").onclick = runZip;
   $("rcfg").onclick = openReportConfig;
   // Tocar «Semana del …»: calendario; cualquier día lleva a la semana que lo contiene.

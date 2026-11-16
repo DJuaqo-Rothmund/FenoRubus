@@ -82,7 +82,8 @@ def images():
 
 
 PY_MODULES = ["phenology", "crops", "database", "sync", "reporter", "pdf_report", "pdfdoc", "platform_utils",
-              "trial_stats", "measures_export", "workspaces", "geo", "report_config", "photo_cache"]
+              "trial_stats", "measures_export", "workspaces", "geo", "report_config", "photo_cache",
+              "degree_days", "season_compare"]
 
 
 def py_zip():

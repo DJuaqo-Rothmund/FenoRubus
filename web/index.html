@@ -170,7 +170,31 @@
           <div><b>Mediciones a Excel</b><div class="muted small">Una hoja por medición, toda la temporada (igual que en la app).</div></div>
           <span></span><span class="btns"><button class="primary" data-pdf="excel">Excel</button></span>
         </div>
+        <div class="rep">
+          <div><b>Fenología y días grado</b><div class="muted small">°C·día desde el 1 de septiembre (T base 5 °C), hitos BBCH, pronóstico y temporada anterior. Usa las temperaturas del predio (abajo).</div></div>
+          <span></span><span class="btns"><button class="primary" data-pdf="degree_days">PDF</button></span>
+        </div>
+        <div class="rep">
+          <div><b>Comparación entre temporadas</b><div class="muted small">Calor acumulado, días de adelanto o atraso, hitos (¿clima o manejo?) y fotos del mismo estado.</div></div>
+          <select id="rcmp" class="pill"><option value="prev">Contra la temporada anterior</option><option value="all">Contra el promedio de varias</option></select>
+          <span class="btns"><button class="primary" data-pdf="season_compare">PDF</button></span>
+        </div>
         <p id="rmsg" class="muted small"></p>
+      </section>
+      <section class="card weather" id="wcard">
+        <div class="row-h"><div class="label">TEMPERATURAS DEL PREDIO</div><button id="wrefresh" class="ghost" title="Volver a leer">⟳</button></div>
+        <p id="winfo" class="muted small">Se usan en «Fenología y días grado» y en la comparación entre temporadas.</p>
+        <div class="wmode">
+          <label><input type="radio" name="wmode" value="openmeteo"> <b>Open-Meteo</b> <span class="muted small">· estimación de la zona, se actualiza sola</span></label>
+          <label><input type="radio" name="wmode" value="propios"> <b>Estación del predio</b> <span class="muted small">· sus datos reales (subidos aquí o en la app)</span></label>
+        </div>
+        <div class="wup">
+          <p class="muted small">Archivo de la estación (CSV, TXT o Excel) o columnas copiadas de una planilla: fecha y T media (opcional T mín, T máx y lluvia), con o sin encabezado. Datos por hora se resumen por día.</p>
+          <input type="file" id="wfile" accept=".csv,.txt,.tsv,.xlsx,.xlsm">
+          <textarea id="wpaste" rows="4" placeholder="Fecha	T media	Lluvia&#10;01-09-2026	11,5	0"></textarea>
+          <div class="btns"><button id="wcheck" class="ghost">Revisar</button><button id="wsave" class="primary" disabled>Guardar en el predio</button></div>
+          <div id="wpreview" class="muted small"></div>
+        </div>
       </section>
     </div>
     <div id="tab-settings" hidden>

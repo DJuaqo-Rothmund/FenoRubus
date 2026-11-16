@@ -24,9 +24,16 @@ function call(msg, handlers = {}) {
 
 export function warm() { return call({ op: "warm" }); }
 
+// Consulta corta al código de la app (temperaturas del predio). extra: [{ws, bundles}] de otros
+// ensayos/predios que necesita; file: {name, buf}. Devuelve el JSON ya leído.
+export async function py(fn, args, { extra = [], crop, file = null, text = "", progress } = {}) {
+  const r = await call({ op: "py", fn, args, extra, crop, file, text }, { progress });
+  return JSON.parse(r.json);
+}
+
 // ctx: {ws, bundles, crop (módulo), plain (PDF simple), cfg (configuración de informes): [[nombre, paquete]…], photoBlob(path) -> Blob|null, progress(texto)}
 export async function makePdf(ctx, kind, arg, season) {
-  const r = await call({ op: "pdf", ws: ctx.ws, bundles: ctx.bundles, kind, arg, season,
+  const r = await call({ op: "pdf", ws: ctx.ws, bundles: ctx.bundles, extra: ctx.extra || [], kind, arg, season,
     crop: ctx.crop, plain: !!ctx.plain, cfg: ctx.cfg || null }, {
     progress: ctx.progress,
     need: async (paths, jid) => {

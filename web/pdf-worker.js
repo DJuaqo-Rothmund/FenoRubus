@@ -25,12 +25,28 @@ self.onmessage = async ({ data: m }) => {
   const say = (progress) => self.postMessage({ id: m.id, progress });
   try {
     if (m.op === "warm") { await boot(m.indexURL); self.postMessage({ id: m.id, done: true }); return; }
+    if (m.op === "py") {          // consultas cortas (temperaturas del predio): devuelven texto JSON
+      say("Cargando el lector de datos (la primera vez tarda un poco)…");
+      const { py, wr } = await boot(m.indexURL);
+      wr.use_crop(m.crop || "PhenoRubus");
+      for (const x of m.extra || []) wr.load(x.ws.code, JSON.stringify(x.ws), JSON.stringify(x.bundles));
+      let out;
+      if (m.fn === "weather_info") out = wr.weather_info(m.args[0], m.args[1], m.args[2] || "");
+      else if (m.fn === "parse_weather") {
+        let path = "";
+        if (m.file) { path = `/tmp/${m.file.name}`; py.FS.writeFile(path, new Uint8Array(m.file.buf)); }
+        out = wr.parse_weather(path, m.text || "");
+      } else throw new Error(`función desconocida: ${m.fn}`);
+      self.postMessage({ id: m.id, json: String(out) });
+      return;
+    }
     say("Cargando el generador de informes (la primera vez tarda un poco)…");
     const { py, wr } = await boot(m.indexURL);
     say("Preparando los datos…");
     wr.use_crop(m.crop || "PhenoRubus");
     wr.load(m.ws.code, JSON.stringify(m.ws), JSON.stringify(m.bundles));
-    const paths = ["treatments", "excel"].includes(m.kind) ? [] : JSON.parse(wr.photos(m.ws.code, m.kind, m.arg, m.season, m.cfg ? JSON.stringify(m.cfg) : ""));
+    for (const x of m.extra || []) wr.load(x.ws.code, JSON.stringify(x.ws), JSON.stringify(x.bundles));   // el predio (temperaturas)
+    const paths = ["treatments", "excel", "degree_days"].includes(m.kind) ? [] : JSON.parse(wr.photos(m.ws.code, m.kind, m.arg, m.season, m.cfg ? JSON.stringify(m.cfg) : ""));
     const need = [...new Set(paths)].filter((p) => !py.FS.analyzePath(`/data/${p}`).exists);
     if (need.length) {
       const photos = await new Promise((res) => { waiting.set(m.id, res); self.postMessage({ id: m.id, need }); });
