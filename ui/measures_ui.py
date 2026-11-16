@@ -644,16 +644,19 @@ class MeasureScreen(MDScreen):
         from ui import boxes
         varieties = a.db.list_varieties(include_archived=True)
         ws = a.db.workspace or {}
-        photo = {"name": os.path.basename(entry["path"]), "path": entry["path"],
-                 "exists": os.path.exists(entry["path"]), "ws": ws.get("code") or "",
-                 "variety": entry.get("caption") or (_variety_label(entry["variety_id"], varieties)
-                                                     if entry["variety_id"] else self.measure["name"]),
-                 "week": self.week["start_date"]}
+        # Todas las fotos de la medición en esta semana: «‹ / Siguiente ›» pasan de una a otra.
+        entries = [e for e in a.db.list_entries(self.measure["id"], week_id=self.week["id"]) if e["path"]]
+        photos = [{"name": os.path.basename(e["path"]), "path": e["path"], "exists": os.path.exists(e["path"]),
+                   "ws": ws.get("code") or "",
+                   "variety": " · ".join(x for x in (self.measure["name"], e.get("caption") or (
+                       _variety_label(e["variety_id"], varieties) if e["variety_id"] else "")) if x),
+                   "week": self.week["start_date"]} for e in entries]
+        index = next((i for i, e in enumerate(entries) if e["id"] == entry["id"]), 0)
 
         def closed():
             self.refresh()
             boxes.sync_now()           # a Drive (y a la web)
-        boxes.BoxEditor([photo], 0, on_close=closed).open()
+        boxes.BoxEditor(photos, index, on_close=closed).open()
 
     # --------------------------------------------------------- definición
     def edit(self):

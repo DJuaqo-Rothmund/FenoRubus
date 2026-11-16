@@ -165,6 +165,7 @@ async function saveNow() {
   clearTimeout(saveTimer);
   if (!data) return;
   if (loadError) { $("tsaved").textContent = "No se guardó: primero hay que leer las marcas de Drive (pulse ⟳)."; return; }
+  $("tsaved").textContent = "Guardando en Drive…";
   try {
     await X.saveLabels(data);
     $("tsaved").textContent = "Guardado en Drive";
@@ -294,6 +295,7 @@ const Ed = {
       if (cb) cb();
     });
     $("tsuggest").onclick = () => this.suggest();
+    $("tsave").onclick = () => saveNow();
     this.cv.addEventListener("pointerdown", (e) => this.down(e));
     this.cv.addEventListener("pointermove", (e) => this.move(e));
     for (const ev of ["pointerup", "pointercancel"]) this.cv.addEventListener(ev, (e) => this.up(e));
@@ -342,7 +344,7 @@ const Ed = {
   },
   // «Foto 12 de 240 · 30 analizadas · 210 por ver» (todas las fotos del sistema, sin filtro).
   progress() {
-    const all = photos || [];
+    const all = photos && photos.includes(this.photo) ? photos : list;   // desde una medición: sus fotos
     const done = all.filter((p) => marked(p.name)).length;
     const pos = all.indexOf(this.photo) + 1 || this.i + 1;
     $("tprogress").innerHTML = `Foto <b>${pos}</b> de <b>${all.length}</b> · <b>${done}</b> analizadas · <b>${all.length - done}</b> por ver`;
@@ -629,11 +631,11 @@ window.addEventListener("keyup", (e) => { if (e.key === " ") Ed.space = false; }
 // ------------------------------------------------------------------ contar desde una medición
 // Abre el editor para UNA foto (de una medición): las marcas van al mismo marcas.json del
 // cultivo (sirven también para entrenar la IA). onClose() al cerrar (se guarda en Drive).
-export async function countPhoto(p, mod, onClose) {
+export async function countPhoto(items, index, mod, onClose) {
   await ensureLabels(mod);
-  list = [p];
+  list = items;                     // las fotos de la medición: ‹ › recorren todas
   Ed.onClose = onClose;
-  Ed.open(0);
+  Ed.open(index);
 }
 
 // Marcas del cultivo `mod` en memoria (una vez): para mostrar los conteos de las fotos.

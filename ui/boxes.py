@@ -838,6 +838,9 @@ class BoxEditor(ModalView):
                            halign="left", valign="middle", markup=True)
         self.count.bind(size=lambda w, s: setattr(w, "text_size", s))
         tools.add_widget(self.count)
+        save_b = _Pill("Guardar")
+        save_b.bind(on_release=lambda *_: self.save_now())
+        tools.add_widget(save_b)
         self.ai_b = _Pill("IA: sugerir cajas")
         self.ai_b.bind(on_release=lambda *_: self.suggest())
         tools.add_widget(self.ai_b)
@@ -971,6 +974,14 @@ class BoxEditor(ModalView):
             self.rec["boxes"] = []
             self.sel = None
         self.changed()
+
+    def save_now(self):
+        """Botón «Guardar»: guarda esta foto y sube las marcas a Drive (también se guarda solo
+        al pasar de foto y al cerrar)."""
+        self._edited = True
+        self._commit()
+        sync_now(lambda _got: app().toast("Marcas guardadas en Drive")) if drive_ready() \
+            else app().toast("Marcas guardadas en el teléfono (se suben a Drive al conectar la cuenta)")
 
     def suggest(self):
         """Cajas automáticas con Gemini (gratis, la clave de AeonScout): se agregan a las que ya

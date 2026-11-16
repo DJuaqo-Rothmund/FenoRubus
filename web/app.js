@@ -1141,8 +1141,12 @@ function renderMeasureBody() {
       const name = base(r.e.path);
       const showCount = () => { cnt.innerHTML = TR.countText(name); };
       TR.ensureLabels(CROP).then(showCount).catch(() => {});
-      cbtn.onclick = () => TR.countPhoto({ name, path: r.e.path, code: S.ws.code, wsName: S.ws.name || S.ws.code, week: S.week,
-        variety: r.caption || M.m.name }, CROP, showCount);
+      cbtn.onclick = () => {
+        // Todas las fotos de la medición en esta semana: ‹ › pasan de una a otra en el editor.
+        const items = live.filter((x) => x.e && x.e.path).map((x) => ({ name: base(x.e.path), path: x.e.path, code: S.ws.code,
+          wsName: S.ws.name || S.ws.code, week: S.week, variety: [M.m.name, x.caption].filter(Boolean).join(" · ") }));
+        TR.countPhoto(items, Math.max(0, items.findIndex((x) => x.name === name)), CROP, () => renderMeasureBody());
+      };
       card.append(cap, sel, cnt, cbtn, del);
       grid.appendChild(card);
       const ph = card.querySelector(".ph");
