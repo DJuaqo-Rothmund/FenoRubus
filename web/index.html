@@ -556,14 +556,12 @@
     <div class="tbarx">
       <span id="tcount" class="tcount"></span>
       <span class="spacer"></span>
-      <button type="button" id="tundo" class="ghost" title="Deshacer (Ctrl+Z)" aria-label="Deshacer">↶</button>
-      <button type="button" id="tredo" class="ghost" title="Rehacer (Ctrl+Y)" aria-label="Rehacer">↷</button>
-      <button type="button" id="tsuggest" class="ghost" title="Cajas automáticas con Gemini (clave de AeonScout): después revise el tipo de cada una">✨ Sugerir (IA)</button>
-      <button type="button" id="tcopy" class="ghost" title="Copiar las cajas de la foto anterior (C)">Copiar anterior</button>
-      <button type="button" id="tempty" class="ghost" title="La foto no tiene estructuras que marcar (V)">Sin estructuras</button>
-      <button type="button" id="tfit" class="ghost" title="Ver la foto completa (F)">Encuadrar</button>
-      <button type="button" id="tdel" class="ghost" title="Borrar la caja elegida (Supr)">Borrar caja</button>
-      <button type="button" id="tsave" class="primary" title="Guardar en Drive ahora (también se guarda solo)">💾 Guardar</button>
+      <button type="button" id="tundo" class="ghost ticon" title="Deshacer (Ctrl+Z)" aria-label="Deshacer">↶</button>
+      <button type="button" id="tredo" class="ghost ticon" title="Rehacer (Ctrl+Y)" aria-label="Rehacer">↷</button>
+      <button type="button" id="tsuggest" class="tbtn tai" title="IA: sugerir cajas (Gemini, clave de AeonScout). Después revise el tipo de cada una" aria-label="IA: sugerir cajas"><svg viewBox="0 0 24 24"><path d="M19 9l1.25-2.75L23 5l-2.75-1.25L19 1l-1.25 2.75L15 5l2.75 1.25L19 9zm-7.5.5L9 4 6.5 9.5 1 12l5.5 2.5L9 20l2.5-5.5L17 12l-5.5-2.5zM19 15l-1.25 2.75L15 19l2.75 1.25L19 23l1.25-2.75L23 19l-2.75-1.25L19 15z"/></svg></button>
+      <button type="button" id="tfit" class="tbtn" title="Encuadrar: ver la foto completa (F)" aria-label="Encuadrar"><svg viewBox="0 0 24 24"><path d="M3 5v4h2V5h4V3H5c-1.1 0-2 .9-2 2zm2 10H3v4c0 1.1.9 2 2 2h4v-2H5v-4zm14 4h-4v2h4c1.1 0 2-.9 2-2v-4h-2v4zm0-16h-4v2h4v4h2V5c0-1.1-.9-2-2-2z"/></svg></button>
+      <button type="button" id="tdel" class="tbtn tdel" title="Borrar la caja elegida (Supr)" aria-label="Borrar caja"><svg viewBox="0 0 24 24"><path d="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z"/></svg></button>
+      <button type="button" id="tsave" class="tbtn tsave" title="Guardar en Drive ahora (también se guarda solo)" aria-label="Guardar"><svg viewBox="0 0 24 24"><path d="M17 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14c1.1 0 2-.9 2-2V7l-4-4zm-5 16a3 3 0 1 1 0-6 3 3 0 0 1 0 6zm3-10H5V5h10v4z"/></svg></button>
     </div>
     <div class="thint small"><span class="mouse">Arrastre para crear una caja · clic en una caja para elegirla, moverla o cambiarle la clase (0–9) · esquinas para ajustar · rueda: zoom · clic derecho o espacio + arrastre: mover · Ctrl+Z deshacer · Ctrl+Y rehacer</span><span class="touch">Un dedo: crear o mover cajas · dos dedos: acercar y mover · toque una clase arriba</span></div>
   </dialog>

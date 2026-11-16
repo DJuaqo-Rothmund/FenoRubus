@@ -300,13 +300,19 @@ function renderList() {
 const Ed = {
   // Botones de clase del cultivo elegido (cambian con el cultivo).
   renderClasses() {
+    // N/A (sin estructuras) y los estadios: solo número y color; el elegido muestra su nombre.
     const bar = $("tclassbar");
     if (!bar) return;
     bar.innerHTML = "";
+    const na = document.createElement("button");
+    na.type = "button"; na.id = "tempty"; na.className = "stg na"; na.title = "Sin estructuras (la foto no tiene nada que marcar)";
+    na.innerHTML = `<i style="background:#616161">N/A</i><span>Sin estructuras</span>`;
+    na.onclick = () => this.toggleEmpty();
+    bar.appendChild(na);
     CLASSES.forEach(([k, n, c], i) => {
       const b = document.createElement("button");
-      b.type = "button"; b.dataset.k = k;
-      b.innerHTML = `<i style="background:${c}"></i>${i} · ${n}`;
+      b.type = "button"; b.dataset.k = k; b.className = "stg"; b.title = `${i} · ${n}`;
+      b.innerHTML = `<i style="background:${c}">${i}</i><span>${esc(n)}</span>`;
       b.onclick = () => this.setClass(k);
       bar.appendChild(b);
     });
@@ -321,8 +327,6 @@ const Ed = {
     $("tprev").onclick = () => this.go(-1);
     $("tnext").onclick = () => this.go(1);
     $("tdel").onclick = () => this.deleteSel();
-    $("tempty").onclick = () => this.toggleEmpty();
-    $("tcopy").onclick = () => this.copyPrev();
     $("tfit").onclick = () => { this.fitView(); this.draw(); };
     $("tclose").onclick = () => this.close();
     $("tdialog").addEventListener("close", () => {
@@ -356,7 +360,8 @@ const Ed = {
   },
   setClass(k) {
     this.cls = k;
-    [...$("tclassbar").children].forEach((b) => b.classList.toggle("on", b.dataset.k === k));
+    [...$("tclassbar").children].forEach((b) => b.dataset.k && b.classList.toggle("on", b.dataset.k === k));
+    $("tclassbar").querySelector(".stg.on")?.scrollIntoView({ block: "nearest", inline: "nearest" });
     if (this.sel != null && this.rec) { this.rec.boxes[this.sel].c = k; this.changed(); }
   },
   async open(i) {
@@ -406,10 +411,9 @@ const Ed = {
     if (!this.img || btn.disabled) return;
     const p = this.photo;
     btn.disabled = true;
-    const label = btn.textContent;
     try {
       const blob = await (await fetch(this.img.src)).blob();
-      const got = await BOX.suggest(blob, CLASSES, (CROP_NAMES[crop] || "").toLowerCase(), (t) => { btn.textContent = t; });
+      const got = await BOX.suggest(blob, CLASSES, (CROP_NAMES[crop] || "").toLowerCase(), (t) => { $("tsaved").textContent = `IA: ${t}`; });
       if (this.photo !== p) return;
       const before = this.rec.boxes.length;
       this.rec.boxes = BOX.merge(this.rec.boxes, got);
@@ -420,7 +424,7 @@ const Ed = {
         : "La IA no encontró estructuras nuevas";
     } catch (e) {
       $("tsaved").textContent = `IA: ${e.message}`;
-    } finally { btn.disabled = false; btn.textContent = label; }
+    } finally { btn.disabled = false; }
   },
   go(d) {
     const j = this.i + d;
@@ -473,8 +477,10 @@ const Ed = {
     const r = this.rec || { boxes: [] };
     const n = {};
     for (const b of r.boxes) n[b.c] = (n[b.c] || 0) + 1;
+    const tot = Object.values(n).reduce((a, b) => a + b, 0);
     $("tcount").innerHTML = r.empty && !r.boxes.length ? "Sin estructuras (foto vacía)" :
-      CLASSES.filter(([k]) => n[k]).map(([k, nm, c]) => `<span><i style="background:${c}"></i>${nm} <b>${n[k]}</b></span>`).join("") || "Sin cajas aún";
+      (CLASSES.filter(([k]) => n[k]).map(([k, nm, c]) => `<span title="${esc(nm)}"><i style="background:${c}"></i><b>${n[k]}</b></span>`).join("")
+        + (tot ? `<span class="ttot">${tot} en total</span>` : "")) || "Sin cajas aún";
     $("tempty").classList.toggle("on", !!r.empty);
   },
   toggleEmpty() {
@@ -511,7 +517,6 @@ const Ed = {
     else if (e.key === "ArrowLeft") { this.go(-1); e.preventDefault(); }
     else if (e.key.toLowerCase() === "f") { this.fitView(); this.draw(); }
     else if (e.key.toLowerCase() === "v") this.toggleEmpty();
-    else if (e.key.toLowerCase() === "c") this.copyPrev();
     else if (e.key === " ") { this.space = true; e.preventDefault(); }
   },
   // geometría: cajas en coordenadas 0..1 de la imagen
@@ -589,7 +594,7 @@ const Ed = {
   },
   setClassButton(k) {
     this.cls = k;
-    [...$("tclassbar").children].forEach((b) => b.classList.toggle("on", b.dataset.k === k));
+    [...$("tclassbar").children].forEach((b) => b.dataset.k && b.classList.toggle("on", b.dataset.k === k));
   },
   move(e) {
     const d = this.drag;

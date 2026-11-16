@@ -794,6 +794,83 @@ class _Pill(ButtonBehavior, Label):
             self.padding = (dp(16), 0, 0, 0)
 
 
+class _StagePill(ButtonBehavior, Widget):
+    """Estadio en la barra de arriba: círculo de su color con el número; el elegido se agranda y
+    muestra su nombre («5  Flor»). N/A = «sin estructuras»."""
+
+    def __init__(self, num: str, name: str, color: str, **kw):
+        super().__init__(size_hint=(None, None), size=(dp(32), dp(32)), **kw)
+        self.num, self.name, self.col = num, name, color
+        self.on = False
+        self.bind(pos=self.draw, size=self.draw, state=self.draw)
+
+    def set_on(self, on: bool):
+        self.on = on
+        if on:
+            w = text_texture(self.name, 13, True).width
+            self.width = dp(32) + w + dp(12)
+        else:
+            self.width = dp(32)
+        self.draw()
+
+    def draw(self, *_):
+        from kivy.graphics import RoundedRectangle
+        self.canvas.clear()
+        with self.canvas:
+            if self.on:                                   # pastilla blanca con el nombre
+                Color(1, 1, 1, 1)
+                RoundedRectangle(pos=self.pos, size=self.size, radius=[dp(16)])
+            Color(*c(self.col)[:3], 1)
+            r = dp(26) if self.on else dp(30)
+            from kivy.graphics import Ellipse
+            Ellipse(pos=(self.x + (dp(32) - r) / 2, self.center_y - r / 2), size=(r, r))
+            if not self.on:                               # borde suave para verlo sobre la foto
+                Color(1, 1, 1, .35 if self.state == "normal" else .7)
+                Line(circle=(self.x + dp(16), self.center_y, dp(15)), width=dp(1))
+            Color(1, 1, 1, 1)
+            t = text_texture(self.num, 11 if len(self.num) > 1 else 13, True)
+            Rectangle(texture=t, size=t.size, pos=(self.x + dp(16) - t.width / 2, self.center_y - t.height / 2))
+            if self.on:
+                Color(.08, .07, .06, 1)
+                t = text_texture(self.name, 13, True)
+                Rectangle(texture=t, size=t.size, pos=(self.x + dp(34), self.center_y - t.height / 2))
+
+
+class _IconBtn(ButtonBehavior, Widget):
+    """Botón redondo con un ícono (Material Design). glow=True: aura morada suave (la IA)."""
+
+    from kivy.properties import NumericProperty as _NP
+    pulse = _NP(0)
+
+    def __init__(self, icon: str, bg: str, glow: bool = False, **kw):
+        super().__init__(size_hint=(None, None), size=(dp(46), dp(46)), **kw)
+        from kivymd.icon_definitions import md_icons
+        self.glyph, self.bg, self.glow = md_icons.get(icon, "?"), bg, glow
+        self.bind(pos=self.draw, size=self.draw, state=self.draw, pulse=self.draw)
+        if glow:
+            from kivy.animation import Animation
+            a = Animation(pulse=1, d=1.6, t="in_out_sine") + Animation(pulse=0, d=1.6, t="in_out_sine")
+            a.repeat = True
+            a.start(self)
+
+    def draw(self, *_):
+        from kivy.graphics import Ellipse
+        self.canvas.clear()
+        with self.canvas:
+            if self.glow:                                  # aura sutil que «respira»
+                for k, a in ((1.55, .10), (1.35, .16), (1.18, .24)):
+                    Color(.70, .45, 1, a * (.65 + .35 * self.pulse))
+                    r = self.width * (k + .06 * self.pulse)
+                    Ellipse(pos=(self.center_x - r / 2, self.center_y - r / 2), size=(r, r))
+            Color(*c(self.bg)[:3], .78 if self.state == "down" else 1)
+            Ellipse(pos=self.pos, size=self.size)
+            lab = CoreLabel(text=self.glyph, font_name="Icons", font_size=sp(24), color=(1, 1, 1, 1))
+            lab.refresh()
+            t = lab.texture
+            Color(1, 1, 1, 1)
+            Rectangle(texture=t, size=t.size, pos=(self.center_x - t.width / 2, self.center_y - t.height / 2))
+
+
 class BoxEditor(ModalView):
     """Una foto a pantalla completa para marcar sus cajas; ‹ › recorren la lista."""
 
@@ -818,43 +895,42 @@ class BoxEditor(ModalView):
         top.add_widget(self.prev_b)
         top.add_widget(self.next_b)
         root.add_widget(top)
-        sv = ScrollView(size_hint_y=None, height=dp(46), do_scroll_y=False, bar_width=0)
-        bar = BoxLayout(size_hint_x=None, padding=(dp(8), dp(4)), spacing=dp(6))
+        # Estadios arriba: N/A (sin estructuras) y 0–9, solo número y color; el elegido muestra su
+        # nombre. Si no caben, la barra se desliza con el dedo (y se mueve sola al elegido).
+        self.class_sv = ScrollView(size_hint_y=None, height=dp(48), do_scroll_y=False, bar_width=0,
+                                   scroll_type=["content"])
+        bar = BoxLayout(size_hint_x=None, padding=(dp(6), dp(8)), spacing=dp(4))
         bar.bind(minimum_width=bar.setter("width"))
+        self.empty_b = _StagePill("N/A", "Sin estructuras", "#616161")
+        self.empty_b.bind(on_release=lambda *_: self.toggle_empty())
+        bar.add_widget(self.empty_b)
         self.class_btns = {}
         for i, (key, name, col) in enumerate(CLASSES):
-            b = _Pill(f"{i} · {name}", color=col)
+            b = _StagePill(str(i), name, col)
             b.bind(on_release=lambda _w, key=key: self.set_class(key))
             self.class_btns[key] = b
             bar.add_widget(b)
-        sv.add_widget(bar)
-        root.add_widget(sv)
+        self.class_sv.add_widget(bar)
+        root.add_widget(self.class_sv)
         self.canvas_w = BoxCanvas(self)
         root.add_widget(self.canvas_w)
-        bottom = ScrollView(size_hint_y=None, height=dp(50), do_scroll_y=False, bar_width=0)
-        tools = BoxLayout(size_hint_x=None, padding=(dp(8), dp(6)), spacing=dp(6))
-        tools.bind(minimum_width=tools.setter("width"))
-        self.count = Label(text="", font_size=sp(12), color=(1, 1, 1, .85), size_hint=(None, 1), width=dp(150),
-                           halign="left", valign="middle", markup=True)
+        # Abajo, fijos: el conteo y 4 íconos (IA, encuadrar, borrar caja, guardar).
+        tools = BoxLayout(size_hint_y=None, height=dp(62), padding=(dp(12), dp(8)), spacing=dp(10))
+        self.count = Label(text="", font_size=sp(12), color=(1, 1, 1, .9), halign="left", valign="middle",
+                           markup=True)
         self.count.bind(size=lambda w, s: setattr(w, "text_size", s))
         tools.add_widget(self.count)
-        save_b = _Pill("Guardar")
-        save_b.bind(on_release=lambda *_: self.save_now())
-        tools.add_widget(save_b)
-        self.ai_b = _Pill("IA: sugerir cajas")
+        self.ai_b = _IconBtn("creation", "#8E44FF", glow=True)
         self.ai_b.bind(on_release=lambda *_: self.suggest())
-        tools.add_widget(self.ai_b)
-        for label, fn in (("Copiar anterior", self.copy_prev), ("Sin estructuras", self.toggle_empty),
-                          ("Encuadrar", lambda: self.canvas_w.fit()), ("Borrar caja", self.delete_sel)):
-            b = _Pill(label)
-            b.bind(on_release=lambda _w, fn=fn: fn())
-            tools.add_widget(b)
-            if label == "Sin estructuras":
-                self.empty_b = b
-        bottom.add_widget(tools)
-        root.add_widget(bottom)
-        root.add_widget(Label(text="Un dedo: crear o mover cajas · dos dedos: acercar y mover · toque una clase arriba",
-                              font_size=sp(11), color=(1, 1, 1, .5), size_hint_y=None, height=dp(22)))
+        for w, fn in ((self.ai_b, None), (_IconBtn("fit-to-screen-outline", "#3A3631"), lambda: self.canvas_w.fit()),
+                      (_IconBtn("delete-outline", "#C62828"), self.delete_sel),
+                      (_IconBtn("content-save-outline", "#2E7D32"), self.save_now)):
+            if fn:
+                w.bind(on_release=lambda _w, fn=fn: fn())
+            tools.add_widget(w)
+        root.add_widget(tools)
+        root.add_widget(Label(text="Un dedo: crear o mover cajas · dos dedos: acercar y mover · elija el estadio arriba",
+                              font_size=sp(11), color=(1, 1, 1, .5), size_hint_y=None, height=dp(20)))
         self.add_widget(root)
         self.set_class(self.cur)
         self.bind(on_dismiss=lambda *_: self._closed())
@@ -942,7 +1018,9 @@ class BoxEditor(ModalView):
         if self.rec.get("empty") and not self.rec["boxes"]:
             self.count.text = "Sin estructuras"
         else:
-            self.count.text = "  ".join(f"[color={COLORS[k]}][b]•[/b][/color] {n[k]}" for k, _, _ in CLASSES if n.get(k)) or "Sin cajas"
+            dots = "  ".join(f"[color={COLORS[k]}][b]•[/b][/color] {n[k]}" for k, _, _ in CLASSES if n.get(k))
+            total = sum(n.values())
+            self.count.text = f"{dots}\n[b]{total} en total[/b]" if total else "Sin cajas"
         self.empty_b.set_on(bool(self.rec.get("empty")))
 
     # ---------------------------------------------------------- acciones
@@ -950,6 +1028,7 @@ class BoxEditor(ModalView):
         self.cur = key
         for k, b in self.class_btns.items():
             b.set_on(k == key)
+        Clock.schedule_once(lambda *_: self.class_sv.scroll_to(self.class_btns[key], padding=dp(40), animate=False), 0)
         if self.sel is not None:
             self.rec["boxes"][self.sel]["c"] = key
             self.changed()
@@ -1002,7 +1081,8 @@ class BoxEditor(ModalView):
         if getattr(self, "_suggesting", False):
             return
         self._suggesting = True
-        self.ai_b.text = "IA: buscando…"
+        self.ai_b.opacity = .55
+        a.toast("IA: buscando estructuras…")
         import crops
         crop_name = crops.current().fruit
         classes = list(CLASSES)
@@ -1018,7 +1098,7 @@ class BoxEditor(ModalView):
 
         def done(got, err):
             self._suggesting = False
-            self.ai_b.text = "IA: sugerir cajas"
+            self.ai_b.opacity = 1
             if err is not None:
                 a.toast(f"IA: {err}")
                 return

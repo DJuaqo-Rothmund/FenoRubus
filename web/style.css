@@ -336,9 +336,21 @@ dialog.tdialog[open] { display: flex; }
 .tbarx .ghost.on { background: rgba(255,255,255,.2); }
 .tbarx .round { background: transparent; color: #fff; border-color: rgba(255,255,255,.3); }
 #tname { opacity: .6; }
-.tclassbar { display: flex; flex-wrap: wrap; gap: 6px; padding: 0 12px 8px; }
-.tclassbar button { border: 1px solid rgba(255,255,255,.25); background: rgba(255,255,255,.06); color: #fff; border-radius: 999px; padding: 5px 12px; cursor: pointer; display: inline-flex; align-items: center; gap: 6px; font-size: 13px; }
-.tclassbar button.on { background: #fff; color: #15130f; font-weight: 700; }
+.tclassbar { display: flex; flex-wrap: nowrap; gap: 6px; padding: 2px 12px 8px; overflow-x: auto; scrollbar-width: thin; scroll-behavior: smooth; }
+.tclassbar button.stg { flex: none; border: 0; background: transparent; color: #fff; border-radius: 999px; padding: 2px; cursor: pointer; display: inline-flex; align-items: center; gap: 6px; font-size: 13px; }
+.tclassbar button.stg i { width: 32px; height: 32px; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center; font-style: normal; font-weight: 700; color: #fff; text-shadow: 0 1px 2px rgba(0,0,0,.6); font-size: 13px; }
+.tclassbar button.stg.na i { font-size: 10px; }
+.tclassbar button.stg span { display: none; }
+.tclassbar button.stg.on { background: #fff; color: #15130f; font-weight: 700; padding-right: 12px; }
+.tclassbar button.stg.on span { display: inline; }
+.tbtn { width: 42px; height: 42px; border-radius: 50%; border: 0; background: #3A3631; color: #fff; cursor: pointer; display: inline-flex; align-items: center; justify-content: center; padding: 0; flex: none; }
+.tbtn svg { width: 22px; height: 22px; fill: currentColor; }
+.tbtn.tdel { background: #C62828; } .tbtn.tsave { background: #2E7D32; }
+.tbtn.tai { background: #8E44FF; animation: taura 2.4s ease-in-out infinite; }
+.tbtn.tai:disabled { opacity: .55; animation: none; }
+@keyframes taura { 0%,100% { box-shadow: 0 0 6px 1px rgba(142,68,255,.45); } 50% { box-shadow: 0 0 16px 5px rgba(170,110,255,.7); } }
+.ticon { font-size: 20px; padding: 4px 10px; }
+.tcount .ttot { font-weight: 700; margin-left: 4px; }
 #tcanvas { flex: 1; min-height: 0; width: 100%; display: block; touch-action: none; cursor: crosshair; }
 .tcount { display: flex; flex-wrap: wrap; gap: 4px 12px; font-size: 13px; }
 .thint { text-align: center; opacity: .55; padding: 0 0 8px; }
@@ -402,8 +414,8 @@ dialog.tpage[open] { display: flex; }
   .tbarx .grow { min-width: 0; }
   #tname { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   #tsaved { display: none; }
-  .tclassbar { flex-wrap: nowrap; overflow-x: auto; padding: 0 8px 6px; scrollbar-width: none; }
-  .tclassbar button { flex: none; padding: 7px 12px; }
+  .tclassbar { padding: 2px 8px 6px; scrollbar-width: none; }
+  .tbtn { width: 40px; height: 40px; }
   .tcount { flex: none; white-space: nowrap; }
   .thint .mouse { display: none; }
   .thint .touch { display: inline; }
