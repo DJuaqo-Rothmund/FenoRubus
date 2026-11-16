@@ -339,10 +339,17 @@ class FenoRubusApp(MDApp):
             try:
                 if manual:
                     d.backup.progress_cb = lambda f, t="": task_badges.update("backup", f, f"AeonScout · {t}")
+                d.last_sync = None
                 n = d.run()
+                got = (d.last_sync or {}).get("applied", 0) + (d.last_sync or {}).get("downloaded", 0)
+                if got:      # llegaron capturas o fotos de otro teléfono / cuenta
+                    from ui import scout_ai_ui
+                    Clock.schedule_once(lambda *_: scout_ai_ui._refresh_scout_screens())
                 if manual:
-                    task_badges.finish("backup", "done" if n else "empty",
-                                       f"AeonScout: {n} foto(s) subidas" if n else "AeonScout: todo estaba respaldado")
+                    extra = f" · {got} cambio(s) recibido(s)" if got else ""
+                    task_badges.finish("backup", "done" if n or got else "empty",
+                                       (f"AeonScout: {n} foto(s) subidas{extra}" if n else
+                                        f"AeonScout: al día{extra}" if got else "AeonScout: todo estaba respaldado"))
             except Exception as exc:  # noqa: BLE001
                 if manual:
                     task_badges.finish("backup", "error", f"AeonScout: {exc}")
@@ -350,6 +357,18 @@ class FenoRubusApp(MDApp):
                 d.backup.progress_cb = None
                 _detach()
         threading.Thread(target=work, daemon=True).start()
+
+    def _scout_tick(self, *_):
+        """AeonScout compartido con otra cuenta: se sincroniza cada 3 minutos (si no, cada 10)."""
+        import time as _t
+        try:
+            shared = bool(self.scout.get_setting("share_folder"))
+        except Exception:  # noqa: BLE001
+            return
+        every = 170 if shared else 590
+        if _t.monotonic() - getattr(self, "_scout_last", -1e9) >= every:
+            self._scout_last = _t.monotonic()
+            self.scout_backup()
 
     def backup_now(self) -> None:
         """Botón «Respaldar»: sube a Drive lo pendiente del ensayo abierto (y reintenta lo que
@@ -798,8 +817,8 @@ class FenoRubusApp(MDApp):
             Clock.schedule_once(lambda *_: self._show_safe_mode(), 1.5)
             Clock.schedule_once(lambda *_: self._finish_start(), 20)
             return
-        Clock.schedule_once(lambda *_: self.scout_backup(), 8)
-        Clock.schedule_interval(lambda *_: self.scout_backup(), 600)
+        Clock.schedule_once(self._scout_tick, 8)
+        Clock.schedule_interval(self._scout_tick, 60)
         Clock.schedule_once(lambda *_: self._finish_start(), 30)
 
     def _add_crops(self, *_):
@@ -909,6 +928,8 @@ class FenoRubusApp(MDApp):
                 Clock.schedule_interval(lambda *_: self.run_sync(), 600)
                 # Ensayos compartidos con otra cuenta: casi en tiempo real (ver _share_tick).
                 Clock.schedule_interval(self._share_tick, 20)
+                # AeonScout compartido: cada 3 minutos (ver _scout_tick).
+                Clock.schedule_interval(self._scout_tick, 60)
         if self.safe_mode:
             return
         # Nombres de foto «ddmmaaaa-…» (hasta la 1.1.30) -> «aaaammdd-…»: archivos de la app,

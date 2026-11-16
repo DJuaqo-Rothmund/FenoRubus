@@ -270,6 +270,7 @@ class ScoutHome(ScoutScreenBase):
             b.bind(on_release=lambda *_: self._connect_google())
             card.add_widget(b)
         body.add_widget(card)
+        body.add_widget(self._share_card(on))
         if alone:
             card = _card("AYUDA")
             b = Factory.GhostButton(icon="camera-outline", text="Cómo sacar las fotos")
@@ -285,6 +286,118 @@ class ScoutHome(ScoutScreenBase):
         # AeonScout sola este es el inicio: sin flecha de volver.
         self.ids.bar.left_action_items = ([] if alone else [["arrow-left", lambda x: app().back()]]) + [
             [theme.DRIVE_UP, lambda x: app().scout_backup(manual=True), "Respaldar en Google Drive"]]
+
+    # ------------------------------------------------------- compartir con otra cuenta
+    def _share_card(self, drive_on: bool):
+        card = _card("COMPARTIR CON OTRA CUENTA")
+        d = db()
+        if scout.is_shared(d):
+            owner = d.get_setting("share_owner") or ""
+            mine = owner and owner == (app().scout_drive.backup.account or "").lower()
+            last = d.get_setting("scout_sync_at") or ""
+            card.add_widget(Factory.Body(markup=True, text=(
+                ("Compartido por usted: " if mine else f"Compartido por [b]{owner}[/b]: ")
+                + "las dos cuentas ven y suben las mismas fotos, capturas e identificaciones "
+                  "(carpeta común en Drive). Se sincroniza solo cada pocos minutos."
+                + (f"\nÚltima sincronización: {last[11:16]} del {last[8:10]}-{last[5:7]}." if last else ""))))
+            b = Factory.GhostButton(icon="sync", text="Sincronizar ahora")
+            b.bind(on_release=lambda *_: app().scout_backup(manual=True))
+            card.add_widget(b)
+            if mine:
+                b = Factory.GhostButton(icon="account-plus-outline", text="Invitar a otra cuenta")
+                b.bind(on_release=lambda *_: self._share_dialog())
+                card.add_widget(b)
+            b = Factory.GhostButton(icon="link-off", text="Dejar de compartir en este teléfono")
+            b.bind(on_release=lambda *_: self._leave())
+            card.add_widget(b)
+            return card
+        card.add_widget(Factory.Muted(text=(
+            "Para trabajar con otra persona sobre el mismo banco de fotos: una comparte su AeonScout "
+            "(con el correo de Google de la otra) y la otra se une. Lo de los dos queda junto y "
+            "sincronizado, incluidas las identificaciones." if drive_on else
+            "Conecte primero la cuenta de Google (Respaldo en Google Drive).")))
+        if drive_on:
+            b = Factory.GhostButton(icon="share-variant-outline", text="Compartir mi AeonScout con…")
+            b.bind(on_release=lambda *_: self._share_dialog())
+            card.add_widget(b)
+            b = Factory.GhostButton(icon="account-arrow-left-outline", text="Unirme al AeonScout de otra persona")
+            b.bind(on_release=lambda *_: self._join())
+            card.add_widget(b)
+        return card
+
+    def _with_scope(self, then, busy: str):
+        """Permiso amplio de Drive (ver las carpetas que otra cuenta comparte) y luego `then`
+        en segundo plano; los errores se avisan."""
+        a = app()
+        a.toast(busy)
+
+        def work():
+            try:
+                from drive_backup import enable_share_scope, share_scope_on
+                if not share_scope_on():
+                    enable_share_scope(a.scout_drive.backup)
+                then()
+            except Exception as exc:  # noqa: BLE001
+                error = exc
+                Clock.schedule_once(lambda *_: a.toast(f"Google Drive: {error}"))
+        threading.Thread(target=work, daemon=True).start()
+
+    def _share_dialog(self):
+        from ui.screens import confirm, form_dialog
+        a = app()
+        form = MDBoxLayout(orientation="vertical", adaptive_height=True, padding=(0, dp(8), 0, 0))
+        field = Factory.Field(hint_text="Correo de Google de la otra persona")
+        form.add_widget(field)
+
+        def ok(_f):
+            email = field.text.strip()
+
+            def go():
+                res = scout.share(a.scout_drive.backup, email,
+                                  "Te comparto mi AeonScout (plagas, malezas y enfermedades). En la app "
+                                  "AeonScout o en AeonCrop › AeonScout: «Unirme al AeonScout de otra persona».")
+                Clock.schedule_once(lambda *_: (
+                    self.refresh(), a.scout_backup(manual=True),
+                    confirm("AeonScout compartido",
+                            f"{res['email']} recibió un correo de Google. En su app: AeonScout › «Unirme "
+                            "al AeonScout de otra persona».", [])))
+            self._with_scope(go, "Compartiendo…")
+        form_dialog("Compartir AeonScout", form, ok, "COMPARTIR")
+
+    def _join(self):
+        from ui.screens import confirm, pick_dialog
+        a = app()
+
+        def go():
+            invs = scout.invitations(a.scout_drive.backup)
+            Clock.schedule_once(lambda *_: show(invs))
+
+        def show(invs):
+            if not invs:
+                confirm("AeonScout compartido conmigo", "Nadie le ha compartido su AeonScout todavía. Pídale "
+                        "a la otra persona que use «Compartir mi AeonScout con…» con su correo de Google.", [])
+                return
+
+            def join(inv):
+                def work():
+                    try:
+                        scout.join(a.scout_drive.backup, inv)
+                        Clock.schedule_once(lambda *_: (self.refresh(), a.scout_backup(manual=True),
+                                                        a.toast(f"Unido al AeonScout de {inv['owner']}: sincronizando…")))
+                    except Exception as exc:  # noqa: BLE001
+                        error = exc
+                        Clock.schedule_once(lambda *_: a.toast(f"No se pudo unir: {error}"))
+                threading.Thread(target=work, daemon=True).start()
+            pick_dialog("AeonScout compartido conmigo",
+                        [(f"AeonScout de {i['owner']}", i["owner_email"], lambda i=i: join(i)) for i in invs],
+                        subtitle="Al unirse, lo que tiene en este teléfono se suma a la carpeta común.")
+        self._with_scope(go, "Buscando invitaciones…")
+
+    def _leave(self):
+        from ui.screens import confirm
+        confirm("Dejar de compartir", "Este teléfono vuelve a usar solo su propia carpeta de Drive. Lo ya "
+                "sincronizado queda aquí; la otra persona conserva lo suyo.",
+                [("Dejar de compartir", lambda: (scout.leave(db()), self.refresh()))])
 
     def _connect_google(self):
         a = app()

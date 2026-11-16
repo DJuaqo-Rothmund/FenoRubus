@@ -22,6 +22,7 @@ import csv
 import datetime as _dt
 import os
 import re
+import threading
 import sqlite3
 import unicodedata
 from dataclasses import dataclass
@@ -184,6 +185,10 @@ class ScoutDB(Database):
         import scout_guide
         scout_ai.ensure(self)
         scout_guide.seed(self)
+        import sync
+        with self._lock:          # las tablas de AeonScout también se sincronizan (ver ScoutDrive)
+            sync.install(self.conn)
+            self.conn.commit()
 
     # ------------------------------------------------------------- catálogo
     def seed_catalog(self) -> None:
@@ -243,6 +248,12 @@ class ScoutDB(Database):
             if m:
                 n = max(n, int(m[1]))
         name = f"NI-{n + 1:03d}"
+        tag = self.get_setting("scout_ni_tag") or ""
+        if tag:                  # AeonScout compartido: «NI-004-J» (no choca con el NI-004 de la otra cuenta)
+            name = f"{name}-{tag}"
+        while self.query_one("SELECT 1 FROM scout_species WHERE section=? AND name=?", (section, name)):
+            n += 1
+            name = f"NI-{n + 1:03d}" + (f"-{tag}" if tag else "")
         cur = self.execute("INSERT INTO scout_species(section, name, unidentified, created_at) VALUES (?,?,1,?)",
                            (section, name, _now()))
         return cur.lastrowid
@@ -350,7 +361,10 @@ class ScoutDB(Database):
             n += 1
             new_path = p["path"]
             base = os.path.basename(p["path"])
-            for token in (old_name, old_slug):
+            # (Una «NI-001-b» es la NI-001 de otra cuenta que aquí se renombró: sus archivos
+            # siguen con «NI-001».)
+            plain = re.sub(r"-b$", "", old_name or "")
+            for token in (old_name, old_slug, plain, slug(plain) if plain else ""):
                 if token and token in base:     # el nombre del archivo lleva la especie
                     cand = os.path.join(os.path.dirname(p["path"]), base.replace(token, slug(sp["name"]), 1))
                     if not os.path.exists(cand):
@@ -362,9 +376,11 @@ class ScoutDB(Database):
                     break
             if new_path != p["path"]:
                 self.execute("UPDATE scout_photos SET path=? WHERE id=?", (new_path, p["id"]))
-            if not p["queue_id"]:
-                continue
-            q = self.query_one("SELECT * FROM drive_queue WHERE id=?", (p["queue_id"],))
+            if p["queue_id"]:
+                q = self.query_one("SELECT * FROM drive_queue WHERE id=?", (p["queue_id"],))
+            else:   # foto que llegó de otro teléfono: su fila es la de la bajada (por ruta)
+                q = self.query_one("SELECT * FROM drive_queue WHERE path=? AND drive_id IS NOT NULL "
+                                   "ORDER BY id DESC", (p["path"],))
             if not q:
                 continue
             status = "move" if q["status"] == "done" and q["drive_id"] else q["status"]
@@ -511,16 +527,39 @@ def sector_for(place: dict, equipo, sector) -> str | None:
 
 
 # ----------------------------------------------------------------- Drive
+def _backup_class():
+    from drive_backup import DriveBackup
+
+    class ScoutBackup(DriveBackup):
+        """Como DriveBackup, pero si AeonScout está compartido su carpeta es la común
+        («AeonCrop/AeonScout» de quien lo compartió): fotos, planilla y paquetes van ahí."""
+
+        def root_id(self) -> str:
+            shared = self.db.get_setting("share_folder")
+            return shared or super().root_id()
+    return ScoutBackup
+
+
+def make_backup(db, **kw):
+    return _backup_class()(db, crop=MODULE, **kw)
+
+
+SYNC_SUB = "Sincronización"          # paquetes de cambios de cada teléfono (sync.py)
+SHARE_PROP = "aeonscout_shared"      # propiedad de la carpeta común (para encontrarla al unirse)
+
+
 class ScoutDrive:
     """Respaldo en Drive de AeonScout: la cola de fotos (DriveBackup con la carpeta
-    «AeonCrop/AeonScout»), las fotos que se mueven al identificar y la planilla."""
+    «AeonCrop/AeonScout», o la común si está compartido), las fotos que se mueven al
+    identificar, la planilla y la sincronización de la base con los otros teléfonos y
+    cuentas (paquetes en «AeonScout/Sincronización»)."""
 
     def __init__(self, db: ScoutDB, backup=None):
         self.db = db
         if backup is None:
-            from drive_backup import DriveBackup
-            backup = DriveBackup(db, crop=MODULE)
+            backup = make_backup(db)
         self.backup = backup
+        self._lock = threading.Lock()
 
     @property
     def enabled(self) -> bool:
@@ -543,11 +582,27 @@ class ScoutDrive:
         return n
 
     def run(self) -> int:
-        """Mueve, sube lo pendiente y reemplaza «registro.csv». Devuelve fotos subidas."""
+        """Mueve, sube lo pendiente, sincroniza la base (y baja las fotos de los otros) y
+        reemplaza «registro.csv». Devuelve fotos subidas."""
         if not self.enabled:
             return 0
+        if not self._lock.acquire(blocking=False):
+            return 0                     # ya hay un respaldo de AeonScout en curso
+        try:
+            return self._run()
+        finally:
+            self._lock.release()
+
+    def _run(self) -> int:
         self.move_pending()
         n = self.backup.flush()
+        try:
+            self.last_sync = self.sync()
+        except Exception as exc:  # noqa: BLE001 (se reintenta en el próximo respaldo)
+            from drive_backup import Offline
+            if isinstance(exc, Offline):
+                raise
+            print("AeonScout: sincronización:", exc)
         try:
             self.backup.put_file(self.db.export_csv(), "registro.csv")
         except Exception:  # noqa: BLE001 (la planilla se repone en la próxima subida)
@@ -557,6 +612,19 @@ class ScoutDrive:
         except Exception as exc:  # noqa: BLE001 (se reintenta en el próximo respaldo)
             print("AeonScout: identificaciones de la web:", exc)
         return n
+
+    def sync(self, downloads: int | None = 40) -> dict:
+        """Paquetes de cambios en «<carpeta de AeonScout>/Sincronización»: recibe los de los
+        otros teléfonos (de esta cuenta o de la cuenta con que se comparte) y envía los de
+        aquí; después baja las fotos que falten. Devuelve el resumen de sync_drive."""
+        from sync_drive import DriveSync
+        data_dir = os.path.dirname(self.db.base_dir)
+        ds = DriveSync(self.backup, None, None, data_dir)
+        folder = self.backup._folder(SYNC_SUB, self.backup.root_id())
+        res = ds.sync_db(self.db, folder)
+        res["downloaded"], res["pending_photos"] = ds.fetch_missing(self.db, downloads)
+        self.db.set_setting("scout_sync_at", _now())
+        return res
 
     def import_web(self) -> int:
         """Identificaciones con IA hechas en AeonCrop Web («identificaciones-web.json»)."""
@@ -578,3 +646,86 @@ class ScoutDrive:
         n = scout_ai.import_web(self.db, entries)
         self.db.set_setting("scout_web_seen", stamp)
         return n
+
+
+# ----------------------------------------------------------------- compartir con otra cuenta
+def share(backup, email: str, message: str = "") -> dict:
+    """Comparte AeonScout con `email` (permiso de edición): la carpeta «AeonCrop/AeonScout»
+    de esta cuenta queda como carpeta común. Los dos ven y suben las mismas fotos e
+    identificaciones. Requiere el permiso amplio de Drive (drive_backup.enable_share_scope)."""
+    import json
+    import urllib.parse
+
+    import sharing
+    from drive_backup import API
+    email = (email or "").strip().lower()
+    if not sharing.EMAIL_RE.match(email):
+        raise ValueError("Escriba un correo válido (la cuenta de Google de la otra persona).")
+    db = backup.db
+    folder = backup.root_id()
+    backup._call("PATCH", f"{API}/{folder}?fields=id", json.dumps({"properties": {SHARE_PROP: "1"}}).encode(),
+                 sharing.JSON)
+    params = {"sendNotificationEmail": "true", "fields": "id"}
+    if message:
+        params["emailMessage"] = message[:500]
+    backup._call("POST", f"{API}/{folder}/permissions?" + urllib.parse.urlencode(params),
+                 json.dumps({"type": "user", "role": "writer", "emailAddress": email}).encode(), sharing.JSON)
+    me = sharing.my_email(backup)
+    db.set_setting("share_folder", folder)
+    db.set_setting("share_owner", me)
+    _set_tag(db, me)
+    db.log("share", "scout", None, f"AeonScout compartido con {email}")
+    return {"folder": folder, "email": email}
+
+
+def invitations(backup) -> list[dict]:
+    """AeonScout que otras cuentas compartieron conmigo: [{folder, owner, owner_email}]."""
+    import urllib.parse
+
+    from drive_backup import API, FOLDER_MIME
+    q = (f"sharedWithMe and mimeType='{FOLDER_MIME}' and trashed=false and "
+         f"properties has {{ key='{SHARE_PROP}' and value='1' }}")
+    res = backup._call("GET", f"{API}?" + urllib.parse.urlencode(
+        {"q": q, "fields": "files(id,name,owners(emailAddress,displayName))", "spaces": "drive", "pageSize": "20"}))
+    out = []
+    for f in res.get("files", []):
+        o = (f.get("owners") or [{}])[0]
+        out.append({"folder": f["id"], "owner": o.get("displayName") or o.get("emailAddress") or "",
+                    "owner_email": (o.get("emailAddress") or "").lower()})
+    return out
+
+
+def join(backup, inv: dict) -> int:
+    """Se une al AeonScout de otra persona: desde ahora se usa su carpeta. Lo de este teléfono
+    se le envía completo (registros y fotos se vuelven a subir a la carpeta común). Devuelve
+    cuántos registros quedan por enviar."""
+    import sharing
+    import sync
+    db = backup.db
+    db.set_setting("share_folder", inv["folder"])
+    db.set_setting("share_owner", inv.get("owner_email") or "")
+    db.set_setting("drive_folders", {})          # carpetas en caché: eran las de esta cuenta
+    db.execute("UPDATE drive_queue SET status='pending', attempts=0, drive_id=NULL, error='' "
+               "WHERE status IN ('done', 'move', 'error')")
+    db.execute("DELETE FROM sync_seen")
+    _set_tag(db, sharing.my_email(backup))
+    db.log("share", "scout", None, f"unido al AeonScout de {inv.get('owner', '')}")
+    return sync.mark_all(db)
+
+
+def leave(db) -> None:
+    """Deja de usar la carpeta común (lo ya sincronizado queda en este teléfono)."""
+    for k in ("share_folder", "share_owner", "scout_ni_tag"):
+        db.set_setting(k, None)
+    db.set_setting("drive_folders", {})
+    db.execute("DELETE FROM sync_seen")
+
+
+def _set_tag(db, email: str) -> None:
+    """Letra de la cuenta para las «No identificadas» (NI-004-J): la inicial del correo."""
+    m = re.match(r"[a-z]", (email or "").lower())
+    db.set_setting("scout_ni_tag", (m.group(0) if m else "x").upper())
+
+
+def is_shared(db) -> bool:
+    return bool(db.get_setting("share_folder"))

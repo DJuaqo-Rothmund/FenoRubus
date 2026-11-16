@@ -619,7 +619,11 @@ def accept(db, record_id: int, cand: dict) -> int:
     estadio si no tenía. Devuelve el id de la especie."""
     rec = db.get_record(record_id)
     section = rec["section"]
-    sid = cand.get("species_id") or catalog_id(db, section, cand["name"], cand["scientific"])
+    # Por nombre: el id guardado en el resultado puede ser de otro teléfono (AeonScout compartido).
+    sid = catalog_id(db, section, cand["name"], cand["scientific"])
+    if not sid and cand.get("species_id"):
+        sp = db.get_species(cand["species_id"])
+        sid = sp["id"] if sp and sp["section"] == section and sp["name"] == cand["name"] else None
     if not sid:
         g = scout_guide.find(section, cand["name"], cand["scientific"])
         kind = (g or {}).get("kind") or ("plaga" if section == "plagas" else "")

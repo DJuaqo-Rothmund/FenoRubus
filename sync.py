@@ -59,14 +59,22 @@ TABLES: dict[str, dict] = {
                      "natural": ("set_id", "path"), "local": ("queue_id",)},
     "yield_counts": {"uid": "lower(hex(randomblob(16)))", "fk": {"photo_id": "yield_photos"},
                      "natural": ("photo_id", "stage")},
+    # AeonScout (base propia, común a los cultivos; compartible con otra cuenta, ver scout.py).
+    "scout_species": {"uid": "lower(hex(randomblob(16)))", "fk": {}, "natural": ("section", "name")},
+    "scout_records": {"uid": "lower(hex(randomblob(16)))", "fk": {"species_id": "scout_species"},
+                      "natural": ()},
+    "scout_photos": {"uid": "lower(hex(randomblob(16)))", "fk": {"record_id": "scout_records"},
+                     "natural": ("record_id", "path"), "local": ("queue_id",)},
+    "scout_ai": {"uid": "lower(hex(randomblob(16)))", "fk": {"record_id": "scout_records"},
+                 "natural": ("record_id",)},
 }
 # Orden de aplicación: primero lo que otros referencian.
 ORDER = ["varieties", "sampling_weeks", "treatments", "measures", "observations", "photos",
          "variety_attachments", "measure_entries", "variety_metrics", "custom_fields",
          "notebook_entries", "notebook_photos", "weather_days", "yield_sets", "yield_photos",
-         "yield_counts"]
+         "yield_counts", "scout_species", "scout_records", "scout_photos", "scout_ai"]
 PATH_COLUMNS = {"photos": "path", "variety_attachments": "path", "measure_entries": "path",
-                "notebook_photos": "path", "yield_photos": "path"}
+                "notebook_photos": "path", "yield_photos": "path", "scout_photos": "path"}
 # Ajustes del ensayo que también viajan (semana de referencia, primera semana fijada…).
 SETTING_PREFIXES = ("season_start:", "first_week:", "treatment_", "trial_", "reportcfg", "share_")
 
@@ -130,6 +138,19 @@ def install(conn, settings_get=None, settings_set=None) -> None:
         conn.execute(
             f"CREATE TRIGGER sync_{table}_del AFTER DELETE ON {table} WHEN OLD.uid IS NOT NULL AND {quiet} "
             f"BEGIN " + mark("OLD.uid") + f"VALUES ('{table}', OLD.uid, {_NOW}, 1); END")
+
+
+def mark_all(db) -> int:
+    """Deja TODOS los registros sincronizables pendientes de enviar (p. ej. al unirse a una
+    carpeta compartida: la otra persona recibe la historia completa). Devuelve cuántos."""
+    n = 0
+    for table in ORDER:
+        cols = {r["name"] for r in db.query(f"PRAGMA table_info({table})")}
+        if "uid" not in cols:
+            continue
+        n += db.execute(f"INSERT OR REPLACE INTO sync_dirty(entity, uid, ts, deleted) "
+                        f"SELECT '{table}', uid, {_NOW}, 0 FROM {table} WHERE uid IS NOT NULL").rowcount
+    return n
 
 
 def device_id(db) -> str:
@@ -310,10 +331,31 @@ def _upsert(db, table, ch, data_dir, week_for_date, stats) -> bool:
     if table == "treatments":
         data["num"] = ch["data"]["num"]
     current = _local_id(db, table, ch["uid"])
-    if current is None and cfg["natural"]:
-        where = " AND ".join(f"{k} IS ?" for k in cfg["natural"])
+    natural = cfg["natural"]
+    if table == "scout_species" and data.get("unidentified"):
+        natural = ()                       # «NI-004» de otro equipo es OTRO ejemplar
+        if current is None and db.query_one("SELECT 1 FROM scout_species WHERE section=? AND name=?",
+                                            (data.get("section"), data.get("name"))):
+            data["name"] = f"{data.get('name')}-b"     # mismo código creado en los dos a la vez
+    if current is not None and table == "scout_photos":
+        # AeonScout: la foto cambió de nombre en el otro equipo (al identificar la especie):
+        # la de aquí se renombra igual en vez de volver a bajarla. (En otras tablas un nombre
+        # nuevo es otra versión: p. ej. la foto anotada del cuaderno.)
+        col = PATH_COLUMNS[table]
+        old = (db.query_one(f"SELECT {col} AS p FROM {table} WHERE {pk}=?", (current,)) or {}).get("p")
+        new = data.get(col)
+        if old and new and old != new and os.path.exists(old) and not os.path.exists(new):
+            try:
+                os.makedirs(os.path.dirname(new), exist_ok=True)
+                os.replace(old, new)
+                if new in stats["missing_files"]:
+                    stats["missing_files"].remove(new)
+            except OSError:
+                pass
+    if current is None and natural:
+        where = " AND ".join(f"{k} IS ?" for k in natural)
         row = db.query_one(f"SELECT {pk} AS id FROM {table} WHERE {where}",
-                           tuple(data.get(k) for k in cfg["natural"]))
+                           tuple(data.get(k) for k in natural))
         if row:                            # el mismo registro creado aquí: queda unificado
             current = row["id"]
             db.execute(f"DELETE FROM sync_dirty WHERE entity=? AND uid=(SELECT uid FROM {table} "
@@ -338,6 +380,10 @@ def _upsert(db, table, ch, data_dir, week_for_date, stats) -> bool:
                 if not hasattr(db, "observation_is_empty") or not db.observation_is_empty(other["id"]):
                     return False
                 db.execute("DELETE FROM observations WHERE id=?", (other["id"],))
+        if table == "scout_species" and "name" in data and db.query_one(
+                "SELECT 1 FROM scout_species WHERE section=? AND name=? AND id<>?",
+                (data.get("section"), data["name"], current)):
+            data.pop("name")              # aquí ese código ya lo usa otro ejemplar: queda el de aquí
         sets = ", ".join(f"{k}=?" for k in data if k != "num")
         vals = [v for k, v in data.items() if k != "num"]
         if sets:
