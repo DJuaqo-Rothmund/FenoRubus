@@ -117,3 +117,27 @@ def test_measure_photo_named_with_treatment_and_caption(tmp_path):
     store.put(old.name, {"w": 1, "h": 1, "boxes": [_box("flor")]})
     assert store.rename(old.name, os.path.basename(new))
     assert tl.counts(store.get(os.path.basename(new))) == {"flor": 1} and not tl.is_marked(store.get(old.name))
+
+
+def test_counts_to_table(tmp_path):
+    tl.set_crop("frambuesa")
+    db = Database(str(tmp_path / "t.sqlite3"))
+    m = db.add_measure("Laterales flores", kind="images")
+    w = db.week_for_date(dt.date(2026, 11, 9))
+    vid = db.add_variety("T2R1")
+    db.add_entry(m, w["id"], vid, path=str(tmp_path / "a.jpg"), caption="Medio 3")
+    db.add_entry(m, w["id"], path=str(tmp_path / "b.jpg"))                       # sin contar: no pasa
+    labels = {"a.jpg": {"boxes": [_box("boton"), _box("boton"), _box("flor")]}}
+    tid, n = db.counts_to_table(m, w["id"], labels)
+    t = db.get_measure(tid)
+    assert n == 1 and t["name"] == "Laterales flores · conteos" and t["kind"] == "table"
+    assert t["columns"] == ["Foto", "Descripción", "Botón", "Flor", "Total estructuras"]
+    rows = db.list_entries(tid, week_id=w["id"])
+    assert len(rows) == 1 and rows[0]["variety_id"] == vid
+    assert rows[0]["data"] == {"Foto": "a.jpg", "Descripción": "Medio 3", "Botón": 2, "Flor": 1, "Total estructuras": 3}
+    # Se vuelve a contar (aparece un fruto): la misma fila se actualiza y se agrega la columna.
+    labels["a.jpg"]["boxes"].append(_box("fruto_verde"))
+    assert db.counts_to_table(m, w["id"], labels) == (tid, 1)
+    rows = db.list_entries(tid, week_id=w["id"])
+    assert len(rows) == 1 and rows[0]["data"]["Fruto verde"] == 1 and rows[0]["data"]["Total estructuras"] == 4
+    assert db.get_measure(tid)["columns"][-1] == "Fruto verde"

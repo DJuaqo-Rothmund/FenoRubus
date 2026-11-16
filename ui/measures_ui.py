@@ -266,6 +266,16 @@ class MeasureScreen(MDScreen):
                                                    on_release=lambda *_: self.add_images("camera")))
             actions.add_widget(Factory.GhostButton(icon="image-multiple-outline", text="Desde galería",
                                                    on_release=lambda *_: self.add_images("gallery")))
+        # «Pasar conteos a una planilla»: solo en registros de imágenes (encima de Exportar).
+        tt = getattr(self, "_to_table", None)
+        if tt is None:
+            tt = self._to_table = Factory.GhostButton(icon="table-arrow-right", text="Pasar conteos a una planilla",
+                                                      on_release=lambda *_: self.counts_to_table())
+        if tt.parent is not None:
+            tt.parent.remove_widget(tt)
+        if self.measure["kind"] != "table":
+            box = self.ids.excel_btn.parent
+            box.add_widget(tt, index=box.children.index(self.ids.excel_btn) + 1)
         self.refresh()
 
     def refresh(self):
@@ -677,6 +687,35 @@ class MeasureScreen(MDScreen):
             camera_burst.burst(done, base, exact=True, title=f"Medición\n{measure['name']}")
         else:
             a.media.pick_images(done)
+
+    # ------------------------------------------------- conteos -> planilla
+    def counts_to_table(self):
+        """Los conteos con cajas de las fotos de esta semana a una medición de planilla (una fila
+        por foto, con su tratamiento): la nueva «<medición> · conteos» o una que ya exista."""
+        a = app()
+        from ui import boxes
+        tables = [m for m in a.db.list_measures() if m["kind"] == "table"]
+        auto = f"{self.measure['name']} · conteos"
+
+        def go(table_id):
+            try:
+                tid, n = a.db.counts_to_table(self.measure["id"], self.week["id"], boxes.store().data["photos"],
+                                              table_id)
+            except Exception as exc:  # noqa: BLE001
+                a.toast(f"No se pudo: {exc}")
+                return
+            if not n:
+                a.toast("Ninguna foto de esta semana tiene conteo: use «Contar» en cada foto primero.")
+                return
+            a.toast(f"{n} fila(s) en «{a.db.get_measure(tid)['name']}»")
+            a.open_measure(tid, self.week["id"])
+        items = [(auto, "Nueva planilla (o la ya creada)" if not any(m["name"] == auto for m in tables)
+                  else "La de los conteos (se actualiza)", lambda: go(None))]
+        items += [(m["name"], "Planilla existente: se agregan las columnas que falten", lambda m=m: go(m["id"]))
+                  for m in tables if m["name"] != auto]
+        pick_dialog("Pasar los conteos a una planilla", items,
+                    subtitle="Una fila por foto de esta semana, con su tratamiento, descripción y cada estructura. "
+                             "Si la vuelve a pasar, las filas se actualizan.")
 
     # ------------------------------------------------- contar estructuras
     def count_entry(self, entry: dict):

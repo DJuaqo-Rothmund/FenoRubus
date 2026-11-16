@@ -1114,8 +1114,10 @@ function renderMeasureBody() {
     const head = document.createElement("div");
     head.className = "photohead";
     head.innerHTML = `<span class="muted small">Arrastre fotos aquí o use «Subir fotos»; luego agregue la descripción y, si corresponde, la variedad.</span><span class="spacer"></span>
+      <button type="button" class="ghost" id="mtotable" title="Una fila por foto de esta semana con su tratamiento, descripción y cada estructura contada">📋 Conteos a planilla</button>
       <label class="ghost upload">＋ Subir fotos<input id="mfiles" type="file" accept="image/*" multiple hidden></label>`;
     box.appendChild(head);
+    $("mtotable").onclick = () => countsToTable().catch((er) => { $("mmsg").textContent = `No se pudo: ${er.message}`; });
     const grid = document.createElement("div");
     grid.className = "mimgs";
     const live = M.rows.filter((r) => !r.gone);
@@ -1163,6 +1165,48 @@ function renderMeasureBody() {
       catch (er) { $("mmsg").textContent = `No se pudieron subir: ${er.message}`; }
     }, { click: false, msg: "mmsg" });
   }
+}
+
+// Conteos con cajas de las fotos de esta semana -> planilla «<medición> · conteos» (= Database.counts_to_table):
+// una fila por foto con su tratamiento/variedad; si se vuelve a pasar, se actualiza la fila de esa foto.
+async function countsToTable() {
+  const M = S.meas;
+  await TR.ensureLabels(CROP);
+  const classes = TR.cropClasses(CROP);
+  const rows = [];
+  for (const r of M.rows.filter((x) => !x.gone && x.e && x.e.path)) {
+    const name = base(r.e.path);
+    const n = TR.countsOf(name);
+    if (n) rows.push({ r, name, n });
+  }
+  if (!rows.length) { $("mmsg").textContent = "Ninguna foto de esta semana tiene conteo: use «Contar estructuras» primero."; return; }
+  const keys = classes.map(([k]) => k).filter((k) => rows.some((x) => x.n[k]));
+  const nameOf = Object.fromEntries(classes.map(([k, n]) => [k, n]));
+  const want = ["Foto", "Descripción", ...keys.map((k) => nameOf[k]), "Total estructuras"];
+  const tname = `${M.m.name} · conteos`;
+  let t = C.measures(S.state).find((m) => m.kind === "table" && m.name === tname);
+  const changes = [...C.weekChange(S.state, S.week)];
+  if (!t) {
+    const order = Math.max(0, ...C.measures(S.state).map((m) => Number(m.sort_order) || 0)) + 1;
+    const ch = C.measureChange(null, { name: tname, kind: "table", sort_order: order, columns: want });
+    changes.push(ch);
+    t = { uid: ch.uid, columns: want };
+  } else {
+    const missing = want.filter((c) => !t.columns.includes(c));
+    if (missing.length) changes.push(C.measureChange(t, { columns: [...t.columns, ...missing] }));
+  }
+  const mine = new Map(C.entriesFor(S.state, t.uid, S.week).map((e) => [e.data.Foto, e]));
+  for (const { r, name, n } of rows) {
+    const data = { Foto: name, "Descripción": r.caption || "" };
+    for (const k of keys) data[nameOf[k]] = n[k] || 0;
+    data["Total estructuras"] = Object.values(n).reduce((a, b) => a + b, 0);
+    const cur = mine.get(name);
+    changes.push(C.entryChange({ ...(cur || {}), measure_id: t.uid, week_id: S.week, variety_id: r.variety_id || null,
+      caption: "", data: { ...(cur ? cur.data : {}), ...data } }));
+  }
+  await send(changes);
+  $("mmsg").textContent = `${rows.length} fila(s) en la planilla «${tname}» (se ve en Mediciones; llega a la app al sincronizar).`;
+  render();
 }
 
 async function addMeasureImages(files) {
