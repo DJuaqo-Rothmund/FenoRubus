@@ -75,3 +75,15 @@ def test_web_box_ai_matches_app(tmp_path):
     assert out["p"] == box_ai.prompt(tl.CLASSES, "arándano")
     assert out["b"] == box_ai.to_boxes(raw, [k for k, _n, _c in tl.CLASSES])
     tl.set_crop("frambuesa")
+
+
+def test_measure_photos_listed_in_iaplus(tmp_path):
+    db = Database(str(tmp_path / "t.sqlite3"))
+    db.workspace = {"code": "NV", "name": "Nuevas variedades"}
+    m = db.add_measure("Racimos", kind="images")
+    w = db.week_for_date(dt.date(2026, 11, 16))
+    db.add_entry(m, w["id"], path=str(tmp_path / "20261116-NV-racimos.jpg"), caption="Caña 1")
+    db.add_entry(m, w["id"], data={"x": 1})                              # fila sin foto: no
+    got = tl.measure_photos([db])
+    assert [(p["name"], p["code"], p["variety"], p["week"][:10]) for p in got] == [
+        ("20261116-NV-racimos.jpg", "NV", "Medición Racimos · Caña 1", "2026-11-16")]

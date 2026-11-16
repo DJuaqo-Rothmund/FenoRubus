@@ -39,7 +39,8 @@ from kivy.uix.widget import Widget
 from kivymd.app import MDApp
 from kivymd.uix.screen import MDScreen
 
-from training_labels import CLASSES, COLORS, GOAL, NAMES, LabelStore, detail_photos, is_marked
+from training_labels import (CLASSES, COLORS, GOAL, NAMES, LabelStore, detail_photos, is_marked,
+                             measure_photos)
 from ui.theme import c
 
 PAGE = 60                     # miniaturas por tanda («Ver más» agrega otras tantas)
@@ -365,7 +366,8 @@ class BoxesScreen(MDScreen):
 
     # ------------------------------------------------------------ datos
     def refresh(self):
-        self.photos = detail_photos(app().all_dbs()) + yield_items() + extra_items()
+        dbs = app().all_dbs()
+        self.photos = detail_photos(dbs) + measure_photos(dbs) + yield_items() + extra_items()
         self._header()
         self._grid()
 

@@ -184,6 +184,16 @@ function detailPhotos(states) {
         variety: C.unitMain(v) || v.name || "" });
     }
   }
+  // Fotos de las mediciones (registro de imágenes): lo contado con cajas también entrena.
+  for (const { ws, state } of states) {
+    const ms = new Map(C.rows(state, "measures").map((m) => [m.uid, m]));
+    for (const e of C.rows(state, "measure_entries")) {
+      if (!e.path) continue;
+      const m = ms.get(e.measure_id) || {};
+      out.push({ ...e, name: base(e.path), code: ws.code, wsName: ws.name || ws.code, week: e.week_id || "",
+        variety: [`Medición ${m.name || ""}`.trim(), e.caption].filter(Boolean).join(" · "), measure: true });
+    }
+  }
   const seen = new Set();        // la misma foto no se repite (mismo nombre de archivo)
   return out.filter((p) => !seen.has(p.name) && seen.add(p.name))
     .sort((a, b) => (b.week || "").localeCompare(a.week || "") || a.name.localeCompare(b.name));

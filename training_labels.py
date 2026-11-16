@@ -214,3 +214,30 @@ def detail_photos(dbs) -> list[dict]:
                         "exists": os.path.exists(r["path"])})
     out.sort(key=lambda p: (p["week"], p["name"]), reverse=True)
     return out
+
+
+def measure_photos(dbs) -> list[dict]:
+    """Fotos de las mediciones (registro de imágenes) de todos los ensayos/predios: lo que se
+    cuenta con cajas en ellas («Contar estructuras») también entrena el detector, así que
+    aparecen en IA+ como las de detalle. Misma forma que detail_photos."""
+    out, seen = [], set()
+    for db in dbs:
+        ws = getattr(db, "workspace", None) or {}
+        try:
+            rows = db.query(
+                "SELECT e.path, e.caption, m.name AS measure, w.start_date AS week FROM measure_entries e "
+                "JOIN measures m ON m.id = e.measure_id JOIN sampling_weeks w ON w.id = e.week_id "
+                "WHERE e.path IS NOT NULL AND e.path <> ''")
+        except Exception:  # noqa: BLE001 (base sin mediciones)
+            continue
+        for r in rows:
+            name = os.path.basename(r["path"])
+            if name in seen:
+                continue
+            seen.add(name)
+            out.append({"name": name, "path": r["path"], "code": ws.get("code", ""),
+                        "ws": ws.get("name") or ws.get("code", ""),
+                        "variety": " · ".join(x for x in (f"Medición {r['measure']}", r["caption"]) if x),
+                        "week": r["week"] or "", "exists": os.path.exists(r["path"]), "measure": True})
+    out.sort(key=lambda p: (p["week"], p["name"]), reverse=True)
+    return out
