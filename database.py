@@ -1479,6 +1479,69 @@ class Database:
              json.dumps(data or {}, ensure_ascii=False), _now()))
         return cur.lastrowid
 
+    # ------------------------------------------------------- nombre de las fotos de mediciones
+    def measure_photo_base(self, entry: dict) -> str | None:
+        """Nombre (sin .jpg) que le corresponde a la foto de una medición: fecha, código, medición,
+        tratamiento (o variedad) y la descripción, todo junto: «20261109-AUF-laterales-flores-
+        23-kg-ha-medio-3». None si la foto no tiene ni tratamiento ni descripción (queda como
+        está: «…-laterales-flores-30»)."""
+        from platform_utils import slugify
+        m = self.get_measure(entry["measure_id"])
+        week = self.get_week(entry["week_id"])
+        if not m or not week:
+            return None
+        extra = []
+        if entry.get("variety_id"):
+            v = self.query_one("SELECT * FROM varieties WHERE id=?", (entry["variety_id"],))
+            if v:
+                title, _tag = self.parcel_labels(v, self.treatment_names())
+                extra.append(slugify(title)[:30])
+        if (entry.get("caption") or "").strip():
+            extra.append(slugify(entry["caption"])[:40])
+        extra = [x for x in extra if x and x != "informe"]
+        if not extra:
+            return None
+        code = f"{self.code}-" if getattr(self, "code", "") else ""
+        stem = f"{ph.photo_date(week['start_date'])}-{code}{slugify(m['name'])[:40] or 'medicion'}"
+        return "-".join([stem] + extra)
+
+    def rename_measure_photo(self, entry_id: int) -> tuple[str, str] | None:
+        """Pone a la foto de la medición su nombre con tratamiento y descripción (archivo, registro y
+        cola de Drive; lo ya subido se renombra en Drive al respaldar: «week_moves_drive»).
+        Devuelve (nombre anterior, nombre nuevo) o None si no cambió."""
+        e = self.query_one("SELECT * FROM measure_entries WHERE id=?", (entry_id,))
+        if not e or not e["path"]:
+            return None
+        base = self.measure_photo_base(e)
+        old = e["path"]
+        if not base or not os.path.exists(old):
+            return None
+        folder = os.path.dirname(old)
+        if os.path.splitext(os.path.basename(old))[0] in (base, *(f"{base}-{n}" for n in range(2, 100))):
+            return None                                   # ya tiene su nombre
+        n, new = 1, os.path.join(folder, f"{base}.jpg")
+        while os.path.exists(new):
+            n += 1
+            new = os.path.join(folder, f"{base}-{n}.jpg")
+        os.rename(old, new)
+        old_name, new_name = os.path.basename(old), os.path.basename(new)
+        self.execute("UPDATE measure_entries SET path=? WHERE id=?", (new, entry_id))
+        for q in self.query("SELECT * FROM drive_queue WHERE path=?", (old,)):
+            name = q["name"] or ""
+            if name.endswith(old_name):
+                name = name[: -len(old_name)] + new_name
+            self.execute("UPDATE drive_queue SET path=?, name=? WHERE id=?", (new, name, q["id"]))
+        if self.query_one("SELECT 1 FROM drive_queue WHERE path=? AND status<>'pending'", (new,)) or \
+                not self.query_one("SELECT 1 FROM drive_queue WHERE path=?", (new,)):
+            week = self.get_week(e["week_id"])
+            m = self.get_measure(e["measure_id"])
+            todo = [x for x in (self.get_setting("week_moves_drive") or []) if isinstance(x, dict)]
+            todo.append({"path": new, "old": old_name, "src": week["start_date"], "dst": week["start_date"],
+                         "sub": (m or {}).get("name", "")})
+            self.set_setting("week_moves_drive", todo)
+        self.log("update", "measure_entries", entry_id, f"foto: {old_name} -> {new_name}")
+        return old_name, new_name
+
     def update_entry(self, entry_id: int, **fields) -> None:
         allowed = {"variety_id", "caption", "data"}
         sets, vals = [], []

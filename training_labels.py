@@ -162,6 +162,21 @@ class LabelStore:
         self.dirty = True
         self.save_local()
 
+    def rename(self, old: str, new: str) -> bool:
+        """La foto cambió de nombre (p. ej. foto de medición con su tratamiento): sus cajas pasan
+        al nombre nuevo; el anterior queda vacío y más reciente (así al juntar con Drive no
+        vuelve ni cuenta dos veces)."""
+        rec = self.data["photos"].get(old)
+        if not rec or old == new:
+            return False
+        ts = now_ts()
+        self.data["photos"][new] = dict(rec, ts=ts)
+        self.data["photos"][old] = {"w": rec.get("w", 0), "h": rec.get("h", 0), "boxes": [], "empty": False,
+                                    "ts": ts, "moved": new}
+        self.dirty = True
+        self.save_local()
+        return True
+
     def totals(self) -> dict[str, int]:
         out = {k: 0 for k, _, _ in CLASSES}
         for rec in self.data["photos"].values():

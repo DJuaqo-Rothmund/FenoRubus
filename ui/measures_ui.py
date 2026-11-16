@@ -182,6 +182,40 @@ SHEET_CELL, SHEET_INK = "#FFFFFF", "#1B2A23"         # celdas
 SHEET_FIRST_FG = "#1E5A45"                           # 1.ª columna (tratamiento / variedad)
 
 
+def rename_entry_photo(entry_id: int) -> None:
+    """Foto de medición con su nombre nuevo (tratamiento + descripción): archivo, marcas de
+    cajas (IA+) y, al respaldar, Drive."""
+    a = app()
+    try:
+        got = a.db.rename_measure_photo(entry_id)
+    except OSError as exc:
+        a.toast(f"No se pudo renombrar la foto: {exc}")
+        return
+    if got:
+        from ui import boxes
+        if boxes.store().rename(*got):
+            boxes.sync_now()
+
+
+def rename_all_photos(db) -> int:
+    """Una vez por ensayo: las fotos de mediciones que ya tenían tratamiento o descripción toman
+    su nombre nuevo (antes «…-30.jpg»)."""
+    if db.get_setting("measure_names_v1"):
+        return 0
+    n = 0
+    for r in db.query("SELECT id FROM measure_entries WHERE path IS NOT NULL AND path <> ''"):
+        got = db.rename_measure_photo(r["id"])
+        if got:
+            n += 1
+            try:
+                from ui import boxes
+                boxes.store().rename(*got)
+            except Exception:  # noqa: BLE001
+                pass
+    db.set_setting("measure_names_v1", True)
+    return n
+
+
 def _cell_button(text, width, bold=False, bg=None, fg=None, on_release=None):
     """Celda-botón de la grilla (encabezados, n.º de fila, variedad). Un texto en dos
     líneas va más chico y sin cortar."""
@@ -206,6 +240,13 @@ class MeasureScreen(MDScreen):
         self.measure = a.db.get_measure(measure_id)
         self.week = a.db.get_week(week_id)
         self.ids.bar.title = self.measure["name"]
+        try:
+            rename_all_photos(a.db)               # una vez: nombres con tratamiento y descripción
+            for e in a.db.list_entries(measure_id, week_id=week_id):   # lo cambiado en la web u otro equipo
+                if e["path"]:
+                    rename_entry_photo(e["id"])
+        except Exception as exc:  # noqa: BLE001 (nunca impide abrir la medición)
+            print("renombrar fotos de mediciones:", exc)
         kind = "PLANILLA DE DATOS" if self.measure["kind"] == "table" else "REGISTRO DE IMÁGENES"
         self.ids.kicker.text = f"{kind} · {ph.week_title(self.week).upper()}"
         self.ids.columns_text.text = (
@@ -571,6 +612,7 @@ class MeasureScreen(MDScreen):
 
         def ok(_f):
             a.db.update_entry(entry["id"], caption=caption.text, variety_id=state["variety_id"])
+            rename_entry_photo(entry["id"])        # nombre con tratamiento y descripción
             self.refresh()
 
         form_dialog("Foto", form, ok)

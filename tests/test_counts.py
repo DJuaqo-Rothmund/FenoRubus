@@ -87,3 +87,33 @@ def test_measure_photos_listed_in_iaplus(tmp_path):
     got = tl.measure_photos([db])
     assert [(p["name"], p["code"], p["variety"], p["week"][:10]) for p in got] == [
         ("20261116-NV-racimos.jpg", "NV", "Medición Racimos · Caña 1", "2026-11-16")]
+
+
+def test_measure_photo_named_with_treatment_and_caption(tmp_path):
+    db = Database(str(tmp_path / "t.sqlite3"))
+    db.code = "AUF"
+    m = db.add_measure("Laterales flores", kind="images")
+    w = db.week_for_date(dt.date(2026, 11, 9))
+    vid = db.add_variety("T2R1")
+    db.execute("UPDATE varieties SET treatment=2 WHERE id=?", (vid,))
+    db.execute("INSERT OR REPLACE INTO treatments(num, name) VALUES (2, '23 kg/ha')")
+    old = tmp_path / "20261109-AUF-laterales-flores-30.jpg"
+    old.write_bytes(b"x")
+    e = db.add_entry(m, w["id"], path=str(old))
+    db.execute("INSERT INTO drive_queue(photo_id, path, name, status, drive_id, created_at) VALUES "
+               "(NULL, ?, ?, 'done', 'f1', 'x')", (str(old), "Año 2026/Semana 45/Laterales flores/" + old.name))
+    assert db.rename_measure_photo(e) is None                        # sin tratamiento ni descripción
+    db.update_entry(e, caption="Medio 3", variety_id=vid)
+    assert db.rename_measure_photo(e) == ("20261109-AUF-laterales-flores-30.jpg",
+                                          "20261109-AUF-laterales-flores-23-kg-ha-medio-3.jpg")
+    new = db.query_one("SELECT path FROM measure_entries WHERE id=?", (e,))["path"]
+    assert os.path.exists(new) and not old.exists()
+    q = db.query_one("SELECT * FROM drive_queue")
+    assert q["path"] == new and q["name"].endswith("23-kg-ha-medio-3.jpg")
+    assert db.get_setting("week_moves_drive")[-1]["old"] == old.name          # se renombra en Drive
+    assert db.rename_measure_photo(e) is None                                # ya está
+    # Las cajas de IA+ pasan al nombre nuevo y el anterior deja de contar.
+    store = tl.LabelStore(str(tmp_path))
+    store.put(old.name, {"w": 1, "h": 1, "boxes": [_box("flor")]})
+    assert store.rename(old.name, os.path.basename(new))
+    assert tl.counts(store.get(os.path.basename(new))) == {"flor": 1} and not tl.is_marked(store.get(old.name))
