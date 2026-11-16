@@ -11,6 +11,7 @@ import { warm as warmPdf, makePdf, py as callPy } from "./pdf.js";
 import { weekCompleted } from "./celebrate.js";
 import { photoHeat, pickPoint, sectorMap } from "./maps.js";
 import * as SC from "./scout.js";
+import * as YD from "./yield.js";
 
 const SCOPE = "https://www.googleapis.com/auth/drive.file";
 const API = "https://www.googleapis.com/drive/v3/files";
@@ -2325,10 +2326,11 @@ async function boot() {
   document.querySelectorAll(".tabs button").forEach((b) => (b.onclick = () => {
     S.tab = b.dataset.tab;
     document.querySelectorAll(".tabs button").forEach((x) => x.classList.toggle("on", x === b));
-    for (const t of ["sampling", "matrix", "notebook", "reports", "settings"]) $(`tab-${t}`).hidden = t !== S.tab;
+    for (const t of ["sampling", "matrix", "notebook", "yield", "reports", "settings"]) $(`tab-${t}`).hidden = t !== S.tab;
     if (S.tab === "reports") warmPdf().catch(() => {});     // el generador de PDF se precarga
     render();
     if (S.tab === "reports") renderWeather();
+    if (S.tab === "yield") YD.load().catch((e) => { $("ymsg").textContent = e.message; });
   }));
   $("season").onchange = (e) => { goSeason(Number(e.target.value)); render(); };
   $("mseason").onchange = (e) => { S.mSeason = Number(e.target.value); S.mMonth = null; renderMatrix(); };
@@ -2375,6 +2377,8 @@ async function boot() {
   $("extrapick").onchange = extraPicked;
   $("today").onclick = () => { S.week = C.iso(C.mondayOf(C.todayUTC())); render(); };
   NB.init({ S, send, photoUrl, resize, uploadPhoto: uploadNotePhoto });
+  YD.init({ list, folder, moduleRoot, upload, download, cacheGet, cachePut, pool, photoUrl, mapFor, sectorMap,
+    crop: () => CROP, classes: () => TR.cropClasses(CROP), device: () => S.device });
   $("aifabs").hidden = !TR.enabled();
   document.body.classList.toggle("withfabs", TR.enabled());      // se activa abriendo la web con «#lab» una vez
   TR.init({ S, photoUrl, loadLabels, saveLabels, cachedLabels: () => cacheGet(trainKey()), allStates, extraList, extraUrl, extraUpload, yieldList,

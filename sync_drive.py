@@ -29,7 +29,7 @@ from concurrent.futures import ThreadPoolExecutor
 
 import perf
 import sync
-from drive_backup import API, UPLOAD, DriveError
+from drive_backup import API, UPLOAD, DriveError, Offline
 
 SYNC_FOLDER = "Sincronización"
 MAX_DOWNLOADS = 200         # fotos por sincronización automática (la manual las baja todas)
@@ -391,11 +391,36 @@ class DriveSync:
                 total["pending_photos"] += left
             else:
                 total["pending_photos"] += self.pending_count(db)
+        if not only:
+            try:
+                with perf.timed("sync.rendimiento"):
+                    self._sync_yields(manual, total)
+            except Exception as exc:  # noqa: BLE001 (no detiene la sincronización de los ensayos)
+                if isinstance(exc, Offline):
+                    raise
+                print("sincronización de rendimiento:", exc)
         d = perf.since(before)
         perf.note("sync.resumen", f"{len(wss)} ensayos · " + " · ".join(
             f"{k}: {round(v)}" for k, v in sorted(d.items()) if k.startswith(("drive.", "sql."))))
         perf.flush()
         return total
+
+    def _sync_yields(self, manual: bool, total: dict) -> None:
+        """Estimaciones de rendimiento del cultivo: sus paquetes van a
+        «<módulo>/Estimaciones de rendimiento/Sincronización» (los lee la web y el otro equipo);
+        las fotos que lleguen se bajan como las de los ensayos."""
+        import rendimiento
+        crop = getattr(self.drive, "crop", None)
+        db = rendimiento.open_db(self.data_dir, getattr(crop, "id", "frambuesa"))
+        base = self.drive._folder(rendimiento.DRIVE_DIR, self.drive.root_id())
+        folder = self.drive._folder(rendimiento.SYNC_DIR, base)
+        res = self.sync_db(db, folder)
+        for k in ("received", "sent", "applied"):
+            total[k] += res[k]
+        if self.photos_allowed():
+            got, left = self.fetch_missing(db, None if manual else MAX_DOWNLOADS)
+            total["downloaded"] += got
+            total["pending_photos"] += left
 
     def _backup_photos(self, db, manual: bool = False, progress=None, quick: bool = False) -> tuple[int, int]:
         """Respaldo de las fotos de ESTE ensayo o predio (no solo del abierto): ordena en Drive

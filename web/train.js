@@ -24,6 +24,7 @@ const CROP_CLASSES = {
     ["fruto_verde", "Fruto verde", "#2E7D32"], ["fruto_pinton", "Fruto blush", "#FB8C00"],
     ["fruto_maduro", "Fruto rojo (maduro)", "#B71C1C"]],
 };
+export const cropClasses = (mod) => CROP_CLASSES[mod] || CROP_CLASSES.PhenoRubus;
 const CROP_NAMES = { PhenoRubus: "Frambuesa", PhenoBlue: "Arándano", PhenoCran: "Cranberry" };
 export const CLASSES = [...CROP_CLASSES.PhenoRubus];
 const COLOR = {}, NAME = {};

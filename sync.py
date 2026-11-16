@@ -53,13 +53,20 @@ TABLES: dict[str, dict] = {
     "custom_fields": {"uid": "lower(hex(randomblob(16)))", "fk": {"variety_id": "varieties"},
                       "natural": ("variety_id", "season", "key")},
     "weather_days": {"uid": "NEW.day", "fk": {}, "natural": ("day",)},
+    # Estimaciones de rendimiento (base propia por cultivo, ver rendimiento.py).
+    "yield_sets": {"uid": "lower(hex(randomblob(16)))", "fk": {}, "natural": ()},
+    "yield_photos": {"uid": "lower(hex(randomblob(16)))", "fk": {"set_id": "yield_sets"},
+                     "natural": ("set_id", "path"), "local": ("queue_id",)},
+    "yield_counts": {"uid": "lower(hex(randomblob(16)))", "fk": {"photo_id": "yield_photos"},
+                     "natural": ("photo_id", "stage")},
 }
 # Orden de aplicación: primero lo que otros referencian.
 ORDER = ["varieties", "sampling_weeks", "treatments", "measures", "observations", "photos",
          "variety_attachments", "measure_entries", "variety_metrics", "custom_fields",
-         "notebook_entries", "notebook_photos", "weather_days"]
+         "notebook_entries", "notebook_photos", "weather_days", "yield_sets", "yield_photos",
+         "yield_counts"]
 PATH_COLUMNS = {"photos": "path", "variety_attachments": "path", "measure_entries": "path",
-                "notebook_photos": "path"}
+                "notebook_photos": "path", "yield_photos": "path"}
 # Ajustes del ensayo que también viajan (semana de referencia, primera semana fijada…).
 SETTING_PREFIXES = ("season_start:", "first_week:", "treatment_", "trial_", "reportcfg", "share_")
 
@@ -68,6 +75,11 @@ _NOW = "strftime('%Y-%m-%dT%H:%M:%f', 'now')"
 
 def _pk(table: str) -> str:
     return TABLES[table].get("pk", "id")
+
+
+def _local_cols(table: str) -> tuple:
+    """Columnas que solo valen en este equipo (id de su cola de Drive): no viajan."""
+    return ("id", "uid") + tuple(TABLES[table].get("local", ()))
 
 
 def _now() -> str:
@@ -156,7 +168,7 @@ def export_changes(db, data_dir: str, settings: dict | None = None) -> dict:
         if row is None:
             changes.append({"entity": table, "uid": d["uid"], "ts": d["ts"], "deleted": 1})
             continue
-        data = {k: v for k, v in row.items() if k not in ("id", "uid")}
+        data = {k: v for k, v in row.items() if k not in _local_cols(table)}
         for col, ref in TABLES[table]["fk"].items():
             data[col] = uid_of(ref, data.get(col))
         if table in PATH_COLUMNS:
@@ -181,7 +193,7 @@ def export_all(db, data_dir: str) -> dict:
         if not cols or "uid" not in cols:
             continue
         for row in db.query(f"SELECT * FROM {table} WHERE uid IS NOT NULL"):
-            data = {k: v for k, v in row.items() if k not in ("id", "uid")}
+            data = {k: v for k, v in row.items() if k not in _local_cols(table)}
             for col, ref in TABLES[table]["fk"].items():
                 data[col] = uid_of(ref, data.get(col))
             if table in PATH_COLUMNS:
@@ -294,7 +306,7 @@ def _upsert(db, table, ch, data_dir, week_for_date, stats) -> bool:
     if table == "sampling_weeks":
         return _upsert_week(db, ch, data, week_for_date)
     cols = {r["name"] for r in db.query(f"PRAGMA table_info({table})")}
-    data = {k: v for k, v in data.items() if k in cols and k not in (pk, "uid")}
+    data = {k: v for k, v in data.items() if k in cols and k not in (pk,) + _local_cols(table)}
     if table == "treatments":
         data["num"] = ch["data"]["num"]
     current = _local_id(db, table, ch["uid"])

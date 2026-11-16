@@ -401,12 +401,8 @@ class FenoRubusApp(MDApp):
         """Base de las estimaciones de rendimiento del cultivo abierto."""
         import crops
         from platform_utils import get_data_dir
-        cid = crops.current().id
-        cache = self.__dict__.setdefault("_yield_dbs", {})
-        if cid not in cache:
-            from rendimiento import YieldDB
-            cache[cid] = YieldDB(get_data_dir(), cid)
-        return cache[cid]
+        import rendimiento
+        return rendimiento.open_db(get_data_dir(), crops.current().id)
 
     def yield_backup(self, manual: bool = False) -> None:
         """Sube a «AeonCrop/<módulo>/Estimaciones de rendimiento» lo pendiente (en segundo plano)."""

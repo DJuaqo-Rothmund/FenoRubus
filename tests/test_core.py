@@ -1992,7 +1992,7 @@ def test_drive_sync_many_photos_batched_and_parallel(tmp_path):
     finally:
         sync_drive.MAX_DOWNLOADS = monkey_limit
     assert r["received"] >= 12 and r["downloaded"] == 50 and r["pending_photos"] == 40
-    assert fake.queries < 15                # 3 consultas de fotos, no 90
+    assert fake.queries < 18                # 3 consultas de fotos, no 90 (+3 de rendimiento)
     r = pc.run(manual=True)                 # «Sincronizar»: el resto de una vez
     assert r["downloaded"] == 40 and r["pending_photos"] == 0
     for k, name in enumerate(names):

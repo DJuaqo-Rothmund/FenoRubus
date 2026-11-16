@@ -65,6 +65,7 @@
       <button data-tab="sampling" class="on">Muestreo</button>
       <button data-tab="matrix">Matriz</button>
       <button data-tab="notebook">Cuaderno</button>
+      <button data-tab="yield">Rendimiento</button>
       <button data-tab="reports">Informes</button>
       <button data-tab="settings">Ajustes</button>
     </nav>
@@ -129,6 +130,24 @@
       </section>
       <p id="nbempty" class="muted nbempty">Aún no hay páginas. Anote aquí lo que vea en terreno cada día.</p>
       <section id="nblist" class="rows"></section>
+    </div>
+
+    <div id="tab-yield" hidden>
+      <section class="card yhead">
+        <div class="grow"><div class="label">ESTIMACIONES DE RENDIMIENTO</div>
+          <div class="muted small">Las que se toman en la app (Rendimiento): resultados, fotos con sus conteos y el mapa por sector.
+            Toque una para ver sus fotos y corregir conteos o parámetros.</div></div>
+        <select id="yplace" class="chip" aria-label="Lugar"></select>
+        <button id="ycsv" class="ghost">⬇ Planilla</button>
+        <button id="yreload" class="ghost">↻ Actualizar</button>
+      </section>
+      <p id="ymsg" class="muted small"></p>
+      <section class="card"><div id="ylist"></div></section>
+      <section id="ymapcard" class="card" hidden>
+        <div class="row-h"><div class="label" id="ymaptitle">MAPA</div><div id="ylegend" class="ylegend small"></div></div>
+        <div id="ymap" class="hmap"></div>
+        <div id="ymapinfo" class="mapinfo"></div>
+      </section>
     </div>
 
     <div id="tab-reports" hidden>
@@ -543,5 +562,17 @@
   <dialog id="viewer"><img id="vimg" alt=""><form method="dialog"><button class="round">✕</button></form></dialog>
 
   <script type="module" src="app.js"></script>
+<dialog id="ydlg" class="ydlg">
+  <div class="detail">
+    <div class="dhead"><div><h2 id="ydtitle"></h2><div id="ydsub" class="muted small"></div></div>
+      <button id="ydclose" class="round" aria-label="Cerrar">✕</button></div>
+    <div id="ydresult" class="yresult"></div>
+    <div class="label">PARÁMETROS</div>
+    <div id="ydparams" class="yparams"></div>
+    <div class="label">FOTOS Y CONTEOS</div>
+    <div id="ydphotos" class="yphotos"></div>
+    <div class="actions"><span id="ydmsg" class="muted small grow"></span><button id="ydsave" class="primary">Guardar cambios</button></div>
+  </div>
+</dialog>
 </body>
 </html>

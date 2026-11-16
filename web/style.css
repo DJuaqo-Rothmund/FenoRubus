@@ -100,8 +100,9 @@ dialog::backdrop { background: rgba(27, 42, 35, .45); }
   .thumb { width: 52px; height: 52px; }
 }
 
-.tabs { display: flex; gap: 6px; margin-bottom: 12px; }
-.tabs button { flex: 1; border: 0; border-radius: 999px; padding: 9px; background: #fff9; font-weight: 600; cursor: pointer; color: var(--leaf-dark); }
+.tabs { display: flex; gap: 6px; margin-bottom: 12px; overflow-x: auto; scrollbar-width: none; }
+.tabs::-webkit-scrollbar { display: none; }
+.tabs button { flex: 1 0 auto; border: 0; border-radius: 999px; padding: 9px; background: #fff9; font-weight: 600; cursor: pointer; color: var(--leaf-dark); }
 .tabs button.on { background: var(--berry); color: #fff; }
 select.chip { border: 0; appearance: auto; cursor: pointer; }
 .row-h { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; justify-content: space-between; }
@@ -527,3 +528,46 @@ dialog.rcfg { width: min(720px, 96vw); background: #FBF8F1; }
 .weather table { border-collapse: collapse; width: 100%; font-size: 12px; }
 .weather td, .weather th { border-bottom: 1px solid var(--line); padding: 3px 6px; text-align: right; }
 .weather td:first-child, .weather th:first-child { text-align: left; }
+
+/* Rendimiento (yield.js) */
+.yhead { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
+.yhead .grow { flex: 1 1 260px; }
+.ytable { width: 100%; border-collapse: collapse; font-size: 14px; }
+.ytable th { text-align: left; font-size: 11px; color: var(--muted); font-weight: 700; padding: 6px 8px; border-bottom: 1px solid var(--line); }
+.ytable td { padding: 8px; border-bottom: 1px solid var(--line); }
+.ytable td:first-child { white-space: nowrap; }
+.ytable td:nth-child(n+3), .ytable th:nth-child(n+3) { text-align: right; white-space: nowrap; }
+.ytable tbody tr { cursor: pointer; }
+.ytable tbody tr:hover, .ytable tr.hl { background: rgba(46, 125, 50, .08); }
+.ylegend { display: flex; align-items: center; gap: 6px; color: var(--muted); }
+.ylegend span { width: 16px; height: 12px; border-radius: 3px; display: inline-block; }
+#ymap:not(.leaf) svg { width: 100%; height: 100%; display: block; background: #fbfcf9; }
+#ymap:not(.leaf) path { stroke: #fff; stroke-width: 2; cursor: pointer; vector-effect: non-scaling-stroke; }
+#ymap:not(.leaf) path.sel { stroke: #1B2A23; stroke-width: 3; }
+.ydlg { width: min(860px, 96vw); }
+.yresult { display: grid; grid-template-columns: repeat(auto-fit, minmax(110px, 1fr)); gap: 8px; }
+.yresult div { background: #fff; border: 1px solid var(--line); border-radius: 12px; padding: 8px 10px; display: grid; }
+.yresult b { font-size: 18px; } .yresult span { font-size: 12px; color: var(--muted); }
+.yresult .big b { font-size: 22px; color: #2E7D32; }
+.yparams { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 10px; }
+.yparams label { display: grid; gap: 4px; font-size: 13px; color: var(--muted); }
+.yparams .wide { grid-column: 1 / -1; }
+.yparams input, .yparams textarea { width: 100%; min-width: 0; box-sizing: border-box; }
+.yparams input, .yparams textarea, .ycounts input { font: inherit; color: var(--ink); border: 1px solid var(--line); border-radius: 10px; padding: 6px 8px; background: #fff; }
+.yphotos { display: grid; gap: 12px; }
+.yphoto { display: grid; grid-template-columns: minmax(140px, 260px) 1fr; gap: 12px; border: 1px solid var(--line); border-radius: 14px; padding: 10px; background: #fff; }
+.ythumb { align-self: start; aspect-ratio: 4 / 3; border-radius: 10px; background: #eef1ea center / cover no-repeat; cursor: zoom-in;
+  display: flex; align-items: center; justify-content: center; font-size: 12px; color: var(--muted); text-align: center; }
+.ycounts { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 6px; align-content: start; }
+.ycounts label { display: flex; align-items: center; gap: 6px; font-size: 13px; }
+.ycounts label i { width: 10px; height: 10px; border-radius: 50%; flex: none; }
+.ycounts input { width: 64px; margin-left: auto; padding: 4px 6px; }
+.ycounts .badge { grid-column: 1 / -1; justify-self: start; }
+#ylist { overflow-x: auto; }
+@media (max-width: 560px) {
+  .yphoto { grid-template-columns: 1fr; }
+  .ytable { font-size: 13px; }
+  .ytable th:nth-child(3), .ytable td:nth-child(3), .ytable th:nth-child(5), .ytable td:nth-child(5) { display: none; }
+  .ytable td, .ytable th { padding: 6px 4px; }
+  .ytable .yr { display: none; }
+}

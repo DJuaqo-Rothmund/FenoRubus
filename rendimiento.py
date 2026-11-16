@@ -19,7 +19,9 @@ Drive: «AeonCrop/<módulo>/Estimaciones de rendimiento/<fecha · lugar>/foto.jp
 I+D y Predio, y «…/Estimaciones de rendimiento/estimaciones.csv» con todas.
 
 Base propia por cultivo («rendimiento/rendimiento.sqlite3» en la carpeta de datos del
-cultivo). Puro Python (sin Kivy).
+cultivo), sincronizada entre equipos y con la web por paquetes en
+«…/Estimaciones de rendimiento/Sincronización» (ver sync.py y sync_drive.py).
+Puro Python (sin Kivy).
 """
 from __future__ import annotations
 
@@ -34,6 +36,7 @@ from database import Database
 DIR = "rendimiento"
 DB_FILE = "rendimiento.sqlite3"
 DRIVE_DIR = "Estimaciones de rendimiento"
+SYNC_DIR = "Sincronización"            # dentro de DRIVE_DIR: paquetes de cambios (equipos y web)
 CSV_NAME = "estimaciones.csv"
 VEGETATIVE = {"yema", "brote", "lateral", "upright", "estolon"}   # no cuentan para el rendimiento
 FRUIT_WEIGHT = {"frambuesa": 4.0, "arandano": 1.8, "cranberry": 1.2}   # g por fruto (por defecto)
@@ -65,11 +68,12 @@ CREATE TABLE IF NOT EXISTS yield_photos (
     created_at  TEXT NOT NULL
 );
 CREATE TABLE IF NOT EXISTS yield_counts (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
     photo_id    INTEGER NOT NULL REFERENCES yield_photos(id) ON DELETE CASCADE,
     stage       TEXT NOT NULL,
     n           INTEGER NOT NULL DEFAULT 0,
     source      TEXT NOT NULL DEFAULT 'manual',   -- manual | ia (cajas de IA+)
-    PRIMARY KEY (photo_id, stage)
+    UNIQUE (photo_id, stage)
 );
 CREATE INDEX IF NOT EXISTS idx_yield_photo_set ON yield_photos(set_id);
 """
@@ -228,11 +232,26 @@ class YieldDB(Database):
         os.makedirs(self.base_dir, exist_ok=True)
         super().__init__(os.path.join(self.base_dir, DB_FILE), seed=False)
         with self._lock:
+            cols = {r[1] for r in self.conn.execute("PRAGMA table_info(yield_counts)")}
+            if cols and "id" not in cols:
+                # Versión anterior (clave photo_id + stage): la sincronización necesita un id.
+                self.conn.executescript(
+                    "DROP TRIGGER IF EXISTS sync_yield_counts_ins;"
+                    "DROP TRIGGER IF EXISTS sync_yield_counts_upd;"
+                    "DROP TRIGGER IF EXISTS sync_yield_counts_del;"
+                    "DROP INDEX IF EXISTS idx_yield_counts_uid;"
+                    "ALTER TABLE yield_counts RENAME TO yield_counts_old;")
             self.conn.executescript(SCHEMA)
+            if cols and "id" not in cols:
+                self.conn.execute("INSERT OR IGNORE INTO yield_counts(photo_id, stage, n, source) "
+                                  "SELECT photo_id, stage, n, source FROM yield_counts_old")
+                self.conn.execute("DROP TABLE yield_counts_old")
             have = {r[1] for r in self.conn.execute("PRAGMA table_info(yield_sets)")}
             for name, typ in NEW_COLUMNS:
                 if name not in have:
                     self.conn.execute(f"ALTER TABLE yield_sets ADD COLUMN {name} {typ}")
+            import sync
+            sync.install(self.conn)      # las tablas recién creadas también se sincronizan
             self.conn.commit()
 
     @property
@@ -350,7 +369,10 @@ class YieldDB(Database):
                      (photo_id, stage, max(0, int(n)), source))
 
     def set_counts(self, photo_id: int, counts: dict, source: str = "manual") -> None:
-        self.execute("DELETE FROM yield_counts WHERE photo_id=?", (photo_id,))
+        # Sin borrar y volver a crear: cada conteo conserva su uid (sincronización).
+        keep = list(counts)
+        self.execute(f"DELETE FROM yield_counts WHERE photo_id=? AND stage NOT IN ({','.join('?' * len(keep))})",
+                     (photo_id, *keep))
         for k, n in counts.items():
             self.set_count(photo_id, k, n, source)
 
@@ -416,6 +438,17 @@ class YieldDB(Database):
                               num(s.get("photo_error"), 0), num(s.get("latitude"), 6),
                               num(s.get("longitude"), 6), s["notes"]])
         return path
+
+
+_OPEN: dict = {}
+
+
+def open_db(data_dir: str, crop_id: str) -> YieldDB:
+    """Una sola conexión por cultivo (la pantalla y la sincronización usan la misma)."""
+    key = (os.path.abspath(data_dir), crop_id)
+    if key not in _OPEN:
+        _OPEN[key] = YieldDB(data_dir, crop_id)
+    return _OPEN[key]
 
 
 class YieldDrive:
