@@ -5,6 +5,7 @@
 // solo archivo en su carpeta de Drive («…/<módulo>/Entrenamiento IA/marcas.json»).
 import * as C from "./core.js";
 import * as BOX from "./box_ai.js";
+import * as AI from "./scout_ai.js";
 
 // Clases de cajas de cada cultivo (= training_labels.py de AeonCrop). La tecla de cada
 // clase es su posición (0–9). IA+ entrena cada cultivo por separado (su carpeta en Drive).
@@ -254,24 +255,95 @@ function marked(name) {
   const r = data?.photos?.[name];
   return !!(r && (r.empty || (r.boxes || []).length));
 }
+// Analizada por la IA en lote y aún sin revisar (= training_labels.needs_review).
+const review = (name) => !!data?.photos?.[name]?.review;
+const confirmed = (name) => marked(name) && !review(name);
+const FILTERS = { todo: () => true, sin: (n) => !marked(n), ia: review, con: confirmed };
+
+// ------------------------------------------------------- análisis en lote con IA
+// Gemini marca muchas fotos sin marcar (de a una, con pausa: el nivel gratuito acepta pocas por
+// minuto); quedan «por confirmar» hasta que la persona las revise (= box_ai.analyze_many).
+let batch = null;
+function renderBatch() {
+  const box = $("tbatch");
+  if (!box) return;
+  if (batch) {
+    box.innerHTML = `<span class="small">✨ ${esc(batch.text)}</span> <button type="button" class="ghost" id="tbstop">Detener</button>`;
+    $("tbstop").onclick = () => { batch.stop = true; batch.text = "Deteniendo después de esta foto…"; renderBatch(); };
+    return;
+  }
+  const todo = (photos || []).filter((p) => (!wsFilter || p.code === wsFilter) && !marked(p.name));
+  if (!todo.length) { box.innerHTML = ""; return; }
+  const opts = [10, 25, 50].filter((k) => k < todo.length).concat([todo.length]);
+  box.innerHTML = `<span class="small"><b>✨ Analizar con IA</b> las fotos sin marcar (${todo.length}${wsFilter ? " de este ensayo" : ""}):
+    la IA marca las cajas y quedan «por confirmar»; luego usted corrige y confirma.</span> `
+    + opts.map((k) => `<button type="button" class="ghost tai2" data-k="${k}">${k < todo.length ? k : `Todas (${k})`}</button>`).join(" ");
+  box.querySelectorAll("button").forEach((b) => (b.onclick = () => runBatch(todo.slice(0, Number(b.dataset.k)))));
+}
+async function runBatch(items) {
+  if (!AI.loadKeys().gemini) { alert("Falta la clave de Gemini: AeonScout › 🔑 Claves de IA (es gratis)."); return; }
+  batch = { stop: false, done: 0, failed: 0, text: `Analizando con IA… 0 de ${items.length}` };
+  renderBatch();
+  let why = "";
+  for (let i = 0; i < items.length && !batch.stop; i++) {
+    const p = items[i];
+    if (marked(p.name)) continue;                    // la marcaron mientras tanto
+    try {
+      const url = await (p.extra ? X.extraUrl(p) : X.photoUrl(p.path));
+      if (!url) throw new Error("aún no está en Drive");
+      const blob = await (await fetch(url)).blob();
+      const bmp = await createImageBitmap(blob).catch(() => null);
+      const boxes = await BOX.suggest(blob, CLASSES, (CROP_NAMES[crop] || "").toLowerCase());
+      if (marked(p.name)) continue;
+      const rec = { w: bmp?.width || 0, h: bmp?.height || 0, boxes, empty: !boxes.length, review: true, ts: C.nowTs(), by: "IA" };
+      data.photos[p.name] = rec;
+      keepPending(p.name, rec);
+      scheduleSave();
+      batch.done++;
+    } catch (e) {
+      if (["quota", "key", "nokey"].includes(e.kind) || /sin conexión/i.test(e.message)) { why = e.message; break; }
+      batch.failed++;
+    }
+    batch.text = `Analizando con IA… ${batch.done} de ${items.length}` + (batch.failed ? ` · ${batch.failed} con error` : "");
+    renderBatch();
+    if (batch.done && batch.done % 5 === 0) renderList();
+    if (i < items.length - 1 && !batch.stop) await new Promise((r) => setTimeout(r, 4000));
+  }
+  const done = batch.done, failed = batch.failed;
+  batch = null;
+  await saveNow();
+  if (done) {
+    filter = "ia";
+    document.querySelectorAll("#tfilter button").forEach((x) => x.classList.toggle("on", x.dataset.f === "ia"));
+  }
+  renderList();
+  alert(`IA: ${done} foto(s) analizadas` + (failed ? ` · ${failed} con error` : "") + (why ? `\nSe detuvo: ${why}` : "")
+    + (done ? "\n\nRevíselas en «Por confirmar»: corrija y confirme cada una con ✓." : ""));
+}
 
 function renderList() {
   if (!photos) return;
   const all = photos;
-  const done = all.filter((p) => marked(p.name));
+  const done = all.filter((p) => confirmed(p.name));
+  const pend = all.filter((p) => review(p.name));
   const totals = Object.fromEntries(CLASSES.map(([k]) => [k, 0]));
   for (const r of Object.values(data?.photos || {})) for (const b of r.boxes || []) totals[b.c] = (totals[b.c] || 0) + 1;
   const warn = loadError ? `<div class="warn"><b>No se pudieron leer las marcas de Drive</b> (${esc(loadError)}).
     Se muestra la última copia de este navegador y no se guardan cambios. Pulse ⟳ para reintentar
     (o «Reconectar» si la sesión de Google venció). Sus marcas siguen a salvo en Drive.</div>` : "";
   const inDrive = Object.keys(data?.photos || {}).filter((k) => marked(k)).length;
-  const orphan = !loadError && inDrive > done.length
-    ? `<div class="warn">En Drive hay <b>${inDrive}</b> fotos marcadas; ${inDrive - done.length} no aparecen en esta lista
+  const inList = all.filter((p) => marked(p.name)).length;
+  const orphan = !loadError && inDrive > inList
+    ? `<div class="warn">En Drive hay <b>${inDrive}</b> fotos marcadas; ${inDrive - inList} no aparecen en esta lista
        (fotos que la web aún no conoce). Las marcas no se pierden.</div>` : "";
-  $("tstats").innerHTML = warn + orphan + `<b>${done.length}</b> fotos marcadas de ${all.length} (todos los ensayos y predios) · meta ${GOAL}
+  $("tstats").innerHTML = warn + orphan + `<b>${done.length}</b> fotos confirmadas de ${all.length} (todos los ensayos y predios) · meta ${GOAL}
+    ${pend.length ? `<div class="treviewn"><b>${pend.length}</b> analizadas por IA · falta confirmar</div>` : ""}
     <div class="tbar"><i style="width:${Math.min(100, done.length / GOAL * 100)}%"></i></div>
     <div class="tclasses">${CLASSES.map(([k, n, c]) => `<span><i style="background:${c}"></i>${n} <b>${totals[k] || 0}</b></span>`).join("")}</div>`;
-  list = all.filter((p) => (!wsFilter || p.code === wsFilter) && (filter === "todo" || (filter === "con") === marked(p.name)));
+  const fb = document.querySelector('#tfilter button[data-f="ia"]');
+  if (fb) fb.textContent = `Por confirmar (${pend.length})`;
+  renderBatch();
+  list = all.filter((p) => (!wsFilter || p.code === wsFilter) && (FILTERS[filter] || FILTERS.todo)(p.name));
   const grid = $("tgrid");
   grid.innerHTML = "";
   if (!list.length) grid.innerHTML = `<p class="muted">${all.length ? "No hay fotos en este filtro." : "Aún no hay fotos de detalle en los ensayos y predios."}</p>`;
@@ -285,11 +357,11 @@ function renderList() {
     const r = data.photos[p.name];
     const n = (r?.boxes || []).length;
     const d = document.createElement("button");
-    d.className = "tthumb";
+    d.className = "tthumb" + (r?.review ? " review" : "");
     d.dataset.i = i;
     d.title = p.name;
     d.innerHTML = `<span class="tc">${p.code}</span><span class="tw">${p.week ? C.weekTitle(p.week).replace(", año", " ·") : ""}</span>
-      <span class="tv">${p.variety || ""}</span>${marked(p.name) ? `<span class="tn">${r.empty && !n ? "vacía" : n}</span>` : ""}`;
+      <span class="tv">${p.variety || ""}</span>${marked(p.name) ? `<span class="tn">${r.review ? "IA? " : ""}${r.empty && !n ? "vacía" : n}</span>` : ""}`;
     d.onclick = () => Ed.open(i);
     grid.appendChild(d);
     io.observe(d);
@@ -335,7 +407,7 @@ const Ed = {
       if (cb) cb();
     });
     $("tsuggest").onclick = () => this.suggest();
-    $("tsave").onclick = () => saveNow();
+    $("tsave").onclick = () => this.confirmOrSave();
     // Aviso rojo «NO GUARDADO»: un toque reconecta la cuenta de Google y vuelve a guardar.
     $("tsaved").onclick = async () => {
       if (!$("tsaved").classList.contains("terr")) return;
@@ -482,6 +554,24 @@ const Ed = {
       (CLASSES.filter(([k]) => n[k]).map(([k, nm, c]) => `<span title="${esc(nm)}"><i style="background:${c}"></i><b>${n[k]}</b></span>`).join("")
         + (tot ? `<span class="ttot">${tot} en total</span>` : "")) || "Sin cajas aún";
     $("tempty").classList.toggle("on", !!r.empty);
+    $("treview").hidden = !r.review;
+    if ($("tsave").classList.contains("confirm") !== !!r.review) {
+      $("tsave").classList.toggle("confirm", !!r.review);
+      $("tsave").innerHTML = r.review ? `<svg viewBox="0 0 24 24"><path d="M9 16.2 4.8 12l-1.4 1.4L9 19 21 7l-1.4-1.4z"/></svg>`
+        : `<svg viewBox="0 0 24 24"><path d="M17 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14c1.1 0 2-.9 2-2V7l-4-4zm-5 16a3 3 0 1 1 0-6 3 3 0 0 1 0 6zm3-10H5V5h10v4z"/></svg>`;
+    }
+    $("tsave").title = r.review ? "Confirmar (lo marcado por la IA queda revisado) y pasar a la siguiente por confirmar" : "Guardar en Drive ahora (también se guarda solo)";
+  },
+  // ✓ en una foto analizada por la IA: queda confirmada y se pasa a la siguiente por confirmar.
+  async confirmOrSave() {
+    if (!this.rec?.review) { saveNow(); return; }
+    delete this.rec.review;
+    this.changed();
+    const j = list.findIndex((p, k) => k > this.i && review(p.name));
+    if (j >= 0) { this.cleanRec(); this.open(j); }
+    await saveNow();
+    if (!$("tsaved").classList.contains("terr"))
+      $("tsaved").textContent = j >= 0 ? "Confirmada ✓ · esta es la siguiente por confirmar" : "Confirmada ✓ · no quedan más por confirmar";
   },
   toggleEmpty() {
     if (!this.rec) return;

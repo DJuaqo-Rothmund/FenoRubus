@@ -632,3 +632,12 @@ dialog.rcfg { width: min(720px, 96vw); background: #FBF8F1; }
 .nstruct textarea { width: 100%; font: inherit; }
 #mbody { min-width: 0; max-width: 100%; }
 #mbody .heatwrap { max-width: 100%; }
+
+/* IA+: análisis en lote con IA y fotos «por confirmar» */
+.tbatch { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin: 8px 0; }
+.tbatch:empty { display: none; }
+.tbatch .tai2 { border-color: #8E44FF; color: #6A2BD9; }
+.treviewn { color: #B35C00; margin-top: 4px; }
+.tthumb.review { outline: 3px solid #FFB74D; outline-offset: -3px; }
+.treview { background: #FFB74D; color: #2A1A00; padding: 6px 12px; font-size: 13px; }
+.tbtn.tsave.confirm { background: #2E7D32; box-shadow: 0 0 0 3px #FFB74D; }

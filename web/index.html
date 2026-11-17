@@ -530,9 +530,10 @@
         <div class="row-h"><div class="label">CULTIVO A ENTRENAR</div>
           <div class="chips" id="tcrop"><button data-m="PhenoRubus">PhenoRubus · frambuesa</button><button data-m="PhenoBlue">PhenoBlue · arándano</button><button data-m="PhenoCran">PhenoCran · cranberry</button></div></div>
         <div class="row-h"><div class="label">MARCAR YEMAS, BROTES, LATERALES, FLORES Y FRUTOS</div>
-          <div class="chips" id="tfilter"><button data-f="todo" class="on">Todas</button><button data-f="sin">Sin marcar</button><button data-f="con">Marcadas</button></div></div>
+          <div class="chips" id="tfilter"><button data-f="todo" class="on">Todas</button><button data-f="sin">Sin marcar</button><button data-f="ia">Por confirmar</button><button data-f="con">Confirmadas</button></div></div>
         <div class="chips" id="tws"></div>
         <div id="tstats" class="muted small"></div>
+        <div id="tbatch" class="tbatch"></div>
         <p class="muted small">Abra una foto y encierre con una caja cada yema, brote, lateral, botón, flor o fruto (teclas 0–9
           para la clase). Las marcas se guardan en su Drive, aparte de los registros.</p>
       </section>
@@ -562,6 +563,7 @@
       <span id="tsaved" class="small"></span>
     </div>
     <div id="tclassbar" class="tclassbar"></div>
+    <div id="treview" class="treview" hidden><b>Analizada por IA · falta confirmar:</b> corrija las cajas y pulse ✓ (confirma y pasa a la siguiente por confirmar)</div>
     <div class="tstage">
       <canvas id="tcanvas"></canvas>
       <button type="button" id="tprev" class="tarrow left" title="Foto anterior (←)" aria-label="Foto anterior">‹</button>

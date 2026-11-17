@@ -92,3 +92,36 @@ def suggest(key: str, image_path: str, classes, crop_name: str = "", db=None, pr
     raw = scout_ai.ask_gemini(key, img, prompt(classes, crop_name), progress=progress, db=db,
                               schema=schema(keys))
     return to_boxes(raw, keys)
+
+
+def analyze_many(key: str, items: list[dict], classes, crop_name: str = "", db=None,
+                 on_result=None, should_stop=None, pause: float = 4.0) -> dict:
+    """Análisis en lote (IA+ «Analizar con IA»): una consulta por foto, de a una (el nivel
+    gratuito de Gemini acepta pocas por minuto). items: [{"name", "path"}].
+    on_result(item, boxes | None, error | None) tras cada foto. Si se acaba la cuota o la
+    clave no sirve, se detiene. Devuelve {"done", "failed", "stopped"}."""
+    import time
+    done = failed = 0
+    stopped = ""
+    for i, it in enumerate(items):
+        if should_stop and should_stop():
+            stopped = "Detenido"
+            break
+        try:
+            got = suggest(key, it["path"], classes, crop_name, db=db)
+        except (scout_ai.Quota, scout_ai.BadKey, scout_ai.Offline) as exc:
+            stopped = str(exc)
+            if on_result:
+                on_result(it, None, exc)
+            break
+        except Exception as exc:  # noqa: BLE001 (una foto mala no detiene el lote)
+            failed += 1
+            if on_result:
+                on_result(it, None, exc)
+            continue
+        done += 1
+        if on_result:
+            on_result(it, got, None)
+        if pause and i < len(items) - 1:
+            time.sleep(pause)
+    return {"done": done, "failed": failed, "stopped": stopped}

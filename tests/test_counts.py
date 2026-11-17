@@ -151,3 +151,31 @@ def test_counts_to_table(tmp_path):
     rows = db.list_entries(tid, week_id=w["id"])
     r0 = next(r for r in rows if r["variety_id"] == t1 and r["data"]["Detalle"] == "Arriba 1")
     assert len(rows) == 4 and r0["data"]["Flor"] == 1 and r0["data"]["Botón"] == 0 and r0["data"]["Foto"] == "nuevo.jpg"
+
+
+def test_batch_ai_review(monkeypatch, tmp_path):
+    """IA+ «Analizar con IA»: muchas fotos de a una; quedan por confirmar; la cuota detiene el lote."""
+    import scout_ai
+    calls = []
+
+    def fake(key, path, classes, crop_name="", db=None, progress=None):
+        calls.append(path)
+        if path == "c.jpg":
+            raise ValueError("foto dañada")
+        if path == "d.jpg":
+            raise scout_ai.Quota("sin cuota")
+        return [_box("flor")]
+
+    monkeypatch.setattr(box_ai, "suggest", fake)
+    got = []
+    res = box_ai.analyze_many("k", [{"name": n, "path": n} for n in ("a.jpg", "b.jpg", "c.jpg", "d.jpg", "e.jpg")],
+                              tl.CLASSES, on_result=lambda it, b, e: got.append((it["name"], b, e)), pause=0)
+    assert res["done"] == 2 and res["failed"] == 1 and "cuota" in res["stopped"]
+    assert calls == ["a.jpg", "b.jpg", "c.jpg", "d.jpg"]            # e.jpg no se consultó
+    rec = tl.ai_record(got[0][1], 800, 600)
+    assert tl.is_marked(rec) and tl.needs_review(rec) and not tl.is_confirmed(rec)
+    assert tl.needs_review(tl.ai_record([], 1, 1)) and tl.ai_record([], 1, 1)["empty"]
+    rec.pop("review")
+    assert tl.is_confirmed(rec)
+    stop = box_ai.analyze_many("k", [{"name": "a.jpg", "path": "a.jpg"}], tl.CLASSES, should_stop=lambda: True, pause=0)
+    assert stop == {"done": 0, "failed": 0, "stopped": "Detenido"}

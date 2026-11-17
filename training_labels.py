@@ -99,6 +99,22 @@ def is_marked(rec: dict | None) -> bool:
     return bool(rec and (rec.get("empty") or rec.get("boxes")))
 
 
+def needs_review(rec: dict | None) -> bool:
+    """Analizada por la IA (Gemini, en lote) y aún sin revisar: falta que la persona corrija
+    y confirme. No sirve para entrenar hasta confirmarla."""
+    return bool(rec and rec.get("review"))
+
+
+def is_confirmed(rec: dict | None) -> bool:
+    """Marcada por la persona o revisada y confirmada (lo que entrena el detector)."""
+    return is_marked(rec) and not needs_review(rec)
+
+
+def ai_record(boxes: list[dict], w: int = 0, h: int = 0) -> dict:
+    """Marcas que deja el análisis en lote: las cajas de la IA, «por confirmar»."""
+    return {"w": w, "h": h, "boxes": boxes, "empty": not boxes, "review": True}
+
+
 def counts(rec: dict | None) -> dict[str, int] | None:
     """Estructuras contadas en una foto: {clase: n} en el orden de CLASSES (solo las que hay).
     None si la foto no está marcada; {} si se marcó «sin estructuras»."""

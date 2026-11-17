@@ -39,8 +39,8 @@ from kivy.uix.widget import Widget
 from kivymd.app import MDApp
 from kivymd.uix.screen import MDScreen
 
-from training_labels import (CLASSES, COLORS, GOAL, NAMES, LabelStore, detail_photos, is_marked,
-                             measure_photos)
+from training_labels import (CLASSES, COLORS, GOAL, NAMES, LabelStore, ai_record, detail_photos, is_confirmed,
+                             is_marked, measure_photos, needs_review)
 from ui.theme import c
 
 PAGE = 60                     # miniaturas por tanda («Ver más» agrega otras tantas)
@@ -239,9 +239,10 @@ class BoxThumb(ButtonBehavior, Widget):
         rec = store().get(self.photo["name"])
         n = len((rec or {}).get("boxes") or [])
         marked = is_marked(rec)
-        self._mark_col.a = 1 if marked else 0
+        review = needs_review(rec)       # analizada por IA, falta confirmar: borde naranjo
+        self._mark_col.rgba = c("#FFB74D") if review else c("#7CF2B0", 1 if marked else 0)
         self._set_text(self._code, self.photo["code"])
-        self._set_text(self._count, (str(n) if n else "vacía") if marked else "")
+        self._set_text(self._count, (("IA? " if review else "") + (str(n) if n else "vacía")) if marked else "")
         self._set_text(self._variety, (self.photo["variety"] or "")[:22], bold=False)
         self._set_text(self._cloud, "" if self.photo["exists"] or self.photo.get("extra") else "En Drive",
                        bold=False, size=12)
@@ -373,8 +374,9 @@ class BoxesScreen(MDScreen):
 
     def _visible(self):
         st = store()
-        return [p for p in self.photos if (not self.ws or p["code"] == self.ws) and (
-                self.filter == "todo" or (self.filter == "con") == is_marked(st.get(p["name"])))]
+        test = {"todo": lambda r: True, "sin": lambda r: not is_marked(r), "ia": needs_review,
+                "con": is_confirmed}.get(self.filter, lambda r: True)
+        return [p for p in self.photos if (not self.ws or p["code"] == self.ws) and test(st.get(p["name"]))]
 
     def _header(self):
         from kivy.factory import Factory
@@ -382,11 +384,14 @@ class BoxesScreen(MDScreen):
         head = self.ids.head
         head.clear_widgets()
         st = store()
-        done = [p for p in self.photos if is_marked(st.get(p["name"]))]
+        done = [p for p in self.photos if is_confirmed(st.get(p["name"]))]
+        review = [p for p in self.photos if needs_review(st.get(p["name"]))]
         card = Factory.MindCard()
         card.add_widget(Factory.MindSection(text="CAJAS PARA EL DETECTOR · TODOS LOS ENSAYOS"))
-        card.add_widget(Factory.MindText(text=f"[b]{len(done)}[/b] fotos marcadas de {len(self.photos)} · meta {GOAL}",
-                                         markup=True))
+        card.add_widget(Factory.MindText(
+            text=f"[b]{len(done)}[/b] fotos confirmadas de {len(self.photos)} · meta {GOAL}"
+                 + (f"\n[color=#FFB74D][b]{len(review)}[/b] analizadas por IA · falta confirmar[/color]" if review else ""),
+            markup=True))
         bar = Widget(size_hint_y=None, height=dp(6))
         k = min(1.0, len(done) / GOAL)
         with bar.canvas:
@@ -405,11 +410,24 @@ class BoxesScreen(MDScreen):
             text="   ".join(f"[color={col}][b]•[/b][/color] {name} {tot.get(key, 0)}" for key, name, col in CLASSES),
             markup=True))
         row = BoxLayout(size_hint_y=None, height=dp(40), spacing=dp(6))
-        for key, label in (("todo", "Todas"), ("sin", "Sin marcar"), ("con", "Marcadas")):
+        row2 = BoxLayout(size_hint_y=None, height=dp(40), spacing=dp(6))
+        for key, label, r in (("todo", "Todas", row), ("sin", "Sin marcar", row),
+                              ("ia", f"Por confirmar ({len(review)})", row2), ("con", "Confirmadas", row2)):
             b = Factory.MindSeg(text=label, selected=self.filter == key)
             b.bind(on_release=lambda _w, key=key: self._filter(key))
-            row.add_widget(b)
+            r.add_widget(b)
         card.add_widget(row)
+        card.add_widget(row2)
+        # Análisis en lote: Gemini marca muchas fotos sin marcar; luego se corrigen y confirman.
+        if getattr(self, "_batch", None):
+            self._ai_btn = Factory.MindGhost(icon="stop-circle-outline", text=self._batch["text"])
+            self._ai_btn.bind(on_release=lambda *_: self._stop_batch())
+        else:
+            todo = [p for p in self.photos if (not self.ws or p["code"] == self.ws) and not is_marked(st.get(p["name"]))]
+            self._ai_btn = Factory.MindGhost(icon="creation", text=f"Analizar con IA las fotos sin marcar ({len(todo)})")
+            self._ai_btn.disabled = not todo
+            self._ai_btn.bind(on_release=lambda *_: self._ask_batch(todo))
+        card.add_widget(self._ai_btn)
         card.add_widget(Factory.MindSection(text="FOTOS DE DETALLE POR ENSAYO O PREDIO"))
         sv = ScrollView(size_hint_y=None, height=dp(44), do_scroll_y=False, bar_width=0)
         chips = BoxLayout(size_hint_x=None, spacing=dp(6), padding=(0, dp(2)))
@@ -506,6 +524,109 @@ class BoxesScreen(MDScreen):
             app().toast(f"{got} foto(s) bajadas" + (f" · {missing} aún no están en Drive" if missing else ""))
             self.refresh()
         fetch_photos(items, progress, done)
+
+    # ------------------------------------------------- análisis en lote con IA
+    def _ask_batch(self, todo: list):
+        from ui.common import pick_dialog
+        n = len(todo)
+        opts = [k for k in (10, 25, 50) if k < n] + [n]
+        pick_dialog("Analizar con IA", [
+            (f"{k} foto(s)" if k < n else f"Todas ({n})",
+             f"Unos {max(1, round(k * 15 / 60))} min · Gemini gratis; luego usted corrige y confirma",
+             lambda k=k: self._start_batch(todo[:k])) for k in opts],
+            subtitle="La IA marca las cajas de cada foto y quedan «por confirmar». Puede seguir usando la app.")
+
+    def _start_batch(self, items: list):
+        a = app()
+        import scout_ai
+        try:
+            key = scout_ai.load_keys(a.scout).get("gemini")
+        except Exception:  # noqa: BLE001
+            key = None
+        if not key:
+            a.toast("Falta la clave de Gemini: AeonScout › Claves de IA (es gratis).")
+            return
+        self._batch = {"text": "Preparando fotos…", "stop": False, "done": 0, "total": len(items)}
+        self._header()
+        missing = [p for p in items if not p.get("exists") or not os.path.exists(p["path"])]
+        if missing and drive_ready():
+            def progress(got, total):
+                self._batch_text(f"Bajando fotos de Drive… {got} de {total} · tocar para detener")
+            fetch_photos(missing, progress, lambda *_: self._run_batch(key, items))
+        else:
+            self._run_batch(key, items)
+
+    def _batch_text(self, text):
+        b = getattr(self, "_batch", None)
+        if b is not None:
+            b["text"] = text
+            btn = getattr(self, "_ai_btn", None)
+            if btn is not None:
+                btn.text = text
+
+    def _stop_batch(self):
+        b = getattr(self, "_batch", None)
+        if b is not None:
+            b["stop"] = True
+            self._batch_text("Deteniendo después de esta foto…")
+
+    def _run_batch(self, key, items):
+        a = app()
+        import crops
+        b = self._batch
+        crop_name = crops.current().fruit
+        classes = list(CLASSES)
+        items = [p for p in items if os.path.exists(p["path"]) and not is_marked(store().get(p["name"]))]
+        b["total"] = len(items)
+        self._batch_text(f"Analizando con IA… 0 de {len(items)} · tocar para detener")
+
+        def size_of(path):
+            try:
+                from PIL import Image
+                with Image.open(path) as im:
+                    return im.size
+            except Exception:  # noqa: BLE001
+                return 0, 0
+
+        def on_result(p, boxes, err):
+            if boxes is None:
+                return
+            w, h = size_of(p["path"])
+            Clock.schedule_once(lambda *_: saved(p, boxes, w, h))
+
+        def saved(p, boxes, w, h):
+            if is_marked(store().get(p["name"])):          # la persona la marcó mientras tanto
+                return
+            store().put(p["name"], ai_record(boxes, w, h), "IA")
+            b["done"] += 1
+            self._batch_text(f"Analizando con IA… {b['done']} de {b['total']} · tocar para detener")
+            for t in getattr(self, "_thumbs", []):
+                if t.photo["name"] == p["name"]:
+                    t.update_marks()
+
+        def work():
+            import box_ai
+            try:
+                res = box_ai.analyze_many(key, items, classes, crop_name, db=a.scout, on_result=on_result,
+                                          should_stop=lambda: b["stop"])
+            except Exception as exc:  # noqa: BLE001
+                res = {"done": b["done"], "failed": 0, "stopped": str(exc)}
+            Clock.schedule_once(lambda *_: finish(res))
+
+        def finish(res):
+            self._batch = None
+            msg = f"IA: {b['done']} foto(s) analizadas · revíselas en «Por confirmar»"
+            if res.get("failed"):
+                msg += f" · {res['failed']} con error"
+            if res.get("stopped") and res["stopped"] != "Detenido":
+                msg += f" · se detuvo: {res['stopped'][:90]}"
+            a.toast(msg)
+            if b["done"]:
+                self.filter, self.shown = "ia", PAGE
+                sync_now()
+            self.refresh()
+
+        threading.Thread(target=work, daemon=True).start()
 
     def open(self, i):
         BoxEditor(self.list, i, on_close=lambda: (self._update_marks(), sync_now())).open()
@@ -853,6 +974,13 @@ class _IconBtn(ButtonBehavior, Widget):
             a.repeat = True
             a.start(self)
 
+    def set_icon(self, icon: str):
+        from kivymd.icon_definitions import md_icons
+        glyph = md_icons.get(icon, "?")
+        if glyph != self.glyph:
+            self.glyph = glyph
+            self.draw()
+
     def draw(self, *_):
         from kivy.graphics import Ellipse
         self.canvas.clear()
@@ -873,6 +1001,7 @@ class _IconBtn(ButtonBehavior, Widget):
 
 class BoxEditor(ModalView):
     """Una foto a pantalla completa para marcar sus cajas; ‹ › recorren la lista."""
+    HINT = "Un dedo: crear o mover cajas · dos dedos: acercar y mover · elija el estadio arriba"
 
     def __init__(self, photos: list, index: int, on_close=None, **kw):
         super().__init__(size_hint=(1, 1), auto_dismiss=False, background_color=(.08, .07, .06, 1), **kw)
@@ -922,15 +1051,18 @@ class BoxEditor(ModalView):
         tools.add_widget(self.count)
         self.ai_b = _IconBtn("creation", "#8E44FF", glow=True)
         self.ai_b.bind(on_release=lambda *_: self.suggest())
+        self.save_b = _IconBtn("content-save-outline", "#2E7D32")
         for w, fn in ((self.ai_b, None), (_IconBtn("fit-to-screen-outline", "#3A3631"), lambda: self.canvas_w.fit()),
                       (_IconBtn("delete-outline", "#C62828"), self.delete_sel),
-                      (_IconBtn("content-save-outline", "#2E7D32"), self.save_now)):
+                      (self.save_b, self.save_now)):
             if fn:
                 w.bind(on_release=lambda _w, fn=fn: fn())
             tools.add_widget(w)
         root.add_widget(tools)
-        root.add_widget(Label(text="Un dedo: crear o mover cajas · dos dedos: acercar y mover · elija el estadio arriba",
-                              font_size=sp(11), color=(1, 1, 1, .5), size_hint_y=None, height=dp(20)))
+        self.hint = Label(text=self.HINT, font_size=sp(11), color=(1, 1, 1, .7), size_hint_y=None, height=dp(30),
+                          markup=True, halign="center", valign="middle")
+        self.hint.bind(size=lambda w, s: setattr(w, "text_size", (s[0] - dp(12), s[1])))
+        root.add_widget(self.hint)
         self.add_widget(root)
         self.set_class(self.cur)
         self.bind(on_dismiss=lambda *_: self._closed())
@@ -954,6 +1086,8 @@ class BoxEditor(ModalView):
         rec = store().get(p["name"])
         self.rec = {"w": 0, "h": 0, "boxes": [dict(b) for b in (rec or {}).get("boxes") or []],
                     "empty": bool((rec or {}).get("empty"))}
+        if needs_review(rec):
+            self.rec["review"] = True
         self._edited = False
         self.sel = None
         import datetime as _dt
@@ -1022,6 +1156,10 @@ class BoxEditor(ModalView):
             total = sum(n.values())
             self.count.text = f"{dots}\n[b]{total} en total[/b]" if total else "Sin cajas"
         self.empty_b.set_on(bool(self.rec.get("empty")))
+        review = bool(self.rec.get("review"))
+        self.hint.text = ("[color=#FFB74D][b]Analizada por IA · falta confirmar:[/b][/color] corrija las cajas y "
+                          "toque el botón verde (confirma y pasa a la siguiente)") if review else self.HINT
+        self.save_b.set_icon("check-bold" if review else "content-save-outline")
 
     # ---------------------------------------------------------- acciones
     def set_class(self, key):
@@ -1057,8 +1195,18 @@ class BoxEditor(ModalView):
     def save_now(self):
         """Botón «Guardar»: guarda esta foto y sube las marcas a Drive (también se guarda solo
         al pasar de foto y al cerrar)."""
+        confirm = bool(self.rec.pop("review", False))      # analizada por IA: queda confirmada
         self._edited = True
         self._commit()
+        if confirm:
+            self.summary()
+            nxt = next((j for j in range(self.i + 1, len(self.photos))
+                        if needs_review(store().get(self.photos[j]["name"]))), None)
+            app().toast("Confirmada" + (" · siguiente por confirmar" if nxt is not None else " · no quedan más por confirmar"))
+            if nxt is not None:
+                release(self.photo)
+                self.show(nxt)
+            return
         sync_now(lambda _got: app().toast("Marcas guardadas en Drive")) if drive_ready() \
             else app().toast("Marcas guardadas en el teléfono (se suben a Drive al conectar la cuenta)")
 
