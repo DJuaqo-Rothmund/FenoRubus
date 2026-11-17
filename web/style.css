@@ -613,3 +613,22 @@ dialog.rcfg { width: min(720px, 96vw); background: #FBF8F1; }
 /* Aviso de marcas NO guardadas en Drive: siempre visible (también en el teléfono) */
 #tsaved.terr { display: block !important; background: #B71C1C; color: #fff; padding: 6px 12px; border-radius: 10px;
   font-weight: 700; cursor: pointer; white-space: normal; max-width: min(520px, 90vw); }
+
+/* Planillas por plantas: grupos arriba, n.º y tratamiento fijos al desplazar hacia el lado */
+.mgrid .fix0, .mgrid .fix1 { position: sticky; z-index: 1; background: #fff; }
+.mgrid .fix0 { left: 0; min-width: 32px; width: 32px; max-width: 32px; box-sizing: border-box; }
+.mgrid .fix1 { left: 31px; min-width: 130px; box-shadow: 2px 0 0 var(--line); }
+.mgrid th.fix0, .mgrid th.fix1 { background: var(--leaf-soft); z-index: 2; }
+.mgrid.grouped td input { min-width: 92px; }
+.mgrid.grouped th .hcol input { font-size: 12.5px; min-width: 70px; padding: 8px 4px; }
+.mgrid tr.ghead th .hcol { justify-content: center; }
+.mgrid tr.ghead th { background: var(--leaf-dark); color: #fff; }
+.mgrid tr.ghead th input { color: #fff; text-align: center; min-width: 60px; }
+.mgrid tr.ghead th { white-space: nowrap; }
+.mgrid tr.ghead th button.del { color: rgba(255,255,255,.7); }
+.nstruct { border: 1px solid var(--line); border-radius: 12px; padding: 10px 12px; margin: 6px 0; }
+.nstruct .nrow2 { display: flex; gap: 10px; }
+.nstruct .nrow2 .field { flex: 1; }
+.nstruct textarea { width: 100%; font: inherit; }
+#mbody { min-width: 0; max-width: 100%; }
+#mbody .heatwrap { max-width: 100%; }

@@ -192,6 +192,36 @@ def measure_rows(db, measure: dict, season: int | None = None, labels: dict | No
     return rows
 
 
+def long_rows(rows: list[list]) -> list[list] | None:
+    """Planilla por plantas en formato largo (una fila por planta): Semana, Año, Inicio,
+    Tratamiento, [Rep.], Muestra y una columna por evaluación. Para análisis (tablas
+    dinámicas, InfoStat, R). None si la planilla no tiene columnas subdivididas."""
+    import sheet_layout as SL
+    head = rows[0]
+    data_cols = head[4:-1]
+    if not SL.is_grouped(data_cols):
+        return None
+    evals, samples = [], []
+    for col in data_cols:
+        g, sub = SL.split(col)
+        if g is None:
+            continue
+        if sub not in evals:
+            evals.append(sub)
+        if g not in samples:
+            samples.append(g)
+    loose = [c for c in data_cols if SL.split(c)[0] is None]
+    out = [head[:4] + loose + ["Muestra"] + evals]
+    for r in rows[1:]:
+        vals = dict(zip(head, r))
+        base = r[:4] + [vals.get(c, "") for c in loose]
+        for g in samples:
+            got = [vals.get(SL.join(g, ev), "") for ev in evals]
+            if any(str(v).strip() for v in got):
+                out.append(base + [g] + got)
+    return out
+
+
 def export_measures(db, measure_ids: list[int], season: int | None = None,
                     dest_dir: str | None = None, labels: dict | None = None) -> str:
     """Un .xlsx con una hoja por medición. Devuelve la ruta."""
@@ -203,6 +233,13 @@ def export_measures(db, measure_ids: list[int], season: int | None = None,
     code = f"{db.code}_" if getattr(db, "code", "") else ""
     path = os.path.join(dest_dir, f"{stem}_{code}{season or 'todas'}_{_dt.datetime.now():%Y%m%d_%H%M}.xlsx")
     labels = photo_marks() if labels is None else labels
-    write_xlsx(path, [(m["name"], measure_rows(db, m, season, labels)) for m in measures])
+    sheets = []
+    for m in measures:
+        rows = measure_rows(db, m, season, labels)
+        sheets.append((m["name"], rows))
+        longer = long_rows(rows) if m["kind"] == "table" else None
+        if longer:
+            sheets.append((f"{m['name'][:20]} por muestra", longer))
+    write_xlsx(path, sheets)
     db.log("export", "measures", None, os.path.basename(path))
     return path

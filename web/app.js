@@ -12,6 +12,7 @@ import { weekCompleted } from "./celebrate.js";
 import { photoHeat, pickPoint, sectorMap } from "./maps.js";
 import * as SC from "./scout.js";
 import * as YD from "./yield.js";
+import * as SH from "./sheet.js";
 
 const SCOPE = "https://www.googleapis.com/auth/drive.file";
 const API = "https://www.googleapis.com/drive/v3/files";
@@ -989,14 +990,17 @@ function renderMeasures() {
       <div class="badges"><span class="badge ${n ? "bbch" : "none"}">${n ? n + (m.kind === "images" ? " FOTO" : " FILA") + (n > 1 ? "S" : "") : "SIN DATOS"}</span></div>`;
     el.querySelector(".place").textContent = KIND_NAME[m.kind] || m.kind;
     el.querySelector(".name").textContent = m.name;
-    el.querySelector(".sub").textContent = m.kind === "table" ? m.columns.join(" · ") : "Fotos con descripción";
+    el.querySelector(".sub").textContent = m.kind === "table" ? (SH.isGrouped(m.columns) ? SH.describe(m.columns) : m.columns.join(" · ")) : "Fotos con descripción";
     el.onclick = () => openMeasure(m.uid);
     box.appendChild(el);
   }
   const add = document.createElement("button");
   add.className = "card row mrow add";
   add.textContent = "＋ Nueva medición";
-  add.onclick = () => { $("nname").value = ""; $("nmsg").textContent = ""; $("newmeasure").showModal(); };
+  add.onclick = () => {
+    $("nname").value = ""; $("nmsg").textContent = ""; $("nvars").value = ""; $("nsamples").value = "1"; $("nreps").value = "1";
+    structPreview(); $("newmeasure").showModal();
+  };
   box.appendChild(add);
 }
 
@@ -1012,26 +1016,82 @@ function varietySelect(value) {
   return sel;
 }
 
+// Lo que va en cada fila de una planilla: las parcelas del ensayo o las variedades (= Database.sheet_units).
+function sheetUnits() {
+  const trial = C.isTrial(S.state);
+  return C.varieties(S.state).filter((v) => (trial ? C.isParcel(v) : true));
+}
+
+// Asistente de la planilla nueva (= _structure_box de la app).
+function structPlan() {
+  const trial = C.isTrial(S.state);
+  const vars = SH.parseVars($("nvars").value);
+  if (!vars.length) return null;
+  const reps = trial ? null : Math.max(1, parseInt($("nreps").value, 10) || 1);
+  return { cols: SH.build(vars, $("nsamples").value, $("nsname").value, !!(reps && reps > 1)), reps };
+}
+function structPreview() {
+  const trial = C.isTrial(S.state), table = $("nkind").value === "table";
+  $("nstruct").hidden = !table;
+  $("nrepsf").hidden = trial;
+  if (trial) {
+    const parcels = sheetUnits();
+    const nt = C.setting(S.state, "trial_treatments", 0) || new Set(parcels.map((v) => Number(v.treatment))).size;
+    const nr = C.setting(S.state, "trial_reps", 0) || Math.max(0, ...parcels.map((v) => Number(v.rep)));
+    $("nrows").textContent = `Filas: ${nt} tratamiento(s) × ${nr} repetición(es) = ${parcels.length} parcelas (las del ensayo).`;
+  } else $("nrows").textContent = `Filas: una por variedad (${sheetUnits().length}).`;
+  try {
+    const p = structPlan();
+    $("nprev").textContent = p ? (p.reps > 1 ? `${sheetUnits().length} × ${p.reps} filas · ` : "") + SH.describe(p.cols.filter((c) => c !== SH.REP_COL)) : "";
+  } catch (e) { $("nprev").textContent = e.message; }
+}
+
 async function createMeasure(ev) {
   ev.preventDefault();
   const name = $("nname").value.trim(), kind = $("nkind").value;
   if (!name) { $("nmsg").textContent = "Póngale un nombre a la medición."; return; }
   const order = Math.max(0, ...C.measures(S.state).map((m) => Number(m.sort_order) || 0)) + 1;
-  const ch = C.measureChange(null, { name, kind, sort_order: order, columns: kind === "table" ? ["Columna 1", "Columna 2", "Columna 3"] : [] });
+  let plan = null;
+  try { plan = kind === "table" ? structPlan() : null; } catch (e) { $("nmsg").textContent = e.message; return; }
+  const ch = C.measureChange(null, { name, kind, sort_order: order, columns: kind === "table" ? (plan ? plan.cols : ["Columna 1", "Columna 2", "Columna 3"]) : [] });
   try {
     await send([ch]);
     $("newmeasure").close();
     render();
-    openMeasure(ch.uid);
+    openMeasure(ch.uid, plan ? plan.reps : null);
   } catch (e) { $("nmsg").textContent = `No se pudo crear: ${e.message}`; }
 }
 
-function openMeasure(uid) {
+// Filas que faltan en la semana: una por parcela / variedad (y repetición si hay «Rep.»). Quedan sin
+// guardar hasta que se escriba algo en ellas (= Database.fill_sheet_rows).
+function sheetRows(M, reps) {
+  const withRep = M.cols.some((c) => c.orig === SH.REP_COL) && !C.isTrial(S.state);
+  if (withRep && !reps) {
+    reps = 1;
+    for (const e of C.entriesFor(S.state, M.m.uid)) reps = Math.max(reps, parseInt(String(e.data?.[SH.REP_COL] ?? "").replace(",", "."), 10) || 0);
+  }
+  const live = M.rows.filter((r) => !r.gone);
+  const have = new Set(live.map((r) => `${r.variety_id}|${withRep ? String(r.data[SH.REP_COL] ?? "") : ""}`));
+  let n = 0;
+  for (const v of sheetUnits()) {
+    for (const r of withRep ? Array.from({ length: reps }, (_, i) => i + 1) : [null]) {
+      if (have.has(`${v.uid}|${withRep ? String(r) : ""}`)) continue;
+      M.rows.push({ e: null, variety_id: v.uid, data: withRep ? { [SH.REP_COL]: String(r) } : {}, caption: "", gone: false, auto: true });
+      n++;
+    }
+  }
+  // la fila vacía de cortesía (sin variedad) sobra si se agregaron las de las parcelas
+  if (n) M.rows = M.rows.filter((r) => r.e || r.variety_id || Object.keys(r.data).length);
+  return n;
+}
+
+function openMeasure(uid, reps = null) {
   const m = C.measures(S.state).find((x) => x.uid === uid);
   if (!m) return;
   const entries = C.entriesFor(S.state, m.uid, S.week);
   S.meas = { m, cols: m.columns.map((c) => ({ orig: c, name: c })),
     rows: entries.map((e) => ({ e, variety_id: e.variety_id || "", data: { ...e.data }, caption: e.caption || "", gone: false })) };
+  if (m.kind === "table" && !S.meas.rows.length && (reps || SH.isGrouped(m.columns))) sheetRows(S.meas, reps);
   if (m.kind === "table" && !S.meas.rows.length) S.meas.rows.push({ e: null, variety_id: "", data: {}, caption: "", gone: false });
   $("mkind").textContent = KIND_NAME[m.kind] || m.kind;
   $("mname").value = m.name;
@@ -1048,16 +1108,54 @@ function renderMeasureBody() {
   box.className = "";
   if (M.m.kind === "table") {
     const t = document.createElement("table");
-    t.className = "mgrid";
+    const grouped = SH.isGrouped(M.cols.map((c) => c.name));
+    t.className = "mgrid" + (grouped ? " grouped" : "");
+    const thead = document.createElement("thead");
+    if (grouped) {     // fila de arriba: «Planta 1», «Planta 2»… sobre sus evaluaciones
+      const gr = document.createElement("tr");
+      gr.className = "ghead";
+      gr.innerHTML = `<th class="fix0"></th><th class="fix1"></th>`;
+      for (const [g, cs] of SH.groups(M.cols.map((c) => c.name))) {
+        const th = document.createElement("th");
+        th.colSpan = cs.length;
+        if (g) {
+          const hc = document.createElement("div");
+          hc.className = "hcol"; th.appendChild(hc);
+          const inp = document.createElement("input");
+          inp.value = g; inp.title = "Nombre del grupo (se cambia en todas sus columnas)";
+          inp.onchange = () => {
+            const nv = inp.value.replaceAll(SH.SEP.trim(), " ").trim();
+            if (!nv || M.cols.some((c) => SH.split(c.name)[0] === nv)) { inp.value = g; return; }
+            for (const c of M.cols) if (SH.split(c.name)[0] === g) c.name = SH.join(nv, SH.split(c.name)[1]);
+            renderMeasureBody();
+          };
+          hc.appendChild(inp);
+          const del = document.createElement("button");
+          del.type = "button"; del.className = "del"; del.textContent = "✕"; del.title = `Eliminar «${g}» (y sus datos en todas las semanas)`;
+          del.onclick = () => { if (confirm(`¿Eliminar «${g}» y sus datos en todas las semanas?`)) { M.cols = M.cols.filter((c) => SH.split(c.name)[0] !== g); renderMeasureBody(); } };
+          hc.appendChild(del);
+        }
+        gr.appendChild(th);
+      }
+      gr.insertAdjacentHTML("beforeend", `<th class="x"></th>`);
+      thead.appendChild(gr);
+    }
     const hr = document.createElement("tr");
-    hr.innerHTML = `<th>#</th><th>Variedad / sector</th>`;
+    hr.innerHTML = `<th class="fix0">#</th><th class="fix1">Variedad / sector</th>`;
     M.cols.forEach((c, i) => {
       const th = document.createElement("th");
       const hc = document.createElement("div");
       hc.className = "hcol"; th.appendChild(hc);
       const inp = document.createElement("input");
-      inp.value = c.name; inp.title = "Nombre de la columna";
-      inp.oninput = () => { c.name = inp.value; };
+      const [g, sub] = SH.split(c.name);
+      inp.value = g ? sub : c.name; inp.title = g ? "Nombre de la evaluación (se cambia en todas las columnas del mismo nombre)" : "Nombre de la columna";
+      inp.oninput = () => { if (!g) c.name = inp.value; };
+      if (g) inp.onchange = () => {
+        const nv = inp.value.replaceAll(SH.SEP.trim(), " ").trim();
+        if (!nv) { inp.value = sub; return; }
+        for (const x of M.cols) { const [gx, sx] = SH.split(x.name); if (gx !== null && sx === sub) x.name = SH.join(gx, nv); }
+        renderMeasureBody();
+      };
       hc.appendChild(inp);
       if (M.cols.length > 1) {
         const del = document.createElement("button");
@@ -1068,22 +1166,28 @@ function renderMeasureBody() {
       hr.appendChild(th);
     });
     hr.insertAdjacentHTML("beforeend", `<th class="x"></th>`);
-    const thead = document.createElement("thead"); thead.appendChild(hr); t.appendChild(thead);
+    thead.appendChild(hr); t.appendChild(thead);
     const tb = document.createElement("tbody");
+    const cells = [];
     M.rows.filter((r) => !r.gone).forEach((r, i) => {
       const tr = document.createElement("tr");
-      tr.innerHTML = `<td class="n">${i + 1}</td>`;
+      tr.innerHTML = `<td class="n fix0">${i + 1}</td>`;
       const tdv = document.createElement("td");
+      tdv.className = "fix1";
       const sel = varietySelect(r.variety_id);
       sel.onchange = () => { r.variety_id = sel.value; };
       tdv.appendChild(sel); tr.appendChild(tdv);
+      const rowCells = [];
       for (const c of M.cols) {
         const td = document.createElement("td");
         const inp = document.createElement("input");
         inp.value = r.data[c.orig] ?? ""; inp.inputMode = "decimal";
         inp.oninput = () => { r.data[c.orig] = inp.value; };
+        inp._set = (v) => { inp.value = v; r.data[c.orig] = v; };
         td.appendChild(inp); tr.appendChild(td);
+        rowCells.push(inp);
       }
+      cells.push(rowCells);
       const tdx = document.createElement("td");
       tdx.className = "x";
       const del = document.createElement("button");
@@ -1092,12 +1196,37 @@ function renderMeasureBody() {
       tdx.appendChild(del); tr.appendChild(tdx);
       tb.appendChild(tr);
     });
+    // Enter: a la derecha en planillas por plantas (si no, abajo) · pegar un bloque de Excel / Sheets.
+    cells.forEach((row, ri) => row.forEach((inp, ci) => {
+      inp.onkeydown = (ev) => {
+        if (ev.key !== "Enter") return;
+        ev.preventDefault();
+        const flat = cells.flat(), k = flat.indexOf(inp);
+        const nxt = grouped ? flat[k + 1] : cells[ri + 1]?.[ci];
+        if (nxt) { nxt.focus(); nxt.select(); }
+      };
+      inp.onpaste = (ev) => {
+        const block = SH.table(ev.clipboardData?.getData("text/plain"));
+        if (block.length < 2 && (block[0] || []).length < 2) return;   // un solo valor: pegado normal
+        ev.preventDefault();
+        let n = 0;
+        block.forEach((vals, dr) => vals.forEach((v, dc) => {
+          const cell = cells[ri + dr]?.[ci + dc];
+          if (cell) { cell._set(v.trim()); n++; }
+        }));
+        $("mmsg").textContent = `${n} valor(es) pegado(s) desde Excel / Sheets. Pulse Guardar.`;
+      };
+    }));
     t.appendChild(tb);
     const wrap = document.createElement("div"); wrap.className = "heatwrap"; wrap.appendChild(t);
     box.appendChild(wrap);
     const tools = document.createElement("div");
     tools.className = "mtools";
-    tools.innerHTML = `<button type="button" class="ghost" id="maddrow">＋ Fila</button><button type="button" class="ghost" id="maddcol">＋ Columna</button>`;
+    const word = grouped ? SH.unitWord(M.cols.map((c) => c.name)) : "";
+    tools.innerHTML = `<button type="button" class="ghost" id="maddrow">＋ Fila</button>`
+      + (grouped ? `<button type="button" class="ghost" id="maddgrp"></button><button type="button" class="ghost" id="maddsub"></button>` : "")
+      + `<button type="button" class="ghost" id="maddcol">＋ Columna</button>`
+      + `<button type="button" class="ghost" id="mfill" title="Agrega las filas que falten esta semana">＋ Una fila por ${C.isTrial(S.state) ? "parcela" : "variedad"}</button>`;
     box.appendChild(tools);
     $("maddrow").onclick = () => {
       const last = M.rows.filter((r) => !r.gone).pop();
@@ -1110,6 +1239,27 @@ function renderMeasureBody() {
       M.cols.push({ orig: `Columna ${n}`, name: `Columna ${n}`, added: true });
       renderMeasureBody();
     };
+    $("mfill").onclick = () => {
+      const n = sheetRows(M);
+      $("mmsg").textContent = n ? `${n} fila(s) agregada(s): se guardan las que tengan datos.` : "Ya hay una fila por cada una.";
+      renderMeasureBody();
+    };
+    if (grouped) {
+      const names = () => M.cols.map((c) => c.name);
+      const nxt = SH.nextGroup(names());
+      $("maddgrp").textContent = `＋ ${nxt[0]}`;
+      $("maddsub").textContent = `＋ Evaluación en todas las ${word}`;
+      $("maddgrp").onclick = () => { for (const c of SH.nextGroup(names())[1]) M.cols.push({ orig: c, name: c, added: true }); renderMeasureBody(); };
+      $("maddsub").onclick = () => {
+        const name = SH.parseVars(prompt("Nombre de la nueva evaluación (ej.: Diámetro (mm))") || "")[0];
+        if (!name) return;
+        if (M.cols.some((c) => SH.split(c.name)[1] === name)) { alert(`Ya existe «${name}»`); return; }
+        const want = SH.addSub(names(), name);
+        const byName = new Map(M.cols.map((c) => [c.name, c]));
+        M.cols = want.map((n) => byName.get(n) || { orig: n, name: n, added: true });
+        renderMeasureBody();
+      };
+    }
   } else {
     const head = document.createElement("div");
     head.className = "photohead";
@@ -2479,6 +2629,7 @@ async function boot() {
   $("skipweek").onchange = (e) => setSkipped(e.target.checked);
   $("clearweek").onclick = clearWeek;
   $("ncreate").onclick = createMeasure;
+  for (const id of ["nkind", "nvars", "nsamples", "nsname", "nreps"]) $(id).addEventListener("input", structPreview);
   $("dseldel").onclick = () => deletePhotos([...S.photoSel]);
   $("dgps").onclick = locateMe;
   $("dmap").onclick = openPickMap;

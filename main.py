@@ -109,6 +109,11 @@ class FenoRubusApp(MDApp):
         self.safe_mode = crashguard.previous_failure() is not None
         import native_input
         native_input.install()   # Android: campos de texto con el teclado real del teléfono
+        try:
+            import clip
+            clip.install()       # copiar/pegar en español y con el portapapeles real de Android
+        except Exception as exc:  # noqa: BLE001
+            print("clip:", exc)
         # Cultivo (PhenoRubus, PhenoBlue o PhenoCran) y estilo: los últimos elegidos. Al abrir
         # se muestra igual la pantalla de cultivos; el último queda precargado detrás.
         import crops

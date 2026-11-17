@@ -408,6 +408,20 @@
       <label class="field">Tipo
         <select id="nkind"><option value="table">Planilla de datos</option><option value="images">Registro de imágenes</option></select>
       </label>
+      <div id="nstruct" class="nstruct">
+        <b>Cómo tomará los datos</b>
+        <p id="nrows" class="muted small"></p>
+        <label class="field" id="nrepsf">Repeticiones por variedad <input id="nreps" type="number" min="1" max="12" value="1"></label>
+        <div class="nrow2">
+          <label class="field">Muestras por parcela <input id="nsamples" type="number" min="1" max="50" value="1"></label>
+          <label class="field">Cada muestra es una… <input id="nsname" value="Planta"></label>
+        </div>
+        <label class="field">Evaluaciones (una por línea)
+          <textarea id="nvars" rows="4" placeholder="N.º laterales&#10;Largo laterales (cm)&#10;Largo entrenudos (cm)"></textarea>
+        </label>
+        <p id="nprev" class="muted small"></p>
+        <p class="muted small">Si deja las evaluaciones vacías, se crea con 3 columnas para nombrar.</p>
+      </div>
       <p id="nmsg" class="warn small"></p>
       <div class="actions">
         <button value="cancel" class="ghost">Cancelar</button>

@@ -139,6 +139,7 @@ def _measure_form(measure: dict | None = None):
     hint = MDLabel(font_style="Caption", adaptive_height=True, theme_text_color="Custom",
                    text_color=c(theme.MUTED))
     buttons = {}
+    box.struct = _structure_box(app().db)
 
     def choose(kind):
         box.kind = kind
@@ -146,8 +147,13 @@ def _measure_form(measure: dict | None = None):
             on = k == kind
             b.md_bg_color = c(theme.LEAF_DARK) if on else c("#FFFFFF", 0)
             b.text_color = c("#FFFFFF") if on else c(theme.LEAF_DARK)
-        hint.text = ("Una planilla como Excel: agregue filas y columnas y nombre cada columna."
+        hint.text = ("Una planilla como Excel. Diga cómo tomará los datos y queda ordenada y lista "
+                     "para llenar (si deja las evaluaciones vacías, se crea con 3 columnas para nombrar)."
                      if kind == "table" else "Fotos con descripción y, si quiere, la variedad.")
+        if kind == "table" and box.struct.parent is None:
+            box.add_widget(box.struct)
+        elif kind != "table" and box.struct.parent is not None:
+            box.remove_widget(box.struct)
 
     for kind, label in (("table", "Planilla de datos"), ("images", "Imágenes")):
         b = MDRectangleFlatButton(text=label, theme_text_color="Custom", line_color=c(theme.LEAF_DARK),
@@ -165,7 +171,12 @@ def new_measure_dialog():
 
     def ok(form):
         try:
-            mid = a.db.add_measure(form.name.text, form.kind)
+            if form.kind == "table" and form.struct.has_vars():
+                cols, reps = form.struct.result()
+                mid = a.db.add_measure(form.name.text, "table", cols)
+                a.db.fill_sheet_rows(mid, a.week["id"], reps)
+            else:
+                mid = a.db.add_measure(form.name.text, form.kind)
         except ValueError as exc:
             a.toast(str(exc))
             return False
@@ -174,12 +185,81 @@ def new_measure_dialog():
     form_dialog("Nueva medición", _measure_form(), ok, "CREAR")
 
 
+def _structure_box(db, cols: list[str] | None = None):
+    """Cómo se tomarán los datos: filas (tratamientos × repeticiones o variedades), muestras
+    por parcela (plantas, cañas…) y evaluaciones de cada muestra (subcolumnas)."""
+    import sheet_layout as SL
+    from kivy.factory import Factory
+    box = MDBoxLayout(orientation="vertical", adaptive_height=True, spacing=dp(4))
+    muted = lambda t: MDLabel(text=t, font_style="Caption", adaptive_height=True,  # noqa: E731
+                              theme_text_color="Custom", text_color=c(theme.MUTED))
+    box.add_widget(MDLabel(text="[b]Cómo tomará los datos[/b]", markup=True, adaptive_height=True))
+    reps = None
+    if db.is_trial:
+        nt, nr = db.trial_size()
+        box.add_widget(muted(f"Filas: {nt} tratamiento(s) × {nr} repetición(es) = {nt * nr} parcelas "
+                             "(las del ensayo; se cambian en los ajustes del ensayo)."))
+    else:
+        nv = len(db.sheet_units())
+        box.add_widget(muted(f"Filas: una por variedad ({nv})."))
+        reps = Factory.Field(hint_text="Repeticiones por variedad", text="1", input_filter="int")
+        if cols is not None and SL.REP_COL not in cols:
+            reps.text = "1"
+        box.add_widget(reps)
+    row = MDBoxLayout(adaptive_height=True, spacing=dp(8))
+    samples = Factory.Field(hint_text="Muestras por parcela", text="1", input_filter="int")
+    sname = Factory.Field(hint_text="Cada muestra es una…", text="Planta")
+    row.add_widget(samples)
+    row.add_widget(sname)
+    box.add_widget(row)
+    evals = Factory.Field(hint_text="Evaluaciones (una por línea)", multiline=True)
+    box.add_widget(evals)
+    preview = muted("Ej.: N.º laterales · Largo laterales (cm) · Largo entrenudos (cm)")
+    box.add_widget(preview)
+    if cols:                                    # planilla ya hecha: se parte de lo que tiene
+        gs = [(g, cs) for g, cs in SL.groups([x for x in cols if x != SL.REP_COL]) if g]
+        if gs:
+            samples.text = str(len(gs))
+            head = gs[0][0].rpartition(" ")
+            sname.text = head[0] if head[2].isdigit() else gs[0][0]
+            evals.text = "\n".join(SL.split(x)[1] for x in gs[0][1])
+        else:
+            evals.text = "\n".join(x for x in cols if x != SL.REP_COL and not x.startswith("Columna "))
+
+    def _int(f, default=1):
+        try:
+            return max(1, int(f.text or default))
+        except ValueError:
+            return default
+
+    def result():
+        r = _int(reps) if reps is not None else None
+        out = SL.build(SL.parse_vars(evals.text), _int(samples), sname.text, reps_col=bool(r and r > 1))
+        return out, r
+
+    def show(*_):
+        try:
+            out, r = result()
+            rows = (f"{len(db.sheet_units())} × {r} filas · " if r and r > 1 else "")
+            preview.text = rows + SL.describe([x for x in out if x != SL.REP_COL])
+        except ValueError:
+            preview.text = "Ej.: N.º laterales · Largo laterales (cm) · Largo entrenudos (cm)"
+
+    for f in (samples, sname, evals) + ((reps,) if reps is not None else ()):
+        f.bind(text=show)
+    Clock.schedule_once(show, 0)
+    box.result = result
+    box.has_vars = lambda: bool(SL.parse_vars(evals.text))
+    return box
+
+
 # Planilla con colores propios (como una hoja de cálculo), iguales en todos los estilos: con los
 # del estilo, en los oscuros quedaba texto claro sobre celdas blancas (no se leía).
 SHEET_HEAD, SHEET_HEAD_FG = "#1E5A45", "#FFFFFF"     # encabezados
 SHEET_NUM, SHEET_NUM_FG = "#DCEFE4", "#1B2A23"       # n.º de fila
 SHEET_CELL, SHEET_INK = "#FFFFFF", "#1B2A23"         # celdas
 SHEET_FIRST_FG = "#1E5A45"                           # 1.ª columna (tratamiento / variedad)
+SHEET_GROUP = "#123A2C"                              # grupos («Planta 1») sobre las subcolumnas
 
 
 def rename_entry_photo(entry_id: int) -> None:
@@ -232,6 +312,64 @@ def _cell_button(text, width, bold=False, bg=None, fg=None, on_release=None):
     return b
 
 
+from kivy.uix.textinput import TextInput  # noqa: E402
+
+
+class SheetCell(TextInput):
+    """Celda de planilla: al mantenerla presionada abre el menú propio (en español) de copiar /
+    pegar, en vez de los cuadritos «Cut / Copy / Paste» de Kivy."""
+    HOLD_S = .5
+
+    def __init__(self, **kw):
+        super().__init__(**kw)
+        self.use_bubble = self.use_handles = False
+        self.on_hold = None
+        self._hold = None
+
+    def _cancel(self):
+        if self._hold is not None:
+            self._hold.cancel()
+            self._hold = None
+
+    def on_touch_down(self, touch):
+        if self.collide_point(*touch.pos) and not getattr(touch, "is_mouse_scrolling", False):
+            self._cancel()
+            self._hold = Clock.schedule_once(lambda *_: self._fire(), self.HOLD_S)
+            self._origin = touch.pos
+        return super().on_touch_down(touch)
+
+    def on_touch_move(self, touch):
+        o = getattr(self, "_origin", None)
+        if self._hold is not None and o and (abs(touch.x - o[0]) > dp(10) or abs(touch.y - o[1]) > dp(10)):
+            self._cancel()
+        return super().on_touch_move(touch)
+
+    def on_touch_up(self, touch):
+        self._cancel()
+        return super().on_touch_up(touch)
+
+    def _fire(self):
+        self._hold = None
+        if self.on_hold:
+            self.on_hold(self)
+
+
+def _stack(top, below):
+    """Caja vertical de tamaño fijo: `top` arriba y `below` abajo (sigue su tamaño)."""
+    from kivy.uix.boxlayout import BoxLayout
+    box = BoxLayout(orientation="vertical", size_hint=(None, None))
+    box.add_widget(top)
+    box.add_widget(below)
+
+    def fit(*_):
+        box.size = (max(top.width, below.width), top.height + below.height)
+
+    below.bind(size=fit)
+    top.bind(size=fit)
+    fit()
+    return box
+
+
 class MeasureScreen(MDScreen):
     """Registros de UNA medición en UNA semana: fotos con descripción o filas de planilla."""
 
@@ -250,8 +388,9 @@ class MeasureScreen(MDScreen):
         kind = "PLANILLA DE DATOS" if self.measure["kind"] == "table" else "REGISTRO DE IMÁGENES"
         self.ids.kicker.text = f"{kind} · {ph.week_title(self.week).upper()}"
         self.ids.columns_text.text = (
-            "Toque una celda o un encabezado para escribir · los 3 puntos mueven o eliminan la columna · "
-            "toque el n.º de fila para eliminarla." if self.measure["kind"] == "table"
+            "Toque una celda o un encabezado para escribir · mantenga presionada una celda para copiar o "
+            "pegar · los 3 puntos mueven o eliminan la columna · toque el n.º de fila para eliminarla."
+            if self.measure["kind"] == "table"
             else "Cada foto con su descripción y, si quiere, la variedad.")
         actions = self.ids.actions
         fast_clear(actions)
@@ -261,6 +400,14 @@ class MeasureScreen(MDScreen):
                                                    on_release=lambda *_: self.add_row()))
             actions.add_widget(Factory.GhostButton(icon="table-column-plus-after", text="Agregar columna",
                                                    on_release=lambda *_: self.add_column()))
+            actions.add_widget(Factory.GhostButton(icon="table-cog", text="Ordenar planilla",
+                                                   on_release=lambda *_: self.structure()))
+            import sheet_layout as SL
+            if SL.is_grouped(self.measure["columns"]) and not a.db.list_entries(measure_id, week_id=week_id):
+                try:   # planilla ordenada: cada semana parte con sus filas (una por parcela)
+                    a.db.fill_sheet_rows(measure_id, week_id)
+                except Exception as exc:  # noqa: BLE001
+                    print("filas de la planilla:", exc)
         else:
             actions.add_widget(Factory.GhostButton(icon="camera-outline", text="Tomar foto",
                                                    on_release=lambda *_: self.add_images("camera")))
@@ -305,33 +452,42 @@ class MeasureScreen(MDScreen):
                                    text_color=c(theme.MUTED)))
 
     # ------------------------------------------------------ planilla (grilla)
-    COL_W, NUM_W, VAR_W = dp(118), dp(40), dp(118)
+    COL_W, NUM_W, VAR_W, SUB_W = dp(118), dp(40), dp(118), dp(104)
 
     def _build_grid(self, entries):
         """Grilla editable: n.º | Variedad | columnas… · celdas = TextInput que se guardan
-        al salir de ellas. Desplazamiento horizontal si hay muchas columnas."""
+        al salir de ellas. Desplazamiento horizontal si hay muchas columnas. Columnas
+        «Planta 1 · Largo»: encabezado en dos niveles (Planta 1 arriba, Largo abajo)."""
+        import sheet_layout as SL
+        from kivy.uix.boxlayout import BoxLayout
         from kivy.uix.gridlayout import GridLayout
         from kivy.uix.scrollview import ScrollView
-        from kivy.uix.textinput import TextInput
         a = app()
         cols = list(self.measure["columns"])
+        self._grouped = SL.is_grouped(cols)
+        cw = self.SUB_W if self._grouped else self.COL_W
         varieties = a.db.list_varieties(include_archived=True)
         self._rows = {e["id"]: dict(e["data"]) for e in entries}
         self._cells = []
-        grid = GridLayout(cols=len(cols) + 2, size_hint=(None, None), spacing=dp(2), padding=dp(2))
-        grid.bind(minimum_width=grid.setter("width"), minimum_height=grid.setter("height"))
+        sp = dp(2)
+        # Izquierda fija (n.º y tratamiento) y a la derecha las columnas, que se desplazan
+        # hacia el lado: con muchas plantas siempre se ve de qué fila es cada celda.
+        left = GridLayout(cols=2, size_hint=(None, None), spacing=sp, padding=(sp, sp, 0, sp))
+        grid = GridLayout(cols=max(1, len(cols)), size_hint=(None, None), spacing=sp, padding=sp)
+        for g_ in (left, grid):
+            g_.bind(minimum_width=g_.setter("width"), minimum_height=g_.setter("height"))
         head_bg, head_fg = c(SHEET_HEAD), c(SHEET_HEAD_FG)
-        grid.add_widget(_cell_button("#", self.NUM_W, True, head_bg, head_fg))
+        left.add_widget(_cell_button("#", self.NUM_W, True, head_bg, head_fg))
         self.var_w = dp(150) if a.db.is_predio else self.VAR_W   # predio: variedad y año
         self._first = a.db.sheet_first()
         names = a.db.treatment_names()
         vmap = {v["id"]: v for v in varieties}
         self._heads = []
-        grid.add_widget(self._head_cell(self._first["title"], self.var_w, None))
+        left.add_widget(self._head_cell(self._first["title"], self.var_w, None))
         for col in cols:
-            grid.add_widget(self._head_cell(col, self.COL_W, col))
+            grid.add_widget(self._head_cell(SL.split(col)[1], cw, col, small=self._grouped))
         for i, e in enumerate(entries):
-            grid.add_widget(_cell_button(str(i + 1), self.NUM_W, bg=c(SHEET_NUM),
+            left.add_widget(_cell_button(str(i + 1), self.NUM_W, bg=c(SHEET_NUM),
                                          on_release=lambda *_, e=e, n=i + 1: self.row_menu(e, n)))
             v = vmap.get(e["variety_id"])
             if not v:
@@ -340,33 +496,61 @@ class MeasureScreen(MDScreen):
                 label = a.db.sheet_label(v, names, self._first, two_lines=True)
             else:
                 label = _variety_label(e["variety_id"], varieties, two_lines=True)
-            grid.add_widget(_cell_button(label, self.var_w, bg=c(SHEET_CELL), fg=c(SHEET_FIRST_FG),
+            left.add_widget(_cell_button(label, self.var_w, bg=c(SHEET_CELL), fg=c(SHEET_FIRST_FG),
                                          on_release=lambda *_, e=e: self.pick_row_variety(e)))
             row_cells = []
             for col in cols:
-                ti = TextInput(text=str(e["data"].get(col, "")), multiline=False, write_tab=False,
-                               size_hint=(None, None), size=(self.COL_W, dp(42)), font_size="14sp",
+                ti = SheetCell(text=str(e["data"].get(col, "")), multiline=False, write_tab=False,
+                               size_hint=(None, None), size=(cw, dp(42)), font_size="14sp",
                                padding=(dp(8), dp(11)), background_normal="", background_active="",
                                background_color=c(SHEET_CELL), foreground_color=c(SHEET_INK),
                                cursor_color=c(SHEET_HEAD))
                 ti.entry_id, ti.col = e["id"], col
                 ti.native_edit = False   # planilla: se escribe de corrido con el teclado de la app
+                ti.on_hold = self.cell_menu
                 ti.bind(focus=self._cell_focus)
                 ti.bind(on_text_validate=self._cell_next)
                 grid.add_widget(ti)
                 row_cells.append(ti)
             self._cells.append(row_cells)
+        content, fixed = grid, left
+        if self._grouped:          # fila de arriba: «Planta 1», «Planta 2»… sobre sus subcolumnas
+            top_bg = c(SHEET_GROUP)
+            top = BoxLayout(size_hint=(None, None), height=dp(36), spacing=sp, padding=(sp, sp, sp, 0))
+            for g, cs in SL.groups(cols):
+                w = len(cs) * cw + (len(cs) - 1) * sp
+                b = _cell_button(g or "", w, bold=True, bg=top_bg, fg=head_fg,
+                                 on_release=(lambda *_, g=g: self.group_menu(g)) if g else None)
+                b.height = dp(34)
+                top.add_widget(b)
+            top.bind(minimum_width=top.setter("width"))
+            content = _stack(top, grid)
+            ltop = BoxLayout(size_hint=(None, None), height=dp(36), padding=(sp, sp, 0, 0))
+            corner = _cell_button("", self.NUM_W + sp + self.var_w, bg=top_bg)
+            corner.height = dp(34)
+            ltop.add_widget(corner)
+            ltop.width = corner.width + sp
+            fixed = _stack(ltop, left)
         sv = ScrollView(do_scroll_x=True, do_scroll_y=False, size_hint=(1, None),
                         bar_width=dp(4), scroll_type=["bars", "content"])
-        grid.bind(height=lambda g, h: setattr(sv, "height", h + dp(8)))
-        sv.add_widget(grid)
-        self.ids.entries.add_widget(sv)
+        sv.add_widget(content)
+        self._sv = sv
+        row = BoxLayout(size_hint=(1, None))
+        from kivy.uix.widget import Widget
+        fixed = _stack(fixed, Widget(size_hint=(None, None), size=(0, dp(8))))   # mismo alto que la barra de abajo
+        row.add_widget(fixed)
+        row.add_widget(sv)
+        fit = lambda *_: (setattr(sv, "height", content.height + dp(8)),  # noqa: E731
+                          setattr(row, "height", max(fixed.height, content.height + dp(8))))
+        content.bind(height=fit)
+        fixed.bind(height=fit)
+        self.ids.entries.add_widget(row)
         if not entries:
             self.ids.entries.add_widget(MDLabel(
                 text="Sin filas esta semana: toque «Agregar fila».", font_style="Caption",
                 adaptive_height=True, theme_text_color="Custom", text_color=c(theme.MUTED)))
 
-    def _head_cell(self, text: str, width, col):
+    def _head_cell(self, text: str, width, col, small: bool = False):
         """Encabezado editable en el lugar: se toca y se escribe el nombre. «⋮» = mover,
         eliminar (columnas) o qué mostrar (1.ª columna). col=None: la 1.ª columna."""
         from kivy.uix.boxlayout import BoxLayout
@@ -375,8 +559,8 @@ class MeasureScreen(MDScreen):
         from kivymd.icon_definitions import md_icons
         head_bg, head_fg = c(SHEET_HEAD), c(SHEET_HEAD_FG)
         box = BoxLayout(size_hint=(None, None), size=(width, dp(42)))
-        ti = TextInput(text=text, multiline=False, write_tab=False, font_size="13sp",
-                       halign="center", padding=(dp(4), dp(12)), background_normal="",
+        ti = TextInput(text=text, multiline=False, write_tab=False, font_size="11.5sp" if small else "13sp",
+                       halign="center", padding=(dp(4), dp(13) if small else dp(12)), background_normal="",
                        background_active="", background_color=head_bg, foreground_color=head_fg,
                        cursor_color=head_fg, selection_color=c("#FFFFFF", .35))
         ti.native_edit = False        # se escribe directo sobre el encabezado
@@ -404,6 +588,22 @@ class MeasureScreen(MDScreen):
             ti.text = self._first["title"]
             return
         old = ti.col
+        import sheet_layout as SL
+        group, sub = SL.split(old)
+        if group is not None:                            # subcolumna: se renombra en todos los grupos
+            if not new or new == sub:
+                ti.text = sub
+                return
+            try:
+                for o, n in SL.rename_sub(self.measure["columns"], sub, SL.parse_vars(new)[0] if SL.parse_vars(new) else new):
+                    a.db.rename_measure_column(self.measure["id"], o, n)
+            except ValueError as exc:
+                a.toast(str(exc))
+                ti.text = sub
+                return
+            self.measure = a.db.get_measure(self.measure["id"])
+            Clock.schedule_once(lambda *_: self.refresh(), 0)
+            return
         if not new or new == old:
             ti.text = old
             return
@@ -452,20 +652,15 @@ class MeasureScreen(MDScreen):
 
     def fill_rows(self):
         a = app()
-        have = {e["variety_id"] for e in a.db.list_entries(self.measure["id"], week_id=self.week["id"])}
-        units = [v for v in a.db.list_varieties()
-                 if (a.db.is_parcel(v) if a.db.is_trial else not v.get("pheno_unit"))]
-        n = 0
-        with a.db.batch():
-            for v in units:
-                if v["id"] not in have:
-                    a.db.add_entry(self.measure["id"], self.week["id"], v["id"], data={})
-                    n += 1
+        n = a.db.fill_sheet_rows(self.measure["id"], self.week["id"])
         a.toast(f"{n} fila(s) agregada(s)" if n else "Ya hay una fila por cada una")
         self.refresh()
 
     def _cell_focus(self, ti, focused):
         if focused:
+            sv = getattr(self, "_sv", None)
+            if sv is not None and ti.parent is not None:
+                Clock.schedule_once(lambda *_: sv.scroll_to(ti, padding=dp(30), animate=False), 0)
             return
         data = self._rows.get(ti.entry_id)
         if data is None:
@@ -480,7 +675,15 @@ class MeasureScreen(MDScreen):
         app().db.update_entry(ti.entry_id, data=data)
 
     def _cell_next(self, ti):
-        """Enter: baja a la celda de la fila siguiente (misma columna)."""
+        """Enter: baja a la celda de la fila siguiente (misma columna). Planilla por plantas:
+        pasa a la derecha (laterales → largo → entrenudos → planta siguiente) y luego a la
+        fila de abajo."""
+        if getattr(self, "_grouped", False):
+            flat = [x for row in self._cells for x in row]
+            if ti in flat and flat.index(ti) + 1 < len(flat):
+                nxt = flat[flat.index(ti) + 1]
+                Clock.schedule_once(lambda *_: setattr(nxt, "focus", True), .05)
+            return
         for r, row in enumerate(self._cells):
             if ti in row and r + 1 < len(self._cells):
                 nxt = self._cells[r + 1][row.index(ti)]
@@ -514,9 +717,29 @@ class MeasureScreen(MDScreen):
             Clock.schedule_once(lambda *_: setattr(self._cells[-1][0], "focus", True), .15)
 
     def add_column(self):
-        """Columna nueva con nombre provisorio y el cursor en su encabezado para escribirlo."""
+        """Columna nueva con nombre provisorio y el cursor en su encabezado para escribirlo.
+        Planilla por plantas: otra planta, otra evaluación en todas o una columna suelta."""
         self.commit_cells()
         a = app()
+        import sheet_layout as SL
+        if SL.is_grouped(self.measure["columns"]) and not getattr(self, "_loose", False):
+            nxt = SL.next_group(self.measure["columns"])
+            word = SL.unit_word(self.measure["columns"])
+
+            def loose():
+                self._loose = True
+                try:
+                    self.add_column()
+                finally:
+                    self._loose = False
+
+            pick_dialog("Agregar", [
+                (f"Otra: «{nxt[0]}»", "Con las mismas evaluaciones", lambda: self._set_columns(
+                    self.measure["columns"] + nxt[1])),
+                (f"Otra evaluación en todas las {word}", "Ej.: Diámetro (mm)", self.add_evaluation),
+                ("Una columna suelta al final", "Ej.: Observaciones", loose),
+            ])
+            return
         cols = set(self.measure["columns"])
         n = len(cols) + 1
         while f"Columna {n}" in cols:
@@ -534,6 +757,29 @@ class MeasureScreen(MDScreen):
         self.commit_cells()
         a = app()
         mid = self.measure["id"]
+        import sheet_layout as SL
+        group, sub = SL.split(col)
+        if group is not None:
+            word = SL.unit_word(self.measure["columns"])
+            same = [x for x in self.measure["columns"] if SL.split(x)[0] is not None and SL.split(x)[1] == sub]
+
+            def rename_all():
+                ti = next((h for h in self._heads if h.col == col), None)
+                if ti is not None:
+                    Clock.schedule_once(lambda *_: setattr(ti, "focus", True), .3)
+
+            def drop(which):
+                confirm("Eliminar", f"Se eliminará{'n' if len(which) > 1 else ''} {len(which)} columna(s) "
+                        "y sus datos en todas las semanas.", [("Eliminar", lambda: self._set_columns(
+                            [x for x in self.measure["columns"] if x not in which]))])
+
+            pick_dialog(f"«{sub}» ({group})", [
+                ("Cambiar el nombre", f"En todas las {word}", rename_all),
+                (f"Eliminar «{sub}» en todas las {word}", f"{len(same)} columna(s) y sus datos",
+                 lambda: drop(same)),
+                (f"Eliminar solo la de {group}", "Esta columna y sus datos", lambda: drop([col])),
+            ])
+            return
 
         def rename():
             ti = next((h for h in self._heads if h.col == col), None)
@@ -568,6 +814,183 @@ class MeasureScreen(MDScreen):
             ("Mover a la derecha", "Cambia el orden de las columnas", lambda: move(1)),
             ("Eliminar columna", "Borra la columna y sus datos", remove),
         ])
+
+    def _set_columns(self, cols: list[str]) -> None:
+        """Nuevas columnas (las que salen pierden sus datos en todas las semanas)."""
+        a = app()
+        mid = self.measure["id"]
+        gone = [x for x in self.measure["columns"] if x not in cols]
+        try:
+            with a.db.batch():
+                for x in gone:
+                    a.db.delete_measure_column(mid, x)
+                a.db.update_measure(mid, columns=cols)
+        except ValueError as exc:
+            a.toast(str(exc))
+            return
+        self.measure = a.db.get_measure(mid)
+        self.refresh()
+
+    def add_evaluation(self):
+        import sheet_layout as SL
+        from kivy.factory import Factory
+        form = MDBoxLayout(orientation="vertical", adaptive_height=True, padding=(0, dp(8), 0, 0))
+        form.f = Factory.Field(hint_text="Nombre de la evaluación")
+        form.add_widget(form.f)
+
+        def ok(f):
+            name = (SL.parse_vars(f.f.text) or [""])[0]
+            if not name:
+                app().toast("Escriba el nombre")
+                return False
+            if any(SL.split(x)[1] == name for x in self.measure["columns"]):
+                app().toast(f"Ya existe «{name}»")
+                return False
+            self._set_columns(SL.add_sub(self.measure["columns"], name))
+
+        form_dialog(f"Otra evaluación en todas las {SL.unit_word(self.measure['columns'])}", form, ok, "AGREGAR")
+
+    def group_menu(self, group: str):
+        """Toque en «Planta 3»: cambiar el nombre, agregar otra o eliminarla."""
+        self.commit_cells()
+        import sheet_layout as SL
+        from kivy.factory import Factory
+        cols = self.measure["columns"]
+        nxt = SL.next_group(cols)
+        mine = [x for x in cols if SL.split(x)[0] == group]
+
+        def rename():
+            form = MDBoxLayout(orientation="vertical", adaptive_height=True, padding=(0, dp(8), 0, 0))
+            form.f = Factory.Field(hint_text="Nombre", text=group)
+            form.add_widget(form.f)
+
+            def ok(f):
+                new = " ".join(f.f.text.replace(SL.SEP.strip(), " ").split())
+                if not new or new == group:
+                    return
+                if any(SL.split(x)[0] == new for x in cols):
+                    app().toast(f"Ya existe «{new}»")
+                    return False
+                a = app()
+                try:
+                    with a.db.batch():
+                        for x in mine:
+                            a.db.rename_measure_column(self.measure["id"], x, SL.join(new, SL.split(x)[1]))
+                except ValueError as exc:
+                    a.toast(str(exc))
+                    return False
+                self.measure = a.db.get_measure(self.measure["id"])
+                self.refresh()
+
+            form_dialog(f"Cambiar «{group}»", form, ok)
+
+        items = [("Cambiar el nombre", f"Ej.: {group} a «Planta norte»", rename)]
+        if nxt:
+            items.append((f"Agregar «{nxt[0]}»", "Al final, con las mismas evaluaciones",
+                          lambda: self._set_columns(cols + nxt[1])))
+        items.append((f"Eliminar «{group}»", f"{len(mine)} columna(s) y sus datos en todas las semanas",
+                      lambda: confirm("Eliminar", f"Se eliminará «{group}» con sus datos.",
+                                      [("Eliminar", lambda: self._set_columns(
+                                          [x for x in cols if x not in mine]))])))
+        pick_dialog(group, items)
+
+    def structure(self):
+        """«Ordenar planilla»: el mismo asistente de la planilla nueva, sobre esta."""
+        self.commit_cells()
+        a = app()
+        form = _structure_box(a.db, self.measure["columns"])
+
+        def ok(f):
+            try:
+                cols, reps = f.result()
+                a.db.structure_measure(self.measure["id"], cols)
+                n = a.db.fill_sheet_rows(self.measure["id"], self.week["id"], reps)
+            except ValueError as exc:
+                a.toast(str(exc))
+                return False
+            self.measure = a.db.get_measure(self.measure["id"])
+            self.refresh()
+            a.toast(f"Planilla ordenada · {n} fila(s) nueva(s)" if n else "Planilla ordenada")
+
+        form_dialog("Ordenar planilla", form, ok, "APLICAR")
+
+    # ------------------------------------------------- copiar / pegar celdas
+    def cell_menu(self, ti):
+        """Mantener presionada una celda: copiar, cortar, pegar (también un bloque copiado de
+        Excel o Sheets), borrar o rellenar hacia abajo. En español y con el portapapeles real."""
+        import clip
+        self.commit_cells()
+        a = app()
+        try:
+            got = clip.paste()
+        except Exception as exc:  # noqa: BLE001
+            got = ""
+            print("pegar:", exc)
+        block = clip.table(got)
+        n = sum(len(r) for r in block)
+        pos = next(((r, row.index(ti)) for r, row in enumerate(self._cells) if ti in row), None)
+
+        def put(cell, value):
+            cell.text = value
+            self._cell_focus(cell, False)
+
+        def do_copy(cut=False):
+            try:
+                clip.copy(ti.text)
+                if cut:
+                    put(ti, "")
+                a.toast("Copiado" if not cut else "Cortado")
+            except Exception as exc:  # noqa: BLE001
+                a.toast(f"No se pudo copiar: {exc}")
+
+        def do_paste():
+            done = self.paste_block(ti, block)
+            if n > 1:
+                a.toast(f"{done} valor(es) pegado(s)" + ("" if done == n else f" (de {n}: faltan filas o columnas)"))
+
+        def fill_down():
+            if pos is None:
+                return
+            r0, c0 = pos
+            with a.db.batch():
+                for row in self._cells[r0 + 1:]:
+                    put(row[c0], ti.text)
+
+        def copy_row():
+            if pos is not None:
+                clip.copy("\t".join(x.text for x in self._cells[pos[0]]))
+                a.toast("Fila copiada (se pega en Excel o en otra fila)")
+
+        preview = (got[:30] + "…") if len(got) > 30 else got
+        items = [("Copiar", ti.text or "(vacía)", do_copy),
+                 ("Cortar", "Copia y deja la celda vacía", lambda: do_copy(True))]
+        if n > 1:
+            items.append((f"Pegar {n} valores desde aquí", "Copiados de Excel, Sheets u otra fila", do_paste))
+        elif got:
+            items.append(("Pegar", preview.replace("\n", " "), do_paste))
+        items += [("Borrar", "Deja la celda vacía", lambda: put(ti, "")),
+                  ("Rellenar hacia abajo", "Copia este valor en las filas de abajo", fill_down),
+                  ("Copiar la fila", "Todos los valores de esta fila", copy_row)]
+        pick_dialog("Celda", items)
+
+    def paste_block(self, ti, block: list[list[str]]) -> int:
+        """Pega un bloque (filas × columnas) desde la celda `ti` hacia la derecha y abajo."""
+        pos = next(((r, row.index(ti)) for r, row in enumerate(self._cells) if ti in row), None)
+        if pos is None:
+            return 0
+        r0, c0 = pos
+        done = 0
+        with app().db.batch():
+            for dr, vals in enumerate(block):
+                if r0 + dr >= len(self._cells):
+                    break
+                row = self._cells[r0 + dr]
+                for dc, v in enumerate(vals):
+                    if c0 + dc < len(row):
+                        row[c0 + dc].text = v.strip()
+                        self._cell_focus(row[c0 + dc], False)
+                        done += 1
+        return done
 
     def row_menu(self, entry: dict, n: int):
         self.commit_cells()

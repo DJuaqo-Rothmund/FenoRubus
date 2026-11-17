@@ -1446,6 +1446,50 @@ class Database:
                     self.execute("UPDATE measure_entries SET data=? WHERE id=?",
                                  (json.dumps(data, ensure_ascii=False), e["id"]))
 
+    def structure_measure(self, measure_id: int, columns: list[str]) -> list[str]:
+        """Ordena una planilla con las columnas del asistente (ej.: «Planta 1 · Largo»…).
+        Las columnas con datos se conservan (al final); las vacías provisorias
+        («Columna 1»…) se quitan."""
+        m = self.get_measure(measure_id)
+        used = set()
+        for e in self.query("SELECT data FROM measure_entries WHERE measure_id=?", (measure_id,)):
+            used |= {k for k, v in json.loads(e["data"] or "{}").items() if str(v).strip()}
+        keep = [c for c in m["columns"] if c not in columns and c in used]
+        cols = list(columns) + keep
+        self.update_measure(measure_id, columns=cols)
+        return cols
+
+    def sheet_units(self) -> list[dict]:
+        """Lo que va en cada fila: las parcelas del ensayo o las variedades."""
+        return [v for v in self.list_varieties()
+                if (self.is_parcel(v) if self.is_trial else not v.get("pheno_unit"))]
+
+    def fill_sheet_rows(self, measure_id: int, week_id: int, reps: int | None = None) -> int:
+        """Agrega las filas que falten en la semana: una por parcela (ensayo) o una por
+        variedad; con la columna «Rep.» (sin ensayo), una por variedad y repetición."""
+        import sheet_layout as SL
+        m = self.get_measure(measure_id)
+        entries = self.list_entries(measure_id, week_id=week_id)
+        with_rep = SL.REP_COL in m["columns"] and not self.is_trial
+        if with_rep and reps is None:          # las mismas repeticiones de otras semanas
+            reps = 1
+            for e in self.list_entries(measure_id):
+                try:
+                    reps = max(reps, int(float(str(e["data"].get(SL.REP_COL, 0)).replace(",", "."))))
+                except ValueError:
+                    pass
+        have = {(e["variety_id"], str(e["data"].get(SL.REP_COL, "")) if with_rep else "") for e in entries}
+        n = 0
+        with self.batch():
+            for v in self.sheet_units():
+                for r in range(1, (reps or 1) + 1) if with_rep else [None]:
+                    key = (v["id"], str(r) if with_rep else "")
+                    if key in have:
+                        continue
+                    self.add_entry(measure_id, week_id, v["id"], data={SL.REP_COL: str(r)} if with_rep else {})
+                    n += 1
+        return n
+
     def delete_measure(self, measure_id: int) -> None:
         self.execute("DELETE FROM measures WHERE id=?", (measure_id,))
         self.log("delete", "measure", measure_id)
