@@ -641,3 +641,14 @@ dialog.rcfg { width: min(720px, 96vw); background: #FBF8F1; }
 .tthumb.review { outline: 3px solid #FFB74D; outline-offset: -3px; }
 .treview { background: #FFB74D; color: #2A1A00; padding: 6px 12px; font-size: 13px; }
 .tbtn.tsave.confirm { background: #2E7D32; box-shadow: 0 0 0 3px #FFB74D; }
+
+/* Editor de cajas: estadios arriba y botones abajo centrados (si no caben, la barra se desliza) */
+.tclassbar > :first-child { margin-left: auto; }
+.tclassbar > :last-child { margin-right: auto; }
+.ttools { position: relative; justify-content: center; }
+.ttools .spacer { display: none; }
+.ttools .tcount { position: absolute; left: 12px; top: 50%; transform: translateY(-50%); max-width: calc(50% - 170px); }
+@media (max-width: 760px) {
+  .ttools { flex-wrap: wrap; }
+  .ttools .tcount { position: static; transform: none; max-width: none; flex-basis: 100%; justify-content: center; text-align: center; }
+}
