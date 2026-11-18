@@ -889,10 +889,11 @@ class BoxCanvas(StencilView):
 
 
 class _Pill(ButtonBehavior, Label):
-    def __init__(self, text, color=None, on=False, **kw):
-        super().__init__(text=text, font_size=sp(13), color=(1, 1, 1, 1), size_hint=(None, None), height=dp(36), **kw)
+    def __init__(self, text, color=None, on=False, round_=False, **kw):
+        super().__init__(text=text, font_size=sp(20 if round_ else 13), color=(1, 1, 1, 1), size_hint=(None, None),
+                         height=dp(40 if round_ else 36), **kw)
         self.texture_update()
-        self.width = self.texture_size[0] + dp(28 if color else 22)
+        self.width = dp(40) if round_ else self.texture_size[0] + dp(28 if color else 22)
         self.dot = color
         self.on = on
         self.bind(pos=self.draw, size=self.draw, state=self.draw)
@@ -907,7 +908,7 @@ class _Pill(ButtonBehavior, Label):
         with self.canvas.before:
             Color(1, 1, 1, .95 if self.on else (.22 if self.state == "down" else .1))
             from kivy.graphics import RoundedRectangle
-            RoundedRectangle(pos=self.pos, size=self.size, radius=[dp(18)])
+            RoundedRectangle(pos=self.pos, size=self.size, radius=[min(self.width, self.height) / 2])
             if self.dot:
                 Color(*c(self.dot))
                 RoundedRectangle(pos=(self.x + dp(9), self.center_y - dp(5)), size=(dp(10), dp(10)), radius=[dp(3)])
@@ -986,9 +987,9 @@ class _IconBtn(ButtonBehavior, Widget):
         self.canvas.clear()
         with self.canvas:
             if self.glow:                                  # aura sutil que «respira»
-                for k, a in ((1.55, .10), (1.35, .16), (1.18, .24)):
+                for k, a in ((1.32, .10), (1.22, .16), (1.12, .24)):
                     Color(.70, .45, 1, a * (.65 + .35 * self.pulse))
-                    r = self.width * (k + .06 * self.pulse)
+                    r = self.width * (k + .04 * self.pulse)
                     Ellipse(pos=(self.center_x - r / 2, self.center_y - r / 2), size=(r, r))
             Color(*c(self.bg)[:3], .78 if self.state == "down" else 1)
             Ellipse(pos=self.pos, size=self.size)
@@ -1001,7 +1002,7 @@ class _IconBtn(ButtonBehavior, Widget):
 
 class BoxEditor(ModalView):
     """Una foto a pantalla completa para marcar sus cajas; ‹ › recorren la lista."""
-    HINT = "Un dedo: crear o mover cajas · dos dedos: acercar y mover · elija el estadio arriba"
+    HINT = "Un dedo: crear o mover cajas · dos dedos: acercar y mover"
 
     def __init__(self, photos: list, index: int, on_close=None, **kw):
         super().__init__(size_hint=(1, 1), auto_dismiss=False, background_color=(.08, .07, .06, 1), **kw)
@@ -1009,17 +1010,19 @@ class BoxEditor(ModalView):
         self.cur = "flor"
         self.sel = None
         root = BoxLayout(orientation="vertical")
-        top = BoxLayout(size_hint_y=None, height=dp(54), padding=(dp(6), dp(6)), spacing=dp(6))
-        close = _Pill("×")
+        top = BoxLayout(size_hint_y=None, height=dp(50), padding=(dp(6), dp(5)), spacing=dp(6))
+        close = _Pill("×", round_=True)
         close.bind(on_release=lambda *_: self.dismiss())
         top.add_widget(close)
-        self.title = Label(text="", bold=True, font_size=sp(14), halign="left", valign="middle", shorten=True,
-                           shorten_from="right", color=(1, 1, 1, 1))
-        self.title.bind(size=lambda w, s: setattr(w, "text_size", s))
+        # Nombre completo: hasta 2 líneas y la letra se achica si no cabe (no se corta).
+        self.title = Label(text="", bold=True, font_size=sp(13), halign="left", valign="middle", max_lines=2,
+                           color=(1, 1, 1, 1), line_height=.95)
+        self.title.bind(size=lambda w, s: (setattr(w, "text_size", s), self._fit_title()),
+                        text=lambda *_: self._fit_title())
         top.add_widget(self.title)
-        self.prev_b = _Pill("‹")
+        self.prev_b = _Pill("‹", round_=True)
         self.prev_b.bind(on_release=lambda *_: self.go(-1))
-        self.next_b = _Pill("Siguiente ›")
+        self.next_b = _Pill("›", round_=True)
         self.next_b.bind(on_release=lambda *_: self.go(1))
         top.add_widget(self.prev_b)
         top.add_widget(self.next_b)
@@ -1044,11 +1047,18 @@ class BoxEditor(ModalView):
         self.canvas_w = BoxCanvas(self)
         root.add_widget(self.canvas_w)
         # Abajo, fijos: el conteo y 4 íconos (IA, encuadrar, borrar caja, guardar).
-        tools = BoxLayout(size_hint_y=None, height=dp(62), padding=(dp(12), dp(8)), spacing=dp(10))
-        self.count = Label(text="", font_size=sp(12), color=(1, 1, 1, .9), halign="left", valign="middle",
-                           markup=True)
-        self.count.bind(size=lambda w, s: setattr(w, "text_size", s))
+        # Botones centrados; el conteo a la izquierda, en el espacio que queda libre.
+        from kivy.uix.floatlayout import FloatLayout
+        tools = FloatLayout(size_hint_y=None, height=dp(66))
+        btns = BoxLayout(size_hint=(None, None), size=(dp(46) * 4 + dp(12) * 3, dp(46)), spacing=dp(12),
+                         pos_hint={"center_x": .5, "center_y": .5})
+        self.count = Label(text="", font_size=sp(11), color=(1, 1, 1, .9), halign="left", valign="middle",
+                           markup=True, size_hint=(None, 1), pos_hint={"x": 0, "y": 0})
+        tools.bind(width=lambda w, v: setattr(self.count, "width", max(dp(40), (v - btns.width) / 2 - dp(6))))
+        self.count.bind(size=lambda w, s: setattr(w, "text_size", (s[0] - dp(10), s[1])))
+        self.count.padding = (dp(10), 0)
         tools.add_widget(self.count)
+        tools.add_widget(btns)
         self.ai_b = _IconBtn("creation", "#8E44FF", glow=True)
         self.ai_b.bind(on_release=lambda *_: self.suggest())
         self.save_b = _IconBtn("content-save-outline", "#2E7D32")
@@ -1057,10 +1067,11 @@ class BoxEditor(ModalView):
                       (self.save_b, self.save_now)):
             if fn:
                 w.bind(on_release=lambda _w, fn=fn: fn())
-            tools.add_widget(w)
+            btns.add_widget(w)
         root.add_widget(tools)
-        self.hint = Label(text=self.HINT, font_size=sp(11), color=(1, 1, 1, .7), size_hint_y=None, height=dp(30),
-                          markup=True, halign="center", valign="middle")
+        self.hint = Label(text=self.HINT, font_size=sp(11), color=(1, 1, 1, .7), size_hint_y=None, height=dp(18),
+                          markup=True, halign="center", valign="middle", shorten=True, shorten_from="right",
+                          max_lines=1)
         self.hint.bind(size=lambda w, s: setattr(w, "text_size", (s[0] - dp(12), s[1])))
         root.add_widget(self.hint)
         self.add_widget(root)
@@ -1069,6 +1080,19 @@ class BoxEditor(ModalView):
         from android_bridge import allow_rotation
         allow_rotation(True)                 # en horizontal la foto se ve más grande
         Clock.schedule_once(lambda *_: self.show(self.i), 0)
+
+    def _fit_title(self, *_):
+        """Achica la letra del nombre hasta que quepa entero (máx. 2 líneas)."""
+        t = self.title
+        if not t.text or t.width < 10:
+            return
+        for size in (13, 12, 11, 10, 9):
+            lab = CoreLabel(text=t.text, font_size=sp(size), bold=True, text_size=(t.width, None),
+                            halign="left", line_height=.95)
+            lab.refresh()
+            if lab.texture.height <= t.height + 1:
+                break
+        t.font_size = sp(size)
 
     def _closed(self):
         from android_bridge import allow_rotation
@@ -1157,8 +1181,8 @@ class BoxEditor(ModalView):
             self.count.text = f"{dots}\n[b]{total} en total[/b]" if total else "Sin cajas"
         self.empty_b.set_on(bool(self.rec.get("empty")))
         review = bool(self.rec.get("review"))
-        self.hint.text = ("[color=#FFB74D][b]Analizada por IA · falta confirmar:[/b][/color] corrija las cajas y "
-                          "toque el botón verde (confirma y pasa a la siguiente)") if review else self.HINT
+        self.hint.text = ("[color=#FFB74D][b]IA · falta confirmar:[/b][/color] corrija y toque el botón verde"
+                          if review else self.HINT)
         self.save_b.set_icon("check-bold" if review else "content-save-outline")
 
     # ---------------------------------------------------------- acciones
