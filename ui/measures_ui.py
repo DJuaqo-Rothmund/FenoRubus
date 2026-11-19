@@ -467,6 +467,30 @@ def _stack(top, below):
     return box
 
 
+from kivy.uix.behaviors import ButtonBehavior  # noqa: E402
+from kivy.uix.widget import Widget  # noqa: E402
+
+
+class _ImgCircle(ButtonBehavior, Widget):
+    """Botón redondo claro con un ícono en imagen (los dibujados a mano: Excel, guardar)."""
+
+    def __init__(self, source, cb, **kw):
+        super().__init__(size_hint=(None, None), size=(dp(40), dp(40)), pos_hint={"center_y": .5}, **kw)
+        from kivy.core.image import Image as CoreImage
+        self.tex = CoreImage(source, mipmap=True).texture
+        self.bind(pos=self._draw, size=self._draw, state=self._draw, on_release=lambda *_: cb())
+
+    def _draw(self, *_):
+        from kivy.graphics import Color, Ellipse, Rectangle
+        self.canvas.clear()
+        s = dp(23)
+        with self.canvas:
+            Color(1, 1, 1, .7 if self.state == "down" else .88)
+            Ellipse(pos=self.pos, size=self.size)
+            Color(1, 1, 1, 1)
+            Rectangle(texture=self.tex, pos=(self.center_x - s / 2, self.center_y - s / 2), size=(s, s))
+
+
 def _round_action(icon, cb, bg=None, fg=None):
     """Botón redondo solo con ícono (la barra de abajo de la planilla)."""
     from kivymd.uix.button import MDIconButton
@@ -546,18 +570,21 @@ class MeasureScreen(MDScreen):
         self.refresh()
 
     def _top_actions(self):
-        """Arriba a la derecha, en círculos suaves: lupas de la letra (planillas), Excel y guardar."""
+        """Arriba a la derecha, en círculos claros: lupas de la letra (planillas), Excel y guardar
+        (estos dos con íconos propios)."""
         from kivymd.uix.button import MDIconButton
-        items = [("file-excel-outline", self.export), ("content-save-outline", self.save)]
+        items = [(theme.ICO_EXCEL, self.export), (theme.ICO_SAVE, self.save)]
         if self.measure["kind"] == "table":
-            items = [("magnify-minus", lambda: self.set_zoom(-1)),
-                     ("magnify-plus", lambda: self.set_zoom(1))] + items
+            items = [("magnify-minus", lambda: self.set_zoom(-1)), ("magnify-plus", lambda: self.set_zoom(1))] + items
         box = self.ids.top_tools
         fast_clear(box)
         for icon, cb in items:
-            box.add_widget(MDIconButton(icon=icon, on_release=lambda *_, f=cb: f(), icon_size=dp(20),
-                                        md_bg_color=c(theme.SURFACE, .85), theme_icon_color="Custom",
-                                        icon_color=c(theme.LEAF_DARK), pos_hint={"center_y": .5}))
+            if icon.endswith(".png"):
+                box.add_widget(_ImgCircle(icon, cb))
+            else:
+                box.add_widget(MDIconButton(icon=icon, on_release=lambda *_, f=cb: f(), icon_size=dp(20),
+                                            md_bg_color=(1, 1, 1, .88), theme_icon_color="Custom",
+                                            icon_color=c(theme.LEAF_DARK), pos_hint={"center_y": .5}))
 
     def toggle_hint(self):
         self.show_hint(not getattr(self, "_hint_on", False))
