@@ -55,9 +55,9 @@ def _glyph(name: str) -> str:
     return md_icons.get(name, "")
 
 
-# Íconos dibujados (Flow) de cada informe. ART_STYLE: "tile" (cuadro claro), "blob" (burbuja de
-# su color) o "free" (sin fondo, más grande).
-ART_STYLE = os.environ.get("AEON_REP_STYLE", "tile")
+# Íconos dibujados (Flow) de cada informe. ART_STYLE: "free" (sin fondo, elegido), "tile" (cuadro claro)
+# o "blob" (burbuja de su color).
+ART_STYLE = os.environ.get("AEON_REP_STYLE", "free")
 _ART_TEX: dict = {}
 
 
