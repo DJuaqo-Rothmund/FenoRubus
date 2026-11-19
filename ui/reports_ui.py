@@ -39,6 +39,160 @@ class ReportGroup(GlassButton):
     tab = ObjectProperty(None, allownone=True)
 
 
+# --------------------------------------------- filas de informe (opción B)
+from kivy.graphics import Color, RoundedRectangle  # noqa: E402
+from kivy.metrics import dp, sp  # noqa: E402
+from kivy.uix.behaviors import ButtonBehavior  # noqa: E402
+from kivy.uix.boxlayout import BoxLayout  # noqa: E402
+from kivy.uix.label import Label  # noqa: E402
+from kivy.uix.stacklayout import StackLayout  # noqa: E402
+from kivy.uix.widget import Widget  # noqa: E402
+from ui.common import GlassCard  # noqa: E402
+
+
+def _glyph(name: str) -> str:
+    from kivymd.icon_definitions import md_icons
+    return md_icons.get(name, "")
+
+
+class GradIcon(Widget):
+    """Ícono de línea (Material) blanco sobre un cuadrado redondeado con degradado."""
+    icon = StringProperty("file-document-outline")
+    c1 = StringProperty("#3E8A63")
+    c2 = StringProperty("#1E4A3A")
+
+    def __init__(self, **kw):
+        super().__init__(size_hint=(None, None), size=(dp(48), dp(48)), **kw)
+        self.bind(pos=self._draw, size=self._draw, icon=self._draw, c1=self._draw, c2=self._draw)
+
+    def _draw(self, *_):
+        from kivy.core.text import Label as CoreLabel
+        from ui.ws_cards import gradient
+        self.canvas.clear()
+        lab = CoreLabel(text=_glyph(self.icon), font_name="Icons", font_size=sp(25), color=(1, 1, 1, 1))
+        lab.refresh()
+        t = lab.texture
+        with self.canvas:
+            Color(0, 0, 0, .10)
+            RoundedRectangle(pos=(self.x, self.y - dp(2)), size=self.size, radius=[dp(16)])
+            Color(1, 1, 1, 1)
+            RoundedRectangle(pos=self.pos, size=self.size, radius=[dp(16)], texture=gradient(self.c1, self.c2))
+            RoundedRectangle(texture=t, size=t.size, pos=(self.center_x - t.width / 2, self.center_y - t.height / 2))
+
+
+class ChipButton(ButtonBehavior, BoxLayout):
+    """Pastilla para elegir (semana, rango, parcela…): ícono chico + texto, ancho justo."""
+    text = StringProperty("")
+    icon = StringProperty("")
+
+    def __init__(self, **kw):
+        super().__init__(size_hint=(None, None), height=dp(32), padding=(dp(10), 0, dp(12), 0),
+                         spacing=dp(5), **kw)
+        col = c(theme.LEAF_DARK)
+        self._ic = Label(font_name="Icons", font_size=sp(15), color=col, size_hint=(None, 1), width=dp(16))
+        self._lb = Label(font_size=sp(12.5), bold=True, color=col, size_hint=(None, 1), shorten=True,
+                         shorten_from="right", halign="left", valign="middle")
+        self.add_widget(self._ic)
+        self.add_widget(self._lb)
+        self.bind(text=self._fit, icon=self._fit, pos=self._bg, size=self._bg, state=self._bg,
+                  parent=self._on_parent, disabled=self._bg)
+        self._fit()
+
+    def _on_parent(self, *_):
+        if self.parent is not None:
+            self.parent.bind(width=self._fit)      # al conocer el ancho real, se ajusta
+        self._fit()
+
+    def _fit(self, *_):
+        self._ic.text = _glyph(self.icon) if self.icon else ""
+        self._ic.width = dp(16) if self.icon else 0
+        self._lb.text = self.text
+        self._lb.text_size = (None, None)
+        self._lb.texture_update()
+        room = (self.parent.width - dp(4)) if self.parent and self.parent.width > 100 else dp(300)
+        w = min(self._lb.texture_size[0] + dp(6), room - self._ic.width - dp(30))   # holgura: sin «…» de más
+        self._lb.width = w
+        self._lb.text_size = (w, None)
+        self.width = w + self._ic.width + dp(27)
+
+    def _bg(self, *_):
+        self.canvas.before.clear()
+        with self.canvas.before:
+            Color(*c(theme.LEAF_DARK)[:3], .16 if self.state == "down" else .08)
+            RoundedRectangle(pos=self.pos, size=self.size, radius=[self.height / 2])
+
+
+class ReportItem(GlassCard):
+    """Fila de un informe: ícono con degradado · título, descripción y pastillas · botón PDF."""
+    icon = StringProperty("file-document-outline")
+    c1 = StringProperty("#3E8A63")
+    c2 = StringProperty("#1E4A3A")
+    title = StringProperty("")
+    desc = StringProperty("")
+    go_text = StringProperty("PDF")
+    __events__ = ("on_go",)
+
+    def __init__(self, **kw):
+        self._ready = False
+        super().__init__(orientation="horizontal", size_hint_y=None, padding=(dp(12), dp(12), dp(10), dp(12)),
+                         spacing=dp(12), **kw)
+        self.radius = [dp(20)]
+        self.gi = GradIcon(pos_hint={"top": 1})
+        self.col = BoxLayout(orientation="vertical", size_hint_y=None, height=0, spacing=dp(3))
+        self.col.bind(minimum_height=self.col.setter("height"))
+        self.t = MDLabel(bold=True, font_style="Subtitle1", adaptive_height=True, theme_text_color="Custom",
+                         text_color=c(theme.INK))
+        self.d = MDLabel(font_style="Caption", adaptive_height=True, theme_text_color="Custom",
+                         text_color=c(theme.MUTED))
+        self.extra = BoxLayout(orientation="vertical", size_hint_y=None, height=0, spacing=dp(2))
+        self.extra.bind(minimum_height=self.extra.setter("height"))
+        self.chips = StackLayout(size_hint_y=None, height=0, spacing=dp(6), padding=(0, dp(4), 0, 0))
+        self.chips.bind(minimum_height=self.chips.setter("height"))
+        for w in (self.t, self.d, self.extra, self.chips):
+            self.col.add_widget(w)
+        self.go = Label(text=self.go_text, bold=True, font_size=sp(12), color=(1, 1, 1, 1),
+                        size_hint=(None, None), size=(dp(46), dp(46)), pos_hint={"center_y": .5})
+        self.go.bind(pos=self._go_bg, size=self._go_bg)
+        self.go.bind(on_touch_down=self._go_touch)
+        super().add_widget(self.gi)
+        super().add_widget(self.col)
+        super().add_widget(self.go)
+        self.col.bind(height=self._fit)
+        self.bind(icon=self._sync, c1=self._sync, c2=self._sync, title=self._sync, desc=self._sync,
+                  go_text=self._sync)
+        self._ready = True
+        self._sync()
+
+    def add_widget(self, widget, *args, **kw):
+        if not getattr(self, "_ready", False):
+            return super().add_widget(widget, *args, **kw)
+        # Lo que se pone en el KV: pastillas abajo; textos extra (avisos) bajo la descripción.
+        (self.chips if isinstance(widget, ChipButton) else self.extra).add_widget(widget)
+
+    def _sync(self, *_):
+        self.gi.icon, self.gi.c1, self.gi.c2 = self.icon, self.c1, self.c2
+        self.t.text, self.d.text = self.title, self.desc
+        self.go.text = self.go_text
+
+    def _fit(self, *_):
+        self.height = max(dp(72), self.col.height + dp(24))
+
+    def _go_bg(self, *_):
+        self.go.canvas.before.clear()
+        with self.go.canvas.before:
+            Color(*c(theme.BERRY)[:3], 1)
+            RoundedRectangle(pos=self.go.pos, size=self.go.size, radius=[self.go.width / 2])
+
+    def _go_touch(self, w, touch):
+        if w.collide_point(*touch.pos) and not self.disabled:
+            self.dispatch("on_go")
+            return True
+        return False
+
+    def on_go(self, *_):
+        pass
+
+
 # Grupos de la lista de informes: (prefijo del archivo, título)
 REPORT_GROUPS = [("semanal", "Reportes semanales"), ("periodo", "Evolución mensual / rango"),
                  ("variedad", "Fichas por variedad"), ("matriz", "Matriz comparativa"),
@@ -95,8 +249,7 @@ class ReportsTab(MDScreen):
         elif not trial and card.parent is not None:
             self._card_parent, self._card_index = card.parent, card.parent.children.index(card)
             card.parent.remove_widget(card)
-        self.ids.variety_title.text = ("3 · FICHA COMPLETA POR PARCELA" if trial
-                                       else "3 · FICHA COMPLETA POR VARIEDAD")
+        self.ids.variety_title.title = "Ficha completa por parcela" if trial else "Ficha completa por variedad"
         self._labels()
         self._gdd_label()
         self._cmp_label()
@@ -177,7 +330,7 @@ class ReportsTab(MDScreen):
 
     def _labels(self):
         ids = self.ids
-        ids.week_btn.text = f"{ph.week_title(self.sel_week)} · {self.sel_week['label']}"
+        ids.week_btn.text = ph.week_title(self.sel_week)
         ids.from_btn.text = f"Desde {ph.week_short(self.sel_from)}"
         ids.to_btn.text = f"Hasta {ph.week_short(self.sel_to)}"
         ids.month_btn.text = (f"Mes: {ph.MESES[self.sel_month[1] - 1].capitalize()} {self.sel_month[0]}"

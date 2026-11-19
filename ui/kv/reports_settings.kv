@@ -13,141 +13,144 @@
             orientation: "vertical"
             adaptive_height: True
             padding: dp(16), dp(14), dp(16), dp(24)
-            spacing: dp(12)
-            PaperCard:
-                SectionLabel:
-                    text: "CONFIGURACIÓN DE INFORMES"
-                Muted:
-                    id: cfg_summary
-                    text: ""
-                GhostButton:
+            spacing: dp(10)
+            # Configuración: una sola línea (toque para ajustar).
+            GlassButton:
+                orientation: "horizontal"
+                size_hint_y: None
+                height: dp(48)
+                padding: dp(16), 0, dp(12), 0
+                radius: [dp(16)]
+                on_release: root.open_config()
+                MDIcon:
                     icon: "tune-variant"
-                    text: "Configuración de informes"
-                    on_release: root.open_config()
-            PaperCard:
-                SectionLabel:
-                    text: "1 · REPORTE SEMANAL INTER-VARIETAL"
-                Muted:
-                    text: "Todas las variedades lado a lado: canopia, detalle, estado BBCH y notas."
-                GhostButton:
+                    size_hint_x: None
+                    width: dp(28)
+                    pos_hint: {"center_y": .5}
+                    theme_text_color: "Custom"
+                    text_color: c(theme.LEAF_DARK)
+                MDLabel:
+                    id: cfg_summary
+                    font_style: "Caption"
+                    shorten: True
+                    theme_text_color: "Custom"
+                    text_color: c(theme.MUTED)
+                MDLabel:
+                    text: "Ajustar ›"
+                    bold: True
+                    halign: "right"
+                    size_hint_x: None
+                    width: dp(80)
+                    theme_text_color: "Custom"
+                    text_color: c(theme.LEAF_DARK)
+            ReportItem:
+                icon: "calendar-week"
+                c1: "#3E8A63"
+                c2: "#1E4A3A"
+                title: "Semanal inter-varietal"
+                desc: "Todas las variedades lado a lado: canopia, detalle, estado BBCH y notas."
+                on_go: root.generate("weekly")
+                ChipButton:
                     id: week_btn
-                    icon: "calendar-week"
+                    icon: "calendar-blank-outline"
                     text: "Seleccionar semana"
                     on_release: root.pick_week(self, "week")
-                PrimaryButton:
-                    text: "Generar PDF"
-                    on_release: root.generate("weekly")
-                GhostButton:
+                ChipButton:
                     icon: "folder-zip-outline"
-                    text: "Todos los semanales (ZIP)"
+                    text: "Todos (ZIP)"
                     on_release: root.generate_all_weekly()
-            PaperCard:
-                SectionLabel:
-                    text: "2 · EVOLUCIÓN MENSUAL / RANGO DE SEMANAS"
-                Muted:
-                    text: "Avance de todas las variedades a lo largo de un mes o rango de semanas."
-                GhostButton:
+            ReportItem:
+                icon: "chart-timeline-variant"
+                c1: "#C2365F"
+                c2: "#7E1238"
+                title: "Evolución mensual / rango"
+                desc: "Avance de todas las variedades en un mes o en un rango de semanas."
+                on_go: root.generate("period")
+                ChipButton:
                     id: month_btn
-                    icon: "calendar-month"
+                    icon: "calendar-month-outline"
                     text: "Elegir mes"
                     on_release: root.pick_month(self)
-                MDBoxLayout:
-                    adaptive_height: True
-                    spacing: dp(8)
-                    GhostButton:
-                        id: from_btn
-                        icon: "ray-start"
-                        text: "Desde"
-                        on_release: root.pick_week(self, "from")
-                    GhostButton:
-                        id: to_btn
-                        icon: "ray-end"
-                        text: "Hasta"
-                        on_release: root.pick_week(self, "to")
-                PrimaryButton:
-                    text: "Generar PDF"
-                    on_release: root.generate("period")
-            PaperCard:
-                SectionLabel:
-                    id: variety_title
-                    text: "3 · FICHA COMPLETA POR VARIEDAD"
-                Muted:
-                    text: "Timeline de brotación a cosecha con datos biométricos y rendimiento."
-                GhostButton:
+                ChipButton:
+                    id: from_btn
+                    icon: "ray-start"
+                    text: "Desde"
+                    on_release: root.pick_week(self, "from")
+                ChipButton:
+                    id: to_btn
+                    icon: "ray-end"
+                    text: "Hasta"
+                    on_release: root.pick_week(self, "to")
+            ReportItem:
+                id: variety_title
+                icon: "sprout-outline"
+                c1: "#4B7F8C"
+                c2: "#23485A"
+                title: "Ficha completa por variedad"
+                desc: "Timeline de brotación a cosecha con datos biométricos y rendimiento."
+                on_go: root.generate("variety")
+                ChipButton:
                     id: variety_btn
                     icon: "fruit-cherries"
                     text: "Seleccionar variedad"
                     on_release: root.pick_variety(self)
-                PrimaryButton:
-                    text: "Generar PDF"
-                    on_release: root.generate("variety")
-            PaperCard:
-                SectionLabel:
-                    text: "4 · MATRIZ COMPARATIVA GLOBAL"
-                Muted:
-                    text: "Heatmap BBCH, precocidad relativa, hitos fenológicos y galería paralela de la temporada."
-                PrimaryButton:
-                    text: "Generar PDF"
-                    on_release: root.generate("matrix")
-            PaperCard:
+            ReportItem:
+                icon: "view-grid-outline"
+                c1: "#8A7A3E"
+                c2: "#5A4A1E"
+                title: "Matriz comparativa global"
+                desc: "Heatmap BBCH, precocidad relativa, hitos y galería paralela de la temporada."
+                on_go: root.generate("matrix")
+            ReportItem:
                 id: trial_card
-                SectionLabel:
-                    text: "5 · COMPARACIÓN DE TRATAMIENTOS"
-                Muted:
-                    text: "Promedio de las repeticiones por semana, ANOVA con letras de significancia (LSD), hitos fenológicos y mediciones numéricas por tratamiento."
-                PrimaryButton:
-                    text: "Generar PDF"
-                    on_release: root.generate("treatments")
-            PaperCard:
-                SectionLabel:
-                    text: "6 · FENOLOGÍA Y DÍAS GRADO"
-                Muted:
-                    text: "Estados BBCH según el calor acumulado (°C·día, T base 5 °C desde el 1 de septiembre): días grado de cada hito, pronóstico del próximo y comparación con la temporada anterior."
+                icon: "scale-balance"
+                c1: "#6A5AA8"
+                c2: "#3E2F7E"
+                title: "Comparación de tratamientos"
+                desc: "Promedio de las repeticiones por semana, ANOVA con letras (LSD), hitos y mediciones por tratamiento."
+                on_go: root.generate("treatments")
+            ReportItem:
+                icon: "thermometer-lines"
+                c1: "#B8642E"
+                c2: "#7A3A12"
+                title: "Fenología y días grado"
+                desc: "Estados BBCH según el calor acumulado (°C·día, base 5 °C desde el 1 de septiembre) y pronóstico del próximo hito."
+                on_go: root.gdd_generate()
                 Muted:
                     id: gdd_info
                     text: ""
                     theme_text_color: "Custom"
                     text_color: c(theme.LEAF_DARK)
-                MDBoxLayout:
-                    adaptive_height: True
-                    spacing: dp(8)
-                    GhostButton:
-                        icon: "thermometer"
-                        text: "Temperaturas"
-                        on_release: root.gdd_weather()
-                    GhostButton:
-                        id: gdd_predio_btn
-                        icon: "map-marker-outline"
-                        text: "Predio"
-                        on_release: root.gdd_pick_predio()
-                PrimaryButton:
-                    text: "Generar PDF"
-                    on_release: root.gdd_generate()
-            PaperCard:
-                SectionLabel:
-                    text: "7 · COMPARACIÓN ENTRE TEMPORADAS"
-                Muted:
-                    text: "¿Vamos adelantados o atrasados y por qué? Calor acumulado y días de adelanto, cada hito (fecha y °C·día: ¿clima o variedad/manejo?), estado a la misma fecha, curvas superpuestas y fotos del mismo estado."
+                ChipButton:
+                    icon: "thermometer"
+                    text: "Temperaturas"
+                    on_release: root.gdd_weather()
+                ChipButton:
+                    id: gdd_predio_btn
+                    icon: "map-marker-outline"
+                    text: "Predio"
+                    on_release: root.gdd_pick_predio()
+            ReportItem:
+                icon: "compare-horizontal"
+                c1: "#2F7F92"
+                c2: "#1C4F5E"
+                title: "Comparación entre temporadas"
+                desc: "¿Adelantados o atrasados y por qué? Calor acumulado, hitos, estado a la misma fecha y fotos del mismo estado."
+                on_go: root.cmp_generate()
                 Muted:
                     id: cmp_info
                     text: ""
                     theme_text_color: "Custom"
                     text_color: c(theme.LEAF_DARK)
-                MDBoxLayout:
-                    adaptive_height: True
-                    spacing: dp(8)
-                    GhostButton:
-                        id: cmp_refs_btn
-                        icon: "calendar-range"
-                        text: "Comparar contra"
-                        on_release: root.cmp_pick_refs()
-                    GhostButton:
-                        icon: "eye-outline"
-                        text: "Vista previa"
-                        on_release: root.cmp_preview()
-                PrimaryButton:
-                    text: "Generar PDF"
-                    on_release: root.cmp_generate()
+                ChipButton:
+                    id: cmp_refs_btn
+                    icon: "calendar-range"
+                    text: "Comparar contra"
+                    on_release: root.cmp_pick_refs()
+                ChipButton:
+                    icon: "eye-outline"
+                    text: "Vista previa"
+                    on_release: root.cmp_preview()
             SectionLabel:
                 text: "INFORMES GENERADOS"
             MDBoxLayout:
