@@ -179,3 +179,32 @@ def test_batch_ai_review(monkeypatch, tmp_path):
     assert tl.is_confirmed(rec)
     stop = box_ai.analyze_many("k", [{"name": "a.jpg", "path": "a.jpg"}], tl.CLASSES, should_stop=lambda: True, pause=0)
     assert stop == {"done": 0, "failed": 0, "stopped": "Detenido"}
+
+
+def test_productive_classes():
+    """Conteo automático de mediciones: solo estructuras productivas (desde el botón floral)."""
+    for crop, first in (("frambuesa", "boton"), ("arandano", "boton"), ("cranberry", "gancho")):
+        tl.set_crop(crop)
+        keys = [k for k, _n, _c in tl.productive_classes()]
+        assert keys[0] == first and not set(keys) & tl.VEGETATIVE and "flor" in keys
+    tl.set_crop("frambuesa")
+
+
+def test_excel_survives_bad_measure(tmp_path, monkeypatch):
+    """Una medición con un problema no impide bajar el Excel de las demás."""
+    import measures_export as mx
+    db = Database(str(tmp_path / "t.sqlite3"))
+    a = db.add_measure("Buena", "table")
+    b = db.add_measure("Mala", "table")
+    real = mx.measure_rows
+
+    def flaky(db_, m, *args, **kw):
+        if m["name"] == "Mala":
+            raise KeyError("x")
+        return real(db_, m, *args, **kw)
+
+    monkeypatch.setattr(mx, "measure_rows", flaky)
+    path = mx.export_measures(db, [a, b], None, str(tmp_path), labels={})
+    assert len([n for n in zipfile.ZipFile(path).namelist() if "worksheets/sheet" in n]) == 2
+    with pytest.raises(ValueError):
+        mx.export_measures(db, [b], None, str(tmp_path), labels={})

@@ -634,6 +634,7 @@ async function addPhotos(v, files, kind) {
     const id = await upload(dir, name, blob, "image/jpeg");
     S.photoIds.set(name, id);
     S.photoUrls.set(name, URL.createObjectURL(blob));
+    added.push({ name, blob });
     cachePut(name, blob, "photos");
     const ch = C.photoChange(S.state, obs.uid, kind, `photos/T${season}/web/${name}`);
     changes.push(ch);
@@ -1264,10 +1265,15 @@ function renderMeasureBody() {
     const head = document.createElement("div");
     head.className = "photohead";
     head.innerHTML = `<span class="muted small">Arrastre fotos aquí o use «Subir fotos»; luego agregue la descripción y, si corresponde, la variedad.</span><span class="spacer"></span>
+      <button type="button" class="ghost" id="mautocount" title="La IA (Gemini) cuenta botones, flores y frutos por estadio en las fotos sin contar; quedan por confirmar">✨ Contar con IA</button>
       <button type="button" class="ghost" id="mtotable" title="Una fila por foto de esta semana con su tratamiento, descripción y cada estructura contada">📋 Conteos a planilla</button>
       <label class="ghost upload">＋ Subir fotos<input id="mfiles" type="file" accept="image/*" multiple hidden></label>`;
     box.appendChild(head);
     $("mtotable").onclick = () => countsToTable().catch((er) => { $("mmsg").textContent = `No se pudo: ${er.message}`; });
+    $("mautocount").onclick = () => {
+      const items = M.rows.filter((r) => !r.gone && r.e && r.e.path).map((r) => ({ name: base(r.e.path), path: r.e.path }));
+      autoCountPhotos(items, true);
+    };
     const grid = document.createElement("div");
     grid.className = "mimgs";
     const live = M.rows.filter((r) => !r.gone);
@@ -1311,7 +1317,14 @@ function renderMeasureBody() {
     box.appendChild(grid);
     box.classList.add("drop", "mdrop");
     dropZone(box, $("mfiles"), async (files) => {
-      try { await addMeasureImages(files); renderMeasureBody(); render(); }
+      try {
+        const added = await addMeasureImages(files);
+        renderMeasureBody(); render();
+        if (added.length && confirm(`¿Contar estructuras con IA en ${added.length === 1 ? "esta foto" : `estas ${added.length} fotos`}?\n\n`
+          + "La IA cuenta botones, flores y frutos por estadio (desde el botón floral). Quedan «por confirmar»: revíselas con 🔢.")) {
+          autoCountPhotos(added, false);
+        }
+      }
       catch (er) { $("mmsg").textContent = `No se pudieron subir: ${er.message}`; }
     }, { click: false, msg: "mmsg" });
   }
@@ -1374,6 +1387,7 @@ async function addMeasureImages(files) {
   let dir = await weekFolderId();
   dir = await folder(M.m.name.replace(/\//g, "-").trim() || "Otras", dir, true);
   const changes = C.weekChange(S.state, S.week);
+  const added = [];
   let seq = 1;
   for (const f of files) {
     let name;
@@ -1384,12 +1398,28 @@ async function addMeasureImages(files) {
     const id = await upload(dir, name, blob, "image/jpeg");
     S.photoIds.set(name, id);
     S.photoUrls.set(name, URL.createObjectURL(blob));
+    added.push({ name, blob });
     const ch = C.entryChange({ measure_id: M.m.uid, week_id: S.week, path: `photos/T${season}/mediciones/${name}`, data: {} });
     changes.push(ch);
     M.rows.push({ e: { uid: ch.uid, path: ch.data.path, created_at: ch.data.created_at, data: {} }, variety_id: "", data: {}, caption: "", gone: false });
   }
   await send(changes);
   $("mmsg").textContent = `${files.length} foto(s) subida(s). Agregue la descripción y pulse Guardar.`;
+  return added;
+}
+
+// Conteo automático con IA de fotos de la medición (las ya contadas se saltan).
+async function autoCountPhotos(items, askFirst) {
+  await TR.ensureLabels(CROP);
+  const todo = items.filter((it) => !TR.countsOf(it.name));
+  if (!todo.length) { $("mmsg").textContent = "Todas las fotos ya están contadas."; return; }
+  if (askFirst && !confirm(`¿Contar con IA las ${todo.length} foto(s) sin contar de esta semana?\nUnos ${Math.max(1, Math.round(todo.length * 15 / 60))} min; quedan «por confirmar».`)) return;
+  try {
+    const res = await TR.autoCount(todo, CROP, (t) => { $("mmsg").textContent = t; });
+    $("mmsg").textContent = `Conteo con IA listo: ${res.done} foto(s)` + (res.failed ? ` · ${res.failed} con error` : "")
+      + (res.why ? ` · se detuvo: ${res.why}` : "") + (res.done ? " · revise y confirme cada una con 🔢." : "");
+  } catch (e) { $("mmsg").textContent = `IA: ${e.message}`; }
+  if ($("measure").open) renderMeasureBody();
 }
 
 function measureChanges() {
@@ -2062,7 +2092,7 @@ async function runPdf(kind) {
     $("rmsg").textContent = `${name.endsWith(".xlsx") ? "Excel" : "PDF"} listo: ${name} (${Math.max(1, Math.round(blob.size / 1024))} KB, en Descargas).`;
   } catch (e) {
     console.error(e);
-    $("rmsg").textContent = `No se pudo generar el PDF: ${String(e.message || e).split("\n").filter(Boolean).pop()}`;
+    $("rmsg").textContent = `No se pudo generar ${kind === "excel" ? "el Excel" : "el PDF"}: ${String(e.message || e).split("\n").filter(Boolean).pop()}`;
   } finally { btns.forEach((b) => (b.disabled = false)); }
 }
 

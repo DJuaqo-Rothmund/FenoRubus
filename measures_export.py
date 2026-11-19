@@ -233,13 +233,21 @@ def export_measures(db, measure_ids: list[int], season: int | None = None,
     code = f"{db.code}_" if getattr(db, "code", "") else ""
     path = os.path.join(dest_dir, f"{stem}_{code}{season or 'todas'}_{_dt.datetime.now():%Y%m%d_%H%M}.xlsx")
     labels = photo_marks() if labels is None else labels
-    sheets = []
+    sheets, failed = [], []
     for m in measures:
-        rows = measure_rows(db, m, season, labels)
+        # Una medición con un dato raro no impide bajar las demás: su hoja dice qué pasó.
+        try:
+            rows = measure_rows(db, m, season, labels)
+            longer = long_rows(rows) if m["kind"] == "table" else None
+        except Exception as exc:  # noqa: BLE001
+            failed.append(m["name"])
+            sheets.append((m["name"], [["No se pudo exportar esta medición"], [f"{type(exc).__name__}: {exc}"]]))
+            continue
         sheets.append((m["name"], rows))
-        longer = long_rows(rows) if m["kind"] == "table" else None
         if longer:
             sheets.append((f"{m['name'][:20]} por muestra", longer))
+    if failed and len(failed) == len(measures):
+        raise ValueError("No se pudo exportar: " + sheets[0][1][1][0])
     write_xlsx(path, sheets)
     db.log("export", "measures", None, os.path.basename(path))
     return path

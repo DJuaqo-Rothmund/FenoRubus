@@ -394,6 +394,7 @@ class MeasureScreen(MDScreen):
             else "Cada foto con su descripción y, si quiere, la variedad.")
         actions = self.ids.actions
         fast_clear(actions)
+        self._ac_btn = None
         from kivy.factory import Factory
         if self.measure["kind"] == "table":
             actions.add_widget(Factory.GhostButton(icon="table-row-plus-after", text="Agregar fila",
@@ -413,6 +414,10 @@ class MeasureScreen(MDScreen):
                                                    on_release=lambda *_: self.add_images("camera")))
             actions.add_widget(Factory.GhostButton(icon="image-multiple-outline", text="Desde galería",
                                                    on_release=lambda *_: self.add_images("gallery")))
+            self._ac_btn = Factory.GhostButton(icon="creation", text="",
+                                               on_release=lambda *_: self.autocount_menu())
+            actions.add_widget(self._ac_btn)
+            self._autocount_btn()
         # «Pasar conteos a una planilla»: solo en registros de imágenes (encima de Exportar).
         tt = getattr(self, "_to_table", None)
         if tt is None:
@@ -440,10 +445,12 @@ class MeasureScreen(MDScreen):
         from ui import boxes
         for e in entries:
             rec = boxes.store().get(os.path.basename(e["path"] or ""))
+            from training_labels import needs_review
             row = EntryRow(title=e["caption"] or "Sin descripción",
                            subtitle=_variety_label(e["variety_id"], varieties), item=e,
                            screen=self, has_thumb=True, can_count=bool(e["path"]),
-                           counts=count_text(rec, markup=True))
+                           counts=("[color=#E65100][b]IA · falta confirmar:[/b][/color] " if needs_review(rec) else "")
+                           + count_text(rec, markup=True))
             row.ids.thumb_box.add_widget(thumb_widget(e["path"], 160))
             box.add_widget(row)
         if not entries:
@@ -1061,7 +1068,138 @@ class MeasureScreen(MDScreen):
         what = "esta fila" if self.measure["kind"] == "table" else "esta foto (el archivo queda en el teléfono)"
         confirm("Eliminar registro", f"¿Eliminar {what}?", [("Eliminar", go)])
 
+    # ------------------------------------------- conteo automático con IA
+    def _autocount_key(self):
+        return f"autocount:{self.measure.get('uid') or self.measure['id']}"
+
+    def autocount_mode(self) -> str:
+        """«ask» (preguntar al tomar fotos), «yes» (contar siempre) o «no» en esta medición."""
+        return app().db.get_setting(self._autocount_key(), "ask") or "ask"
+
+    def set_autocount(self, mode: str):
+        app().db.set_setting(self._autocount_key(), mode)
+        self._autocount_btn()
+
+    def _autocount_btn(self):
+        b = getattr(self, "_ac_btn", None)
+        if b is not None:
+            b.text = {"ask": "Conteo con IA: preguntar", "yes": "Conteo con IA: siempre",
+                      "no": "Conteo con IA: no"}[self.autocount_mode()]
+
+    def autocount_menu(self):
+        from ui.common import pick_dialog
+        pending = self._uncounted()
+        items = [("Preguntar al tomar fotos", "Cada vez elige si contar o no", lambda: self.set_autocount("ask")),
+                 ("Contar siempre en esta medición", "Cada foto nueva se cuenta sola con IA",
+                  lambda: self.set_autocount("yes")),
+                 ("No contar en esta medición", "Solo fotos (puede contar a mano con el botón contar)",
+                  lambda: self.set_autocount("no"))]
+        if pending:
+            items.append((f"Contar ahora las {len(pending)} foto(s) sin contar de esta semana",
+                          "Botones, flores y frutos por estadio · quedan por confirmar",
+                          lambda: self.auto_count([e["id"] for e in pending])))
+        pick_dialog("Conteo automático de estructuras", items,
+                    subtitle="La IA (Gemini) cuenta las estructuras productivas desde el botón floral: "
+                             "botones, flores y frutos por estadio. Usted revisa y confirma.")
+
+    def _uncounted(self):
+        from training_labels import is_marked
+        from ui import boxes
+        return [e for e in app().db.list_entries(self.measure["id"], week_id=self.week["id"])
+                if e["path"] and not is_marked(boxes.store().get(os.path.basename(e["path"])))]
+
+    def _ask_autocount(self, then):
+        """Antes de tomar fotos: ¿contar estructuras con IA? (o lo ya elegido en la medición)."""
+        mode = self.autocount_mode()
+        if mode != "ask":
+            then(mode == "yes")
+            return
+        from ui.common import pick_dialog
+        pick_dialog("¿Contar estructuras con IA?", [
+            ("Sí, contar esta vez", "Botones, flores y frutos por estadio de cada foto", lambda: then(True)),
+            ("Sí, siempre en esta medición", "No vuelve a preguntar", lambda: (self.set_autocount("yes"), then(True))),
+            ("No, solo fotos", "Puede contarlas después con el botón contar o «Conteo con IA»", lambda: then(False)),
+            ("No, nunca en esta medición", "No vuelve a preguntar", lambda: (self.set_autocount("no"), then(False))),
+        ], subtitle="La IA cuenta las estructuras productivas (desde el botón floral) y quedan por confirmar.")
+
+    def auto_count(self, entry_ids: list[int]):
+        """Cuenta con Gemini (en segundo plano) las fotos de esas filas: las marcas quedan
+        «por confirmar» en IA+ y el conteo sale en la foto, la planilla y el Excel."""
+        a = app()
+        import scout_ai
+        try:
+            key = scout_ai.load_keys(a.scout).get("gemini")
+        except Exception:  # noqa: BLE001
+            key = None
+        if not key:
+            a.toast("Falta la clave de Gemini: AeonScout › Claves de IA (es gratis).")
+            return
+        db = a.db
+        items = []
+        for eid in entry_ids:
+            e = db.query_one("SELECT id, path FROM measure_entries WHERE id=?", (eid,))
+            if e and e["path"] and os.path.exists(e["path"]):
+                items.append({"name": os.path.basename(e["path"]), "path": e["path"], "entry_id": e["id"]})
+        if not items:
+            return
+        import crops
+        from training_labels import ai_record, is_marked, productive_classes
+        from ui import boxes
+        classes = productive_classes()
+        crop_name = crops.current().fruit
+        state = {"done": 0}
+        a.toast(f"Contando estructuras con IA en {len(items)} foto(s)…")
+
+        def size_of(path):
+            try:
+                from PIL import Image
+                with Image.open(path) as im:
+                    return im.size
+            except Exception:  # noqa: BLE001
+                return 0, 0
+
+        def on_result(it, got, err):
+            if got is None:
+                return
+            w, h = size_of(it["path"])
+            Clock.schedule_once(lambda *_: save(it, got, w, h))
+
+        def save(it, got, w, h):
+            # La foto pudo cambiar de nombre (tratamiento y descripción) mientras se contaba.
+            e = db.query_one("SELECT path FROM measure_entries WHERE id=?", (it["entry_id"],))
+            if not e or not e["path"]:
+                return
+            name = os.path.basename(e["path"])
+            if is_marked(boxes.store().get(name)):          # ya contada a mano
+                return
+            boxes.store().put(name, ai_record(got, w, h), "IA")
+            state["done"] += 1
+            if self.measure["kind"] == "images" and getattr(self, "week", None):
+                self.refresh()
+
+        def work():
+            import box_ai
+            try:
+                res = box_ai.analyze_many(key, items, classes, crop_name, db=a.scout, on_result=on_result)
+            except Exception as exc:  # noqa: BLE001
+                res = {"stopped": str(exc), "failed": 0}
+            Clock.schedule_once(lambda *_: end(res))
+
+        def end(res):
+            msg = (f"Conteo con IA listo: {state['done']} foto(s) · revise y confirme cada una con el botón contar"
+                   if state["done"] else "La IA no pudo contar las fotos")
+            if res.get("stopped"):
+                msg += f" · se detuvo: {res['stopped'][:80]}"
+            a.toast(msg)
+            if state["done"]:
+                boxes.sync_now()
+
+        a.workers.submit(work)
+
     def add_images(self, source: str):
+        self._ask_autocount(lambda count: self._add_images(source, count))
+
+    def _add_images(self, source: str, count: bool = False):
         a = app()
         measure, week = self.measure, self.week
         start = _dt.date.fromisoformat(week["start_date"][:10])
@@ -1091,6 +1229,8 @@ class MeasureScreen(MDScreen):
                 Clock.schedule_once(lambda *_: stored(ids, error))
 
             def stored(ids, error):
+                if count and ids:
+                    self.auto_count(ids)            # en segundo plano: no frena la cámara
                 if self.measure["id"] != measure["id"] or self.week["id"] != week["id"]:
                     return
                 self.refresh()

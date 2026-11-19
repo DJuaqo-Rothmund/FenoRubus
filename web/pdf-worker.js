@@ -63,6 +63,9 @@ self.onmessage = async ({ data: m }) => {
     py.FS.unlink(path);
     self.postMessage({ id: m.id, name: path.split("/").pop(), pdf: bytes.buffer }, [bytes.buffer]);
   } catch (e) {
-    self.postMessage({ id: m.id, error: String(e.message || e).split("\n").filter(Boolean).pop() });
+    // Error de Python: la última línea dice qué pasó; se agrega dónde (archivo y línea) para poder arreglarlo.
+    const lines = String(e.message || e).split("\n").filter(Boolean);
+    const where = lines.filter((l) => /File "\/app\//.test(l)).pop()?.replace(/.*\/app\//, "").replace(/", line /, ":").replace(/, in .*/, "") || "";
+    self.postMessage({ id: m.id, error: lines.pop() + (where ? ` (${where})` : "") });
   }
 };

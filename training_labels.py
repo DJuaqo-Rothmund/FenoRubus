@@ -110,6 +110,15 @@ def is_confirmed(rec: dict | None) -> bool:
     return is_marked(rec) and not needs_review(rec)
 
 
+VEGETATIVE = {"yema", "brote", "lateral", "upright", "estolon"}
+
+
+def productive_classes() -> list[tuple[str, str, str]]:
+    """Estructuras productivas del cultivo (desde el botón floral: botón, flor, fruto…), las
+    que cuenta el conteo automático de las fotos de mediciones."""
+    return [c for c in CLASSES if c[0] not in VEGETATIVE]
+
+
 def ai_record(boxes: list[dict], w: int = 0, h: int = 0) -> dict:
     """Marcas que deja el análisis en lote: las cajas de la IA, «por confirmar»."""
     return {"w": w, "h": h, "boxes": boxes, "empty": not boxes, "review": True}

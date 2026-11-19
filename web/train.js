@@ -806,6 +806,44 @@ export async function ensureLabels(mod) {
   return data;
 }
 
+// Conteo automático de las fotos de mediciones (= ui/measures_ui.auto_count): Gemini cuenta las
+// estructuras productivas (desde el botón floral) y quedan «por confirmar» en IA+.
+const VEGETATIVE = new Set(["yema", "brote", "lateral", "upright", "estolon"]);
+export const productiveClasses = () => CLASSES.filter(([k]) => !VEGETATIVE.has(k));
+export async function autoCount(items, mod, progress = () => {}) {
+  await ensureLabels(mod);
+  if (!AI.loadKeys().gemini) throw new Error("Falta la clave de Gemini: AeonScout › 🔑 Claves de IA (es gratis).");
+  const classes = productiveClasses();
+  let done = 0, failed = 0, why = "";
+  for (let i = 0; i < items.length; i++) {
+    const it = items[i];
+    if (marked(it.name)) continue;
+    progress(`Contando estructuras con IA… ${i + 1} de ${items.length}`);
+    try {
+      let blob = it.blob;
+      if (!blob) {
+        const url = await (it.extra ? X.extraUrl(it) : X.photoUrl(it.path));
+        if (!url) throw new Error("aún no está en Drive");
+        blob = await (await fetch(url)).blob();
+      }
+      const bmp = await createImageBitmap(blob).catch(() => null);
+      const boxes = await BOX.suggest(blob, classes, (CROP_NAMES[crop] || "").toLowerCase());
+      if (marked(it.name)) continue;
+      const rec = { w: bmp?.width || 0, h: bmp?.height || 0, boxes, empty: !boxes.length, review: true, ts: C.nowTs(), by: "IA" };
+      data.photos[it.name] = rec;
+      keepPending(it.name, rec);
+      done++;
+    } catch (e) {
+      if (["quota", "key", "nokey"].includes(e.kind) || /sin conexión/i.test(e.message)) { why = e.message; break; }
+      failed++;
+    }
+    if (i < items.length - 1) await new Promise((r) => setTimeout(r, 4000));
+  }
+  if (done) await saveNow();
+  return { done, failed, why };
+}
+export function needsReview(name) { return review(name); }
+
 // Conteo de una foto: {clase: n} (null si no está marcada) = training_labels.counts.
 export function countsOf(name) {
   const r = data?.photos?.[name];
@@ -817,7 +855,8 @@ export function countsOf(name) {
 export function countText(name) {
   const n = countsOf(name);
   if (!n) return "";
+  const ia = review(name) ? `<b class="mia">IA · falta confirmar:</b> ` : "";
   const parts = CLASSES.filter(([k]) => n[k]).map(([k, nm, c]) => `<i style="background:${c}"></i>${esc(nm)} ${n[k]}`);
-  return parts.length ? `${parts.join(" · ")} <b>(${Object.values(n).reduce((a, b) => a + b, 0)})</b>` : "Sin estructuras";
+  return ia + (parts.length ? `${parts.join(" · ")} <b>(${Object.values(n).reduce((a, b) => a + b, 0)})</b>` : "Sin estructuras");
 }
 export function labelsData() { return data; }
