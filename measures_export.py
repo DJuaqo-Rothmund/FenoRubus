@@ -142,9 +142,10 @@ def photo_marks() -> dict:
         return {}
 
 
-def measure_rows(db, measure: dict, season: int | None = None, labels: dict | None = None) -> list[list]:
-    """Filas (con encabezado) de una medición para toda la temporada. labels: marcas de cajas
-    por nombre de foto (por defecto, las del teléfono)."""
+def measure_rows(db, measure: dict, season: int | None = None, labels: dict | None = None,
+                 week_id: int | None = None) -> list[list]:
+    """Filas (con encabezado) de una medición para toda la temporada (o solo week_id). labels:
+    marcas de cajas por nombre de foto (por defecto, las del teléfono)."""
     cfg = db.sheet_first()
     head = ["Semana del año", "Año", "Inicio de semana", cfg["title"]]
     names = db.treatment_names()
@@ -153,7 +154,7 @@ def measure_rows(db, measure: dict, season: int | None = None, labels: dict | No
         head += measure["columns"]
         # Columnas que ya no están en la definición, pero tienen datos: no se pierden.
         extra = []
-        entries = [e for e in db.list_entries(measure["id"], season=season)
+        entries = [e for e in db.list_entries(measure["id"], week_id=week_id, season=season)
                    if any(str(v).strip() for v in e["data"].values())]   # sin filas vacías
         for e in entries:
             for k in e["data"]:
@@ -161,7 +162,7 @@ def measure_rows(db, measure: dict, season: int | None = None, labels: dict | No
                     extra.append(k)
         head += extra
     else:
-        entries = db.list_entries(measure["id"], season=season)
+        entries = db.list_entries(measure["id"], week_id=week_id, season=season)
         head += ["Descripción", "Archivo"]
         # Conteo con cajas (IA+ / «Contar» en la foto): una columna por estructura y el total.
         import training_labels as tl
@@ -223,21 +224,22 @@ def long_rows(rows: list[list]) -> list[list] | None:
 
 
 def export_measures(db, measure_ids: list[int], season: int | None = None,
-                    dest_dir: str | None = None, labels: dict | None = None) -> str:
-    """Un .xlsx con una hoja por medición. Devuelve la ruta."""
+                    dest_dir: str | None = None, labels: dict | None = None, week: dict | None = None) -> str:
+    """Un .xlsx con una hoja por medición (toda la temporada, o solo `week`). Devuelve la ruta."""
     measures = [m for m in (db.get_measure(i) for i in measure_ids) if m]
     if not measures:
         raise ValueError("No hay mediciones para exportar.")
     dest_dir = dest_dir or data_subdir("reports")
+    tag = f"sem{ph.iso_week(week['start_date'])[0]}" if week else (season or "todas")
     stem = slugify(measures[0]["name"]) if len(measures) == 1 else "mediciones"
     code = f"{db.code}_" if getattr(db, "code", "") else ""
-    path = os.path.join(dest_dir, f"{stem}_{code}{season or 'todas'}_{_dt.datetime.now():%Y%m%d_%H%M}.xlsx")
+    path = os.path.join(dest_dir, f"{stem}_{code}{tag}_{_dt.datetime.now():%Y%m%d_%H%M}.xlsx")
     labels = photo_marks() if labels is None else labels
     sheets, failed = [], []
     for m in measures:
         # Una medición con un dato raro no impide bajar las demás: su hoja dice qué pasó.
         try:
-            rows = measure_rows(db, m, season, labels)
+            rows = measure_rows(db, m, season, labels, week["id"] if week else None)
             longer = long_rows(rows) if m["kind"] == "table" else None
         except Exception as exc:  # noqa: BLE001
             failed.append(m["name"])

@@ -119,16 +119,18 @@ def delete_measure_dialog(m: dict, week: dict):
     Clock.schedule_once(lambda *_: confirm(f"Eliminar «{m['name']}»", text, actions), .3)
 
 
-def export_measures_xlsx(measure_ids: list[int]):
+def export_measures_xlsx(measure_ids: list[int], week: dict | None = None):
+    """Excel de toda la temporada o, con `week`, solo de esa semana."""
     a = app()
     a.toast("Generando planilla Excel…")
+    what = f"Mediciones · {ph.week_title(week)}" if week else "Mediciones de toda la temporada"
 
     def work():
         try:
             from measures_export import export_measures
-            path = export_measures(a.db, measure_ids, a.season)
+            path = export_measures(a.db, measure_ids, a.season, week=week)
             Clock.schedule_once(lambda *_: a.report_actions(
-                path, "Planilla Excel (.xlsx)", "Mediciones de toda la temporada", viewable=False))
+                path, "Planilla Excel (.xlsx)", what, viewable=False))
         except Exception as exc:  # noqa: BLE001
             error = exc
             Clock.schedule_once(lambda *_: a.toast(f"No se pudo exportar: {error}"))
@@ -465,6 +467,14 @@ def _stack(top, below):
     return box
 
 
+def _round_action(icon, cb, bg=None, fg=None):
+    """Botón redondo solo con ícono (la barra de abajo de la planilla)."""
+    from kivymd.uix.button import MDIconButton
+    return MDIconButton(icon=icon, on_release=lambda *_: cb(), md_bg_color=c(bg) if bg else c(theme.SURFACE, .92),
+                        theme_icon_color="Custom", icon_color=c(fg) if fg else c(theme.LEAF_DARK),
+                        icon_size=dp(26), size_hint=(None, None), size=(dp(56), dp(56)), pos_hint={"center_y": .5})
+
+
 class MeasureScreen(MDScreen):
     """Registros de UNA medición en UNA semana: fotos con descripción o filas de planilla."""
 
@@ -472,7 +482,8 @@ class MeasureScreen(MDScreen):
         a = app()
         self.measure = a.db.get_measure(measure_id)
         self.week = a.db.get_week(week_id)
-        self.ids.bar.title = self.measure["name"]
+        self.ids.title.text = self.measure["name"]
+        self._top_actions()
         try:
             rename_all_photos(a.db)               # una vez: nombres con tratamiento y descripción
             for e in a.db.list_entries(measure_id, week_id=week_id):   # lo cambiado en la web u otro equipo
@@ -484,9 +495,11 @@ class MeasureScreen(MDScreen):
         self.ids.kicker.text = f"{kind} · {ph.week_title(self.week).upper()}"
         self.ids.columns_text.text = (
             "Toque una celda o un encabezado para escribir · mantenga presionada una celda para copiar o "
-            "pegar · los 3 puntos mueven o eliminan la columna · toque el n.º de fila para eliminarla."
+            "pegar · los 3 puntos mueven o eliminan la columna · toque el n.º de fila para eliminarla · "
+            "las lupas de arriba agrandan o achican la letra."
             if self.measure["kind"] == "table"
             else "Cada foto con su descripción y, si quiere, la variedad.")
+        self.show_hint(getattr(self, "_hint_on", False))
         actions = self.ids.actions
         fast_clear(actions)
         self._ac_btn = None
@@ -500,15 +513,12 @@ class MeasureScreen(MDScreen):
                 self._dict_rec = got[-1] if got else None
         if self.measure["kind"] == "table":
             from ui.dictation_ui import GOLD, GOLD_INK
-            actions.add_widget(Factory.GhostButton(
-                icon="microphone", text="Dictar datos", md_bg_color=c(GOLD), text_color=c(GOLD_INK),
-                icon_color=c(GOLD_INK), line_color=c(GOLD), on_release=lambda *_: self.dictate()))
-            actions.add_widget(Factory.GhostButton(icon="table-row-plus-after", text="Agregar fila",
-                                                   on_release=lambda *_: self.add_row()))
-            actions.add_widget(Factory.GhostButton(icon="table-column-plus-after", text="Agregar columna",
-                                                   on_release=lambda *_: self.add_column()))
-            actions.add_widget(Factory.GhostButton(icon="table-cog", text="Ordenar planilla",
-                                                   on_release=lambda *_: self.structure()))
+            # Solo íconos, centrados: más espacio para la planilla.
+            for icon, cb, bg, fg in (("microphone", self.dictate, GOLD, GOLD_INK),
+                                     ("table-row-plus-after", self.add_row, None, None),
+                                     ("table-column-plus-after", self.add_column, None, None),
+                                     ("table-cog", self.structure, None, None)):
+                actions.add_widget(_round_action(icon, cb, bg, fg))
             import sheet_layout as SL
             if SL.is_grouped(self.measure["columns"]) and not a.db.list_entries(measure_id, week_id=week_id):
                 try:   # planilla ordenada: cada semana parte con sus filas (una por parcela)
@@ -532,9 +542,37 @@ class MeasureScreen(MDScreen):
         if tt.parent is not None:
             tt.parent.remove_widget(tt)
         if self.measure["kind"] != "table":
-            box = self.ids.excel_btn.parent
-            box.add_widget(tt, index=box.children.index(self.ids.excel_btn) + 1)
+            self.ids.body.add_widget(tt)
         self.refresh()
+
+    def _top_actions(self):
+        """Arriba a la derecha, en círculos suaves: lupas de la letra (planillas), Excel y guardar."""
+        from kivymd.uix.button import MDIconButton
+        items = [("file-excel-outline", self.export), ("content-save-outline", self.save)]
+        if self.measure["kind"] == "table":
+            items = [("magnify-minus", lambda: self.set_zoom(-1)),
+                     ("magnify-plus", lambda: self.set_zoom(1))] + items
+        box = self.ids.top_tools
+        fast_clear(box)
+        for icon, cb in items:
+            box.add_widget(MDIconButton(icon=icon, on_release=lambda *_, f=cb: f(), icon_size=dp(20),
+                                        md_bg_color=c(theme.SURFACE, .85), theme_icon_color="Custom",
+                                        icon_color=c(theme.LEAF_DARK), pos_hint={"center_y": .5}))
+
+    def toggle_hint(self):
+        self.show_hint(not getattr(self, "_hint_on", False))
+
+    def show_hint(self, on: bool):
+        """El bombillo muestra u oculta la ayuda (y el conteo de filas/fotos)."""
+        self._hint_on = on
+        ids = self.ids
+        card = ids.entries.parent
+        for w in (ids.columns_text, ids.count_text):
+            if on and w.parent is None:
+                card.add_widget(w, index=card.children.index(ids.entries) + 1)
+            elif not on and w.parent is not None:
+                w.parent.remove_widget(w)
+        self.ids.hint_btn.icon = "lightbulb-on" if on else "lightbulb-outline"
 
     def refresh(self):
         a = app()
@@ -689,12 +727,13 @@ class MeasureScreen(MDScreen):
         i = self.ZOOMS.index(self._zoom())
         z = self.ZOOMS[max(0, min(len(self.ZOOMS) - 1, i + step))]
         app().db.set_setting("sheet_zoom", z)
+        app().toast(f"Letra {round(z * 100)} %")
         x = self._sv.scroll_x if getattr(self, "_sv", None) else 0
         self.refresh()
         Clock.schedule_once(lambda *_: setattr(self._sv, "scroll_x", x) if getattr(self, "_sv", None) else None, 0)
 
     def _build_tools(self):
-        """Sobre la grilla: el dictado (si hay) y «Letra − / +» para ver más o menos celdas."""
+        """Sobre la grilla: el dictado (si hay). La letra se cambia con las lupas de arriba."""
         from kivy.uix.boxlayout import BoxLayout
         from kivymd.uix.button import MDIconButton
         box = self.ids.entries
@@ -709,16 +748,6 @@ class MeasureScreen(MDScreen):
             box.add_widget(self._dict_card)
         else:
             self._dict_card = None
-        row = BoxLayout(size_hint_y=None, height=dp(34), spacing=dp(2))
-        row.add_widget(MDLabel(text="Letra", font_style="Caption", size_hint_x=None, width=dp(40),
-                               theme_text_color="Custom", text_color=c(theme.MUTED)))
-        for icon, step in (("magnify-minus-outline", -1), ("magnify-plus-outline", 1)):
-            row.add_widget(MDIconButton(icon=icon, on_release=lambda *_, st=step: self.set_zoom(st),
-                                        theme_icon_color="Custom", icon_color=c(theme.LEAF_DARK),
-                                        pos_hint={"center_y": .5}))
-        row.add_widget(MDLabel(text=f"{round(self.zoom * 100)} %", font_style="Caption",
-                               theme_text_color="Custom", text_color=c(theme.MUTED)))
-        box.add_widget(row)
 
     # ------------------------------------------------ dictar datos (voz)
     @property
@@ -1727,5 +1756,10 @@ class MeasureScreen(MDScreen):
                 "Las fotos quedan en el teléfono.", [("Eliminar", go)])
 
     def export(self):
+        """Excel: solo esta semana o toda la temporada."""
         self.commit_cells()
-        export_measures_xlsx([self.measure["id"]])
+        mid, week = self.measure["id"], self.week
+        confirm("Exportar a Excel", f"«{self.measure['name']}»\n\n• Semana: solo {ph.week_title(week)}.\n"
+                "• Temporada: todas las semanas.",
+                [("Semana", lambda: export_measures_xlsx([mid], week)),
+                 ("Temporada", lambda: export_measures_xlsx([mid]))])

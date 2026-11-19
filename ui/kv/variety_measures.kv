@@ -161,21 +161,63 @@
     md_bg_color: 0, 0, 0, 0
     MDBoxLayout:
         orientation: "vertical"
-        TopBar:
-            id: bar
-            title: "Medición"
-            left_action_items: [["arrow-left", lambda x: app.back()]]
-            right_action_items: [["file-excel-outline", lambda x: root.export()], ["pencil-outline", lambda x: root.edit()], ["content-save-outline", lambda x: root.save()]]
+        MDBoxLayout:
+            size_hint_y: None
+            height: dp(64)
+            padding: dp(4), 0, dp(12), 0
+            spacing: dp(6)
+            md_bg_color: c(theme.SURFACE, .5)
+            MDIconButton:
+                icon: "arrow-left"
+                pos_hint: {"center_y": .5}
+                theme_icon_color: "Custom"
+                icon_color: c(theme.LEAF_DARK)
+                on_release: app.back()
+            MDLabel:
+                id: title
+                text: "Medición"
+                font_style: "H6"
+                bold: True
+                shorten: True
+                shorten_from: "right"
+                theme_text_color: "Custom"
+                text_color: c(theme.LEAF_DARK)
+            MDBoxLayout:
+                id: top_tools
+                adaptive_width: True
+                spacing: dp(6)
         MDScrollView:
             do_scroll_x: False
             MDBoxLayout:
+                id: body
                 orientation: "vertical"
                 adaptive_height: True
                 padding: dp(16), dp(12), dp(16), dp(32)
                 spacing: dp(12)
                 PaperCard:
-                    SectionLabel:
-                        id: kicker
+                    MDBoxLayout:
+                        adaptive_height: True
+                        spacing: dp(2)
+                        SectionLabel:
+                            id: kicker
+                            pos_hint: {"center_y": .5}
+                        MDIconButton:
+                            icon: "pencil-outline"
+                            pos_hint: {"center_y": .5}
+                            theme_icon_color: "Custom"
+                            icon_color: c(theme.LEAF_DARK)
+                            icon_size: dp(20)
+                            md_bg_color: c(theme.LEAF_SOFT, .75)
+                            on_release: root.edit()
+                        MDIconButton:
+                            id: hint_btn
+                            icon: "lightbulb-outline"
+                            pos_hint: {"center_y": .5}
+                            theme_icon_color: "Custom"
+                            icon_color: c(theme.WARN)
+                            icon_size: dp(20)
+                            md_bg_color: c("#FFF1C9", .9)
+                            on_release: root.toggle_hint()
                     Muted:
                         id: columns_text
                     Body:
@@ -187,13 +229,9 @@
                         spacing: dp(6)
                     MDBoxLayout:
                         id: actions
-                        adaptive_height: True
-                        spacing: dp(8)
-                GhostButton:
-                    id: excel_btn
-                    icon: "file-excel-outline"
-                    text: "Exportar a Excel (toda la temporada)"
-                    on_release: root.export()
+                        adaptive_size: True
+                        pos_hint: {"center_x": .5}
+                        spacing: dp(14)
 
 <EntryRow>:
     adaptive_height: True
