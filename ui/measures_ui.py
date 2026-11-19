@@ -10,6 +10,7 @@ import datetime as _dt
 import os
 from kivy.clock import Clock
 from kivy.metrics import dp
+from kivy.metrics import sp as sp_
 from kivy.properties import BooleanProperty, ObjectProperty, StringProperty
 from kivymd.uix.boxlayout import MDBoxLayout
 from kivymd.uix.button import MDRectangleFlatButton
@@ -352,7 +353,8 @@ SHEET_HEAD, SHEET_HEAD_FG = "#1E5A45", "#FFFFFF"     # encabezados
 SHEET_NUM, SHEET_NUM_FG = "#DCEFE4", "#1B2A23"       # n.º de fila
 SHEET_CELL, SHEET_INK = "#FFFFFF", "#1B2A23"         # celdas
 SHEET_FIRST_FG = "#1E5A45"                           # 1.ª columna (tratamiento / variedad)
-SHEET_GROUP = "#123A2C"                              # grupos («Planta 1») sobre las subcolumnas
+SHEET_GROUP = "#123A2C"
+SHEET_IA = "#FFF1C9"                                 # dato puesto por la IA (por confirmar)                              # grupos («Planta 1») sobre las subcolumnas
 
 
 def rename_entry_photo(entry_id: int) -> None:
@@ -389,13 +391,13 @@ def rename_all_photos(db) -> int:
     return n
 
 
-def _cell_button(text, width, bold=False, bg=None, fg=None, on_release=None):
+def _cell_button(text, width, bold=False, bg=None, fg=None, on_release=None, z: float = 1.0):
     """Celda-botón de la grilla (encabezados, n.º de fila, variedad). Un texto en dos
-    líneas va más chico y sin cortar."""
+    líneas va más chico y sin cortar. z: zoom de la planilla (letra y alto)."""
     from kivy.uix.button import Button
     two = "\n" in text
-    b = Button(text=text, size_hint=(None, None), size=(width, dp(42)),
-               font_size="11.5sp" if two else "13sp", line_height=.95 if two else 1,
+    b = Button(text=text, size_hint=(None, None), size=(width, dp(38) * z),
+               font_size=f"{(11 if two else 12.5) * z:.1f}sp", line_height=.95 if two else 1,
                bold=bold, background_normal="", background_down="",
                background_color=bg or c(SHEET_NUM), color=fg or c(SHEET_NUM_FG),
                halign="center", valign="middle", shorten=not two, shorten_from="right")
@@ -489,7 +491,18 @@ class MeasureScreen(MDScreen):
         fast_clear(actions)
         self._ac_btn = None
         from kivy.factory import Factory
+        if getattr(self, "_ia_key", None) != (measure_id, week_id):
+            self._ia, self._pick, self._ia_key = {}, None, (measure_id, week_id)
+            self._dict_rec = None
+            if self.measure["kind"] == "table":       # el último dictado de la semana, a la vista
+                got = self.dictations.for_measure(self.measure.get("uid") or str(measure_id),
+                                                  self.week["start_date"][:10])
+                self._dict_rec = got[-1] if got else None
         if self.measure["kind"] == "table":
+            from ui.dictation_ui import GOLD, GOLD_INK
+            actions.add_widget(Factory.GhostButton(
+                icon="microphone", text="Dictar datos", md_bg_color=c(GOLD), text_color=c(GOLD_INK),
+                icon_color=c(GOLD_INK), line_color=c(GOLD), on_release=lambda *_: self.dictate()))
             actions.add_widget(Factory.GhostButton(icon="table-row-plus-after", text="Agregar fila",
                                                    on_release=lambda *_: self.add_row()))
             actions.add_widget(Factory.GhostButton(icon="table-column-plus-after", text="Agregar columna",
@@ -565,10 +578,15 @@ class MeasureScreen(MDScreen):
         a = app()
         cols = list(self.measure["columns"])
         self._grouped = SL.is_grouped(cols)
-        cw = self.SUB_W if self._grouped else self.COL_W
+        z = self.zoom = self._zoom()
+        cw = (self.SUB_W if self._grouped else self.COL_W) * z
+        rh = dp(38) * z                         # alto de fila (más compacto que antes)
+        num_w = self.NUM_W * (0.85 + 0.15 * z)
+        self._build_tools()
         varieties = a.db.list_varieties(include_archived=True)
         self._rows = {e["id"]: dict(e["data"]) for e in entries}
         self._cells = []
+        self._row_label = {}
         sp = dp(2)
         # Izquierda fija (n.º y tratamiento) y a la derecha las columnas, que se desplazan
         # hacia el lado: con muchas plantas siempre se ve de qué fila es cada celda.
@@ -577,17 +595,17 @@ class MeasureScreen(MDScreen):
         for g_ in (left, grid):
             g_.bind(minimum_width=g_.setter("width"), minimum_height=g_.setter("height"))
         head_bg, head_fg = c(SHEET_HEAD), c(SHEET_HEAD_FG)
-        left.add_widget(_cell_button("#", self.NUM_W, True, head_bg, head_fg))
-        self.var_w = dp(150) if a.db.is_predio else self.VAR_W   # predio: variedad y año
+        left.add_widget(_cell_button("#", num_w, True, head_bg, head_fg, z=z))
+        self.var_w = (dp(150) if a.db.is_predio else self.VAR_W) * (0.75 + 0.25 * z)   # predio: variedad y año
         self._first = a.db.sheet_first()
         names = a.db.treatment_names()
         vmap = {v["id"]: v for v in varieties}
         self._heads = []
-        left.add_widget(self._head_cell(self._first["title"], self.var_w, None))
+        left.add_widget(self._head_cell(self._first["title"], self.var_w, None, z=z))
         for col in cols:
-            grid.add_widget(self._head_cell(SL.split(col)[1], cw, col, small=self._grouped))
+            grid.add_widget(self._head_cell(SL.split(col)[1], cw, col, small=self._grouped, z=z))
         for i, e in enumerate(entries):
-            left.add_widget(_cell_button(str(i + 1), self.NUM_W, bg=c(SHEET_NUM),
+            left.add_widget(_cell_button(str(i + 1), num_w, bg=c(SHEET_NUM), z=z,
                                          on_release=lambda *_, e=e, n=i + 1: self.row_menu(e, n)))
             v = vmap.get(e["variety_id"])
             if not v:
@@ -596,15 +614,18 @@ class MeasureScreen(MDScreen):
                 label = a.db.sheet_label(v, names, self._first, two_lines=True)
             else:
                 label = _variety_label(e["variety_id"], varieties, two_lines=True)
-            left.add_widget(_cell_button(label, self.var_w, bg=c(SHEET_CELL), fg=c(SHEET_FIRST_FG),
+            self._row_label[e["id"]] = " ".join(label.split())
+            left.add_widget(_cell_button(label, self.var_w, bg=c(SHEET_CELL), fg=c(SHEET_FIRST_FG), z=z,
                                          on_release=lambda *_, e=e: self.pick_row_variety(e)))
             row_cells = []
             for col in cols:
+                fz = sp_(14 * z)
+                ia = (e["id"], col) in self._ia
                 ti = SheetCell(text=str(e["data"].get(col, "")), multiline=False, write_tab=False,
-                               size_hint=(None, None), size=(cw, dp(42)), font_size="14sp",
-                               padding=(dp(8), dp(11)), background_normal="", background_active="",
-                               background_color=c(SHEET_CELL), foreground_color=c(SHEET_INK),
-                               cursor_color=c(SHEET_HEAD))
+                               size_hint=(None, None), size=(cw, rh), font_size=fz, halign="center",
+                               padding=(dp(4), max(0, (rh - fz * 1.25) / 2)), background_normal="",
+                               background_active="", background_color=c(SHEET_IA if ia else SHEET_CELL),
+                               foreground_color=c(SHEET_INK), cursor_color=c(SHEET_HEAD))
                 ti.entry_id, ti.col = e["id"], col
                 ti.native_edit = False   # planilla: se escribe de corrido con el teclado de la app
                 ti.on_hold = self.cell_menu
@@ -616,23 +637,26 @@ class MeasureScreen(MDScreen):
         content, fixed = grid, left
         if self._grouped:          # fila de arriba: «Planta 1», «Planta 2»… sobre sus subcolumnas
             top_bg = c(SHEET_GROUP)
-            top = BoxLayout(size_hint=(None, None), height=dp(36), spacing=sp, padding=(sp, sp, sp, 0))
+            top = BoxLayout(size_hint=(None, None), height=dp(32) * z, spacing=sp, padding=(sp, sp, sp, 0))
             for g, cs in SL.groups(cols):
                 w = len(cs) * cw + (len(cs) - 1) * sp
-                b = _cell_button(g or "", w, bold=True, bg=top_bg, fg=head_fg,
+                b = _cell_button(g or "", w, bold=True, bg=top_bg, fg=head_fg, z=z,
                                  on_release=(lambda *_, g=g: self.group_menu(g)) if g else None)
-                b.height = dp(34)
+                b.height = dp(30) * z
                 top.add_widget(b)
             top.bind(minimum_width=top.setter("width"))
             content = _stack(top, grid)
-            ltop = BoxLayout(size_hint=(None, None), height=dp(36), padding=(sp, sp, 0, 0))
-            corner = _cell_button("", self.NUM_W + sp + self.var_w, bg=top_bg)
-            corner.height = dp(34)
+            ltop = BoxLayout(size_hint=(None, None), height=dp(32) * z, padding=(sp, sp, 0, 0))
+            corner = _cell_button("", num_w + sp + self.var_w, bg=top_bg, z=z)
+            corner.height = dp(30) * z
             ltop.add_widget(corner)
             ltop.width = corner.width + sp
             fixed = _stack(ltop, left)
+        # Arrastrar hacia el lado mueve la planilla aunque se empiece sobre una celda: el toque
+        # solo entra a la celda si casi no se mueve (antes se «pegaba» y no se desplazaba).
         sv = ScrollView(do_scroll_x=True, do_scroll_y=False, size_hint=(1, None),
-                        bar_width=dp(4), scroll_type=["bars", "content"])
+                        bar_width=dp(4), scroll_type=["bars", "content"], scroll_distance=dp(8),
+                        scroll_timeout=250)
         sv.add_widget(content)
         self._sv = sv
         row = BoxLayout(size_hint=(1, None))
@@ -650,7 +674,270 @@ class MeasureScreen(MDScreen):
                 text="Sin filas esta semana: toque «Agregar fila».", font_style="Caption",
                 adaptive_height=True, theme_text_color="Custom", text_color=c(theme.MUTED)))
 
-    def _head_cell(self, text: str, width, col, small: bool = False):
+    # ------------------------------------------------ tamaño de letra (zoom)
+    ZOOMS = (0.7, 0.8, 0.9, 1.0, 1.15, 1.3, 1.45)
+
+    def _zoom(self) -> float:
+        try:
+            z = float(app().db.get_setting("sheet_zoom", 1.0) or 1.0)
+        except (TypeError, ValueError):
+            z = 1.0
+        return min(self.ZOOMS, key=lambda x: abs(x - z))
+
+    def set_zoom(self, step: int):
+        self.commit_cells()
+        i = self.ZOOMS.index(self._zoom())
+        z = self.ZOOMS[max(0, min(len(self.ZOOMS) - 1, i + step))]
+        app().db.set_setting("sheet_zoom", z)
+        x = self._sv.scroll_x if getattr(self, "_sv", None) else 0
+        self.refresh()
+        Clock.schedule_once(lambda *_: setattr(self._sv, "scroll_x", x) if getattr(self, "_sv", None) else None, 0)
+
+    def _build_tools(self):
+        """Sobre la grilla: el dictado (si hay) y «Letra − / +» para ver más o menos celdas."""
+        from kivy.uix.boxlayout import BoxLayout
+        from kivymd.uix.button import MDIconButton
+        box = self.ids.entries
+        old = getattr(self, "_dict_card", None)
+        if old is not None:
+            old.stop_audio()
+        rec = getattr(self, "_dict_rec", None)
+        if rec is not None:
+            from ui.dictation_ui import DictationCard
+            n = len(self.dictations.for_measure(rec["measure"], rec["week"]))
+            self._dict_card = DictationCard(self, rec, n_total=n)
+            box.add_widget(self._dict_card)
+        else:
+            self._dict_card = None
+        row = BoxLayout(size_hint_y=None, height=dp(34), spacing=dp(2))
+        row.add_widget(MDLabel(text="Letra", font_style="Caption", size_hint_x=None, width=dp(40),
+                               theme_text_color="Custom", text_color=c(theme.MUTED)))
+        for icon, step in (("magnify-minus-outline", -1), ("magnify-plus-outline", 1)):
+            row.add_widget(MDIconButton(icon=icon, on_release=lambda *_, st=step: self.set_zoom(st),
+                                        theme_icon_color="Custom", icon_color=c(theme.LEAF_DARK),
+                                        pos_hint={"center_y": .5}))
+        row.add_widget(MDLabel(text=f"{round(self.zoom * 100)} %", font_style="Caption",
+                               theme_text_color="Custom", text_color=c(theme.MUTED)))
+        box.add_widget(row)
+
+    # ------------------------------------------------ dictar datos (voz)
+    @property
+    def dictations(self):
+        st = getattr(self, "_dstore", None)
+        if st is None:
+            import voice
+            from platform_utils import get_data_dir
+            st = self._dstore = voice.Store(get_data_dir())
+        return st
+
+    def _mkey(self):
+        return self.measure.get("uid") or str(self.measure["id"])
+
+    def dictate(self):
+        """Grabar: barra abajo con pausa, terminar, descartar y «modo bolsillo»."""
+        import voice
+        a = app()
+        self.commit_cells()
+        if not voice.can_record():
+            a.toast("Grabar audio funciona en el teléfono (en la web: suba un archivo de audio).")
+            return
+
+        def start(ok):
+            if not ok:
+                a.toast("Sin permiso para el micrófono: actívelo en los ajustes del teléfono.")
+                return
+            from platform_utils import slugify
+            from ui.dictation_ui import RecordPanel
+            path = self.dictations.new_path(slugify(self.measure["name"])[:30] or "dictado")
+            panel = RecordPanel(path, self.measure["name"], self._dict_done)
+            try:
+                panel.start()
+            except Exception as exc:  # noqa: BLE001
+                a.toast(f"No se pudo grabar: {exc}")
+        Clock.schedule_once(lambda *_: voice.ask_mic(lambda ok: Clock.schedule_once(lambda *_: start(ok))), 0)
+
+    def _dict_done(self, path, secs):
+        a = app()
+        rec = self.dictations.add(self._mkey(), self.week["start_date"][:10], path, secs)
+        try:
+            a.backup_extra(path, self.week["start_date"], self.measure["name"])     # respaldo en Drive
+        except Exception:  # noqa: BLE001
+            pass
+        self._dict_rec = rec
+        self.refresh()
+        self.transcribe(rec)
+
+    def transcribe(self, rec):
+        a = app()
+        import scout_ai
+        try:
+            key = scout_ai.load_keys(a.scout).get("gemini")
+        except Exception:  # noqa: BLE001
+            key = None
+        if not key:
+            a.toast("Falta la clave de Gemini: AeonScout › Claves de IA (es gratis). El audio quedó guardado.")
+            return
+        rec.update(status="working")
+        self.dictations.update(rec["id"], status="working")
+        if self._dict_card is not None:
+            self._dict_card.render()
+
+        def work():
+            import voice
+            try:
+                text, err = voice.transcribe(key, rec["path"], db=a.scout), None
+            except Exception as exc:  # noqa: BLE001
+                text, err = "", str(exc)
+            Clock.schedule_once(lambda *_: done(text, err))
+
+        def done(text, err):
+            fields = {"status": "error", "error": err} if err else {"status": "done", "text": text, "used": []}
+            rec.update(fields)
+            self.dictations.update(rec["id"], **fields)
+            if self._dict_rec is rec:
+                self.refresh()
+            a.toast("No se pudo transcribir (el audio quedó guardado)." if err else
+                    "Transcripción lista: toque un número y luego su celda, o «Ordenar con IA».")
+        a.workers.submit(work)
+
+    def pick_number(self, card, chip):
+        """Número elegido: el próximo toque en una celda lo pone ahí."""
+        prev = self._pick
+        if prev is not None:
+            prev[1].set(sel=False)
+        if prev is not None and prev[1] is chip:
+            self._pick = None
+            return
+        chip.set(sel=True)
+        self._pick = (card, chip)
+        app().toast(f"«{chip.value}»: toque la celda donde va")
+
+    def _put_pick(self, ti):
+        card, chip = self._pick
+        self._pick = None
+        chip.set(sel=False, used=True)
+        card.mark_used(chip.idx)
+        ti.text = chip.value
+        self._cell_focus(ti, False)
+
+    def arrange(self, rec):
+        """La IA ubica los números en la planilla (en amarillo hasta «Confirmar todo»)."""
+        a = app()
+        import scout_ai
+        try:
+            key = scout_ai.load_keys(a.scout).get("gemini")
+        except Exception:  # noqa: BLE001
+            key = None
+        if not key:
+            a.toast("Falta la clave de Gemini: AeonScout › Claves de IA (es gratis).")
+            return
+        self.commit_cells()
+        rows = {}
+        for eid, lab in self._row_label.items():
+            name, k = lab, 2
+            while name in rows:
+                name, k = f"{lab} ({k})", k + 1
+            rows[name] = eid
+        cols = list(self.measure["columns"])
+        a.toast("La IA está ordenando los datos…")
+
+        def work():
+            import voice
+            try:
+                got, err = voice.arrange(key, rec.get("text") or "", list(rows), cols, db=a.scout), None
+            except Exception as exc:  # noqa: BLE001
+                got, err = [], str(exc)
+            Clock.schedule_once(lambda *_: done(got, err))
+
+        def done(got, err):
+            if err:
+                a.toast(f"IA: {err[:120]}")
+                return
+            n = 0
+            with a.db.batch():
+                for it in got:
+                    eid = rows[it["row"]]
+                    data = self._rows.get(eid)
+                    if data is None:
+                        continue
+                    key_ = (eid, it["col"])
+                    if key_ not in self._ia:
+                        self._ia[key_] = data.get(it["col"], "")
+                    data[it["col"]] = it["value"]
+                    a.db.update_entry(eid, data=data)
+                    n += 1
+            # los números que la IA usó quedan tachados
+            import voice
+            vals = [v for _a, _b, v in voice.numbers(rec.get("text") or "")]
+            used, pool = set(rec.get("used") or []), [it["value"] for it in got]
+            for i, v in enumerate(vals):
+                if v in pool:
+                    used.add(i)
+                    pool.remove(v)
+            rec["used"] = sorted(used)
+            self.dictations.update(rec["id"], used=rec["used"])
+            self.refresh()
+            a.toast(f"La IA ubicó {n} dato(s): revise los amarillos y toque «Confirmar todo»" if n
+                    else "La IA no encontró dónde ubicar los datos")
+        a.workers.submit(work)
+
+    def ia_pending(self) -> int:
+        return len(getattr(self, "_ia", {}) or {})
+
+    def ia_confirm(self):
+        self._ia = {}
+        self.refresh()
+        app().toast("Datos confirmados")
+
+    def ia_undo(self):
+        a = app()
+        with a.db.batch():
+            for (eid, col), old in self._ia.items():
+                data = self._rows.get(eid)
+                if data is None:
+                    continue
+                if old in ("", None):
+                    data.pop(col, None)
+                else:
+                    data[col] = old
+                a.db.update_entry(eid, data=data)
+        self._ia = {}
+        self.refresh()
+        a.toast("Se deshizo lo que puso la IA")
+
+    def pick_dictation(self):
+        got = self.dictations.for_measure(self._mkey(), self.week["start_date"][:10])
+        if not got:
+            app().toast("No hay otros dictados esta semana")
+            return
+
+        def show(r):
+            self._dict_rec, self._pick = r, None
+            self.refresh()
+
+        def remove(r):
+            def go():
+                self.dictations.delete(r["id"])
+                if self._dict_rec and self._dict_rec["id"] == r["id"]:
+                    self._dict_rec = None
+                self.refresh()
+            confirm("Borrar dictado", "Se borra el audio y su transcripción del teléfono.", [("Borrar", go)])
+
+        import voice
+        from ui.dictation_ui import fmt_time
+        items = [(f"{r['created'][11:16]} · {fmt_time(r.get('seconds', 0))}",
+                  (r.get("text") or {"pending": "Sin transcribir", "working": "Transcribiendo…",
+                                      "error": "Error al transcribir"}.get(r.get("status"), ""))[:70],
+                  lambda r=r: show(r), None, lambda r=r: remove(r)) for r in reversed(got)]
+        pick_dialog("Dictados de esta semana", items)
+
+    def close_dictation(self):
+        if self._dict_card is not None:
+            self._dict_card.stop_audio()
+        self._dict_rec, self._pick = None, None
+        self.refresh()
+
+    def _head_cell(self, text: str, width, col, small: bool = False, z: float = 1.0):
         """Encabezado editable en el lugar: se toca y se escribe el nombre. «⋮» = mover,
         eliminar (columnas) o qué mostrar (1.ª columna). col=None: la 1.ª columna."""
         from kivy.uix.boxlayout import BoxLayout
@@ -658,17 +945,19 @@ class MeasureScreen(MDScreen):
         from kivy.uix.textinput import TextInput
         from kivymd.icon_definitions import md_icons
         head_bg, head_fg = c(SHEET_HEAD), c(SHEET_HEAD_FG)
-        box = BoxLayout(size_hint=(None, None), size=(width, dp(42)))
-        ti = TextInput(text=text, multiline=False, write_tab=False, font_size="11.5sp" if small else "13sp",
-                       halign="center", padding=(dp(4), dp(13) if small else dp(12)), background_normal="",
+        h = dp(38) * z
+        fz = sp_((11 if small else 12.5) * z)
+        box = BoxLayout(size_hint=(None, None), size=(width, h))
+        ti = TextInput(text=text, multiline=False, write_tab=False, font_size=fz,
+                       halign="center", padding=(dp(4), max(0, (h - fz * 1.25) / 2)), background_normal="",
                        background_active="", background_color=head_bg, foreground_color=head_fg,
                        cursor_color=head_fg, selection_color=c("#FFFFFF", .35))
         ti.native_edit = False        # se escribe directo sobre el encabezado
         ti.col = col
         ti.bind(focus=self._head_focus)
         ti.bind(on_text_validate=lambda t: setattr(t, "focus", False))
-        dots = Button(text=md_icons["dots-vertical"], font_name="Icons", font_size="18sp",
-                      size_hint_x=None, width=dp(24), background_normal="", background_down="",
+        dots = Button(text=md_icons["dots-vertical"], font_name="Icons", font_size=sp_(17 * z),
+                      size_hint_x=None, width=dp(20) * z, background_normal="", background_down="",
                       background_color=head_bg, color=head_fg)
         dots.bind(on_release=lambda *_: self.first_column_menu() if col is None else self.column_menu(ti.col))
         box.add_widget(ti)
@@ -757,6 +1046,10 @@ class MeasureScreen(MDScreen):
         self.refresh()
 
     def _cell_focus(self, ti, focused):
+        if focused and getattr(self, "_pick", None) is not None:      # número del dictado -> celda
+            Clock.schedule_once(lambda *_: setattr(ti, "focus", False), 0)
+            self._put_pick(ti)
+            return
         if focused:
             sv = getattr(self, "_sv", None)
             if sv is not None and ti.parent is not None:
@@ -800,6 +1093,9 @@ class MeasureScreen(MDScreen):
 
     def on_pre_leave(self, *_):
         self.commit_cells()
+        card = getattr(self, "_dict_card", None)
+        if card is not None:
+            card.stop_audio()
 
     def save(self):
         """Disquete: guarda lo escrito (también se guarda solo al salir), avisa y vuelve."""

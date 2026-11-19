@@ -13,6 +13,7 @@ import { photoHeat, pickPoint, sectorMap } from "./maps.js";
 import * as SC from "./scout.js";
 import * as YD from "./yield.js";
 import * as SH from "./sheet.js";
+import * as VO from "./voice.js";
 
 const SCOPE = "https://www.googleapis.com/auth/drive.file";
 const API = "https://www.googleapis.com/drive/v3/files";
@@ -1253,6 +1254,15 @@ function renderMeasureBody() {
         inp.value = r.data[c.orig] ?? ""; inp.inputMode = "decimal";
         inp.oninput = () => { r.data[c.orig] = inp.value; };
         inp._set = (v) => { inp.value = v; r.data[c.orig] = v; };
+        inp._key = `${i}|${c.orig}`;
+        if (M.ia?.has(inp._key)) inp.classList.add("mia");
+        inp.addEventListener("focus", () => {                 // número del dictado elegido -> esta celda
+          const pk = M.dict?.pick;
+          if (pk == null) return;
+          inp._set(M.dict.nums[pk][2]);
+          M.dict.used.add(pk); M.dict.pick = null;
+          inp.blur(); renderMeasureBody();
+        });
         td.appendChild(inp); tr.appendChild(td);
         rowCells.push(inp);
       }
@@ -1287,15 +1297,21 @@ function renderMeasureBody() {
       };
     }));
     t.appendChild(tb);
+    if (M.dict) box.appendChild(dictationCard(M));
     const wrap = document.createElement("div"); wrap.className = "heatwrap"; wrap.appendChild(t);
     box.appendChild(wrap);
     const tools = document.createElement("div");
     tools.className = "mtools";
+    const au = document.createElement("label");
+    au.className = "ghost upload gold"; au.title = "Un audio dictando los datos: la IA lo transcribe y usted ubica cada número";
+    au.innerHTML = `🎙 Subir audio<input type="file" accept="audio/*,.m4a,.mp3,.wav,.ogg,.opus,.aac,.webm" hidden>`;
+    au.querySelector("input").onchange = (ev) => { const f = ev.target.files?.[0]; ev.target.value = ""; if (f) uploadDictation(M, f); };
+    tools.appendChild(au);
     const word = grouped ? SH.unitWord(M.cols.map((c) => c.name)) : "";
-    tools.innerHTML = `<button type="button" class="ghost" id="maddrow">＋ Fila</button>`
+    tools.insertAdjacentHTML("beforeend", `<button type="button" class="ghost" id="maddrow">＋ Fila</button>`
       + (grouped ? `<button type="button" class="ghost" id="maddgrp"></button><button type="button" class="ghost" id="maddsub"></button>` : "")
       + `<button type="button" class="ghost" id="maddcol">＋ Columna</button>`
-      + `<button type="button" class="ghost" id="mfill" title="Agrega las filas que falten esta semana">＋ Una fila por ${C.isTrial(S.state) ? "parcela" : "variedad"}</button>`;
+      + `<button type="button" class="ghost" id="mfill" title="Agrega las filas que falten esta semana">＋ Una fila por ${C.isTrial(S.state) ? "parcela" : "variedad"}</button>`);
     box.appendChild(tools);
     $("maddrow").onclick = () => {
       const last = M.rows.filter((r) => !r.gone).pop();
@@ -1396,6 +1412,102 @@ function renderMeasureBody() {
       catch (er) { $("mmsg").textContent = `No se pudieron subir: ${er.message}`; }
     }, { click: false, msg: "mmsg" });
   }
+}
+
+// ------------------------------------------------ dictado (audio subido)
+async function uploadDictation(M, file) {
+  M.dict = { name: file.name, text: "", nums: [], used: new Set(), pick: null, status: "Transcribiendo con IA…" };
+  renderMeasureBody();
+  try {                                     // el audio queda en Drive, junto a las fotos de la semana
+    let dir = await weekFolderId();
+    dir = await folder(M.m.name.replace(/\//g, "-").trim() || "Otras", dir, true);
+    upload(dir, file.name, file, file.type || "audio/mp4").catch(() => {});
+  } catch { /* sin Drive: igual se transcribe */ }
+  try {
+    const text = await VO.transcribe(file, (t) => { M.dict.status = t; });
+    Object.assign(M.dict, { text, nums: VO.numbers(text), status: "" });
+  } catch (e) { M.dict.status = `No se pudo transcribir: ${e.message}`; }
+  if (S.meas === M) renderMeasureBody();
+}
+
+function rowLabels(M) {
+  const vs = new Map(C.allVarieties(S.state).map((v) => [v.uid, v]));
+  const out = new Map();
+  M.rows.filter((r) => !r.gone).forEach((r, i) => {
+    const v = vs.get(r.variety_id);
+    let lab = v ? (v.code || C.unitMain(v) || v.name) : `Fila ${i + 1}`, k = 2;
+    const base0 = lab;
+    while (out.has(lab)) lab = `${base0} (${k++})`;
+    out.set(lab, i);
+  });
+  return out;
+}
+
+async function arrangeDictation(M) {
+  const D = M.dict;
+  const rows = rowLabels(M), live = M.rows.filter((r) => !r.gone);
+  const cols = M.cols.map((c) => c.name);
+  D.status = "La IA está ordenando los datos…"; renderMeasureBody();
+  try {
+    const got = await VO.arrange(D.text, [...rows.keys()], cols);
+    M.ia ||= new Map();
+    for (const it of got) {
+      const ri = rows.get(it.row), col = M.cols[cols.indexOf(it.col)];
+      const r = live[ri];
+      const k = `${ri}|${col.orig}`;
+      if (!M.ia.has(k)) M.ia.set(k, r.data[col.orig] ?? "");
+      r.data[col.orig] = it.value;
+    }
+    const pool = got.map((g) => g.value);
+    D.nums.forEach(([, , v], i) => { const j = pool.indexOf(v); if (j >= 0) { D.used.add(i); pool.splice(j, 1); } });
+    D.status = got.length ? `La IA ubicó ${got.length} dato(s): revise los amarillos, «Confirmar» y luego Guardar.` : "La IA no encontró dónde ubicar los datos.";
+  } catch (e) { D.status = `IA: ${e.message}`; }
+  renderMeasureBody();
+}
+
+function dictationCard(M) {
+  const D = M.dict;
+  const card = document.createElement("div");
+  card.className = "dcard";
+  const head = document.createElement("div");
+  head.className = "dhead2";
+  head.innerHTML = `<b></b><span class="muted small"></span>`;
+  head.querySelector("b").textContent = `🎙 ${D.name}`;
+  head.querySelector("span").textContent = D.status || "Toque un número y luego la celda donde va · o «Ordenar con IA».";
+  card.appendChild(head);
+  if (D.text) {
+    const p = document.createElement("p");
+    p.className = "dtext";
+    let pos = 0;
+    D.nums.forEach(([a, b, v], i) => {
+      p.appendChild(document.createTextNode(D.text.slice(pos, a)));
+      const ch = document.createElement("button");
+      ch.type = "button"; ch.textContent = v;
+      ch.className = "dnum" + (D.used.has(i) ? " used" : "") + (D.pick === i ? " sel" : "");
+      ch.onclick = () => { D.pick = D.pick === i ? null : i; renderMeasureBody(); };
+      p.appendChild(ch);
+      pos = b;
+    });
+    p.appendChild(document.createTextNode(D.text.slice(pos)));
+    card.appendChild(p);
+  }
+  const acts = document.createElement("div");
+  acts.className = "mtools";
+  if (D.text && !(M.ia && M.ia.size)) acts.insertAdjacentHTML("beforeend", `<button type="button" class="ghost gold" data-a="ia">✨ Ordenar con IA</button>`);
+  if (M.ia && M.ia.size) acts.insertAdjacentHTML("beforeend", `<button type="button" class="primary" data-a="ok">✓ Confirmar</button><button type="button" class="ghost" data-a="undo">Deshacer</button>`);
+  acts.insertAdjacentHTML("beforeend", `<button type="button" class="ghost" data-a="close">Cerrar</button>`);
+  acts.querySelectorAll("button").forEach((b) => (b.onclick = () => {
+    const a = b.dataset.a;
+    if (a === "ia") arrangeDictation(M);
+    else if (a === "ok") { M.ia = new Map(); D.status = "Confirmado: pulse Guardar."; renderMeasureBody(); }
+    else if (a === "undo") {
+      const live = M.rows.filter((r) => !r.gone);
+      for (const [k, old] of M.ia) { const [ri, col] = [Number(k.split("|")[0]), k.slice(k.indexOf("|") + 1)]; if (old === "") delete live[ri].data[col]; else live[ri].data[col] = old; }
+      M.ia = new Map(); D.status = "Se deshizo lo que puso la IA."; renderMeasureBody();
+    } else { M.dict = null; M.ia = new Map(); renderMeasureBody(); }
+  }));
+  card.appendChild(acts);
+  return card;
 }
 
 // Conteos con cajas de las fotos de esta semana -> planilla «<medición> · conteos» (= Database.counts_to_table):

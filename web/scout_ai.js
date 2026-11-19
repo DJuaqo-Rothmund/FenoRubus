@@ -157,7 +157,7 @@ const toB64 = (blob) => new Promise((res) => { const fr = new FileReader(); fr.o
 export async function askGemini(key, images, text, progress = () => {}, schema = null) {   // = scout_ai.ask_gemini
   await guide();
   const parts = [];
-  for (const img of images) parts.push({ inline_data: { mime_type: "image/jpeg", data: await toB64(img) } });
+  for (const img of images) parts.push({ inline_data: { mime_type: img.type && !img.type.startsWith("image/") ? img.type : "image/jpeg", data: await toB64(img) } });
   parts.push({ text });
   const body = JSON.stringify({ contents: [{ role: "user", parts }],
     generationConfig: { responseMimeType: "application/json", responseSchema: schema || G.schema } });

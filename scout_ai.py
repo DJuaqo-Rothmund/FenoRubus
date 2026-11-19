@@ -338,7 +338,9 @@ def ask_gemini(key: str, images: list[bytes], text: str, models=GEMINI_MODELS, p
                db=None, schema: dict | None = None):
     """Prueba los modelos gratuitos en orden (el último que funcionó primero): si uno no
     existe, no acepta la consulta o no tiene cuota gratuita, pasa al siguiente."""
-    parts = [{"inline_data": {"mime_type": "image/jpeg", "data": base64.b64encode(i).decode()}}
+    # images: JPEG (bytes) o (bytes, tipo) para otros archivos, p. ej. audio («audio/mp4»).
+    parts = [{"inline_data": {"mime_type": i[1] if isinstance(i, tuple) else "image/jpeg",
+                              "data": base64.b64encode(i[0] if isinstance(i, tuple) else i).decode()}}
              for i in images]
     parts.append({"text": text})
     body = json.dumps({"contents": [{"role": "user", "parts": parts}],
@@ -352,7 +354,7 @@ def ask_gemini(key: str, images: list[bytes], text: str, models=GEMINI_MODELS, p
         short = model.replace("gemini-", "")
         if progress:
             progress(f"Gemini ({short})")
-        code, data = _post(GEMINI_URL.format(model=model), body, headers, timeout=60)
+        code, data = _post(GEMINI_URL.format(model=model), body, headers, timeout=120)
         msg = _err_text(data) if code != 200 else ""
         if code in (401, 403) or (code == 400 and "api key" in msg.lower()):
             raise BadKey(f"Gemini: la clave no es válida ({msg[:120]}).")

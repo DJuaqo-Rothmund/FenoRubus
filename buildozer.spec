@@ -56,6 +56,7 @@ fullscreen = 0
 
 # (list) Permissions
 # - CAMERA: captura directa.
+# - RECORD_AUDIO: dictar datos a las planillas de mediciones (se pide al usarlo).
 # - READ_EXTERNAL_STORAGE / WRITE_EXTERNAL_STORAGE (<= Android 9-12) y
 #   READ_MEDIA_IMAGES (Android 13+): galería y guardado local.
 # - POST_NOTIFICATIONS, WAKE_LOCK, SCHEDULE_EXACT_ALARM: alarmas semanales precisas.
@@ -71,6 +72,7 @@ android.permissions = INTERNET,
     ACCESS_MEDIA_LOCATION,
     ACCESS_NETWORK_STATE,
     CAMERA,
+    RECORD_AUDIO,
     (name=android.permission.READ_EXTERNAL_STORAGE;maxSdkVersion=32),
     (name=android.permission.WRITE_EXTERNAL_STORAGE;maxSdkVersion=28),
     READ_MEDIA_IMAGES,
