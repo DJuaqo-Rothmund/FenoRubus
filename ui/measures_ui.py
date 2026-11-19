@@ -60,13 +60,23 @@ def open_measures_menu():
     week = a.week
     items = []
     measures = a.db.list_measures(week["id"])
-    for m in measures:
+    due = [m for m in measures if a.db.measure_due(m, week)]
+    rest = [m for m in measures if m not in due]
+
+    def row(m, note=""):
         unit = ("foto(s)" if m["kind"] == "images" else "fila(s)")
         kind = "Imágenes" if m["kind"] == "images" else "Planilla"
-        items.append((m["name"], f"{kind} · {m['n']} {unit} esta semana",
-                      lambda m=m: a.open_measure(m["id"], week["id"]), None,
-                      lambda m=m: delete_measure_dialog(m, week)))
+        sched = a.db.schedule_text(m)
+        sub = f"{kind} · {m['n']} {unit} esta semana" + ("" if sched == "Todas las semanas" else f" · {sched}")
+        return (m["name"], note + sub, lambda m=m: a.open_measure(m["id"], week["id"]), None,
+                lambda m=m: delete_measure_dialog(m, week))
+
+    items = [row(m) for m in due]
     footer = [("plus", "Nueva medición", new_measure_dialog)]
+    if rest:       # una sola vez o semanas elegidas: no tocan esta semana, pero se pueden abrir
+        footer.insert(0, ("calendar-blank-outline", f"Otras mediciones ({len(rest)}) · no tocan esta semana",
+                          lambda: pick_dialog("Otras mediciones", [row(m) for m in rest],
+                                              subtitle="Se toman una sola vez o en otras semanas")))
     if measures:
         footer.append(("microsoft-excel", "Exportar todas a Excel",
                        lambda: export_measures_xlsx([m["id"] for m in measures])))
@@ -75,7 +85,8 @@ def open_measures_menu():
     span = (f"{start.day} {ph.MESES[start.month - 1][:3]} – "
             f"{end.day} {ph.MESES[end.month - 1][:3]} {end.year}")
     pick_dialog("Mediciones", items, subtitle=f"{ph.week_title(week)} · {span}", footer=footer,
-                empty="Aún no hay mediciones en este ensayo.", image=theme.MEASURES_ICON)
+                empty="Aún no hay mediciones en este ensayo." if not rest else "Ninguna medición toca esta semana.",
+                image=theme.MEASURES_ICON)
 
 
 def delete_measure_dialog(m: dict, week: dict):
@@ -124,8 +135,86 @@ def export_measures_xlsx(measure_ids: list[int]):
     a.workers.submit(work)
 
 
+def _freq_row(box, measure: dict | None = None):
+    """Frecuencia: todas las semanas, una sola vez (esta semana) o semanas elegidas."""
+    a = app()
+    week = a.week
+    box.freq = a.db.measure_schedule(measure) if measure else {"mode": "weekly", "weeks": []}
+    box.add_widget(MDLabel(text="[b]¿Cuándo se toma?[/b]", markup=True, adaptive_height=True))
+    row = MDBoxLayout(adaptive_height=True, spacing=dp(6))
+    note = MDLabel(font_style="Caption", adaptive_height=True, theme_text_color="Custom", text_color=c(theme.MUTED))
+    buttons = {}
+
+    def show():
+        for k, b in buttons.items():
+            on = k == box.freq["mode"]
+            b.md_bg_color = c(theme.LEAF_DARK) if on else c("#FFFFFF", 0)
+            b.text_color = c("#FFFFFF") if on else c(theme.LEAF_DARK)
+        if box.freq["mode"] == "weekly":
+            note.text = "Aparece todas las semanas."
+        else:
+            nums = [str(ph.iso_week(w)[0]) for w in box.freq["weeks"]]
+            note.text = ("Solo en la semana " if box.freq["mode"] == "once" else "Solo en las semanas ") + \
+                ", ".join(nums) + ". En las demás queda en «Otras mediciones»."
+
+    def choose(mode):
+        if mode == "weekly":
+            box.freq = {"mode": "weekly", "weeks": []}
+        elif mode == "once":
+            keep = box.freq["weeks"][:1] if box.freq["mode"] == "once" else []
+            box.freq = {"mode": "once", "weeks": keep or [week["start_date"][:10]]}
+        else:
+            pick_weeks(box.freq["weeks"] or [week["start_date"][:10]],
+                       lambda got: (box.freq.update(mode="weeks", weeks=got), show()))
+            return
+        show()
+
+    for mode, label in (("weekly", "Semanal"), ("once", "Una vez"), ("weeks", "Semanas…")):
+        b = MDRectangleFlatButton(text=label, theme_text_color="Custom", line_color=c(theme.LEAF_DARK),
+                                  on_release=lambda *_, k=mode: choose(k))
+        buttons[mode] = b
+        row.add_widget(b)
+    box.add_widget(row)
+    box.add_widget(note)
+    Clock.schedule_once(lambda *_: show())
+
+
+def pick_weeks(selected: list[str], on_done):
+    """Elegir semanas (casillas): de 12 semanas atrás a 30 adelante de la semana abierta."""
+    from kivy.uix.scrollview import ScrollView
+    from kivymd.uix.selectioncontrol import MDCheckbox
+    a = app()
+    start = _dt.date.fromisoformat(a.week["start_date"][:10])
+    chosen = set(selected)
+    box = MDBoxLayout(orientation="vertical", adaptive_height=True)
+    for k in range(-12, 31):
+        d = start + _dt.timedelta(weeks=k)
+        key = d.isoformat()
+        r = MDBoxLayout(adaptive_height=True, spacing=dp(6))
+        cb = MDCheckbox(size_hint=(None, None), size=(dp(40), dp(40)), active=key in chosen)
+        cb.bind(active=lambda w, v, key=key: chosen.add(key) if v else chosen.discard(key))
+        r.add_widget(cb)
+        r.add_widget(MDLabel(text=f"Semana {ph.iso_week(d)[0]} · {d.day} {ph.MESES[d.month - 1][:3]} {d.year}"
+                                  + ("  (esta)" if k == 0 else ""), adaptive_height=True, pos_hint={"center_y": .5}))
+        box.add_widget(r)
+    sv = ScrollView(size_hint_y=None, height=dp(340))
+    sv.add_widget(box)
+    form = MDBoxLayout(orientation="vertical", adaptive_height=True)
+    form.add_widget(sv)
+    Clock.schedule_once(lambda *_: sv.scroll_to(box.children[-13], animate=False), .1)
+
+    def ok(_f):
+        if not chosen:
+            a.toast("Elija al menos una semana")
+            return False
+        on_done(sorted(chosen))
+
+    form_dialog("Semanas en que se toma", form, ok, "LISTO")
+
+
 def _measure_form(measure: dict | None = None):
-    """Formulario: nombre y tipo (planilla / imágenes). Las columnas se crean en la grilla."""
+    """Formulario: nombre, tipo (planilla / imágenes) y cuándo se toma. Las columnas se crean
+    en la grilla."""
     from kivy.factory import Factory
     box = MDBoxLayout(orientation="vertical", adaptive_height=True, spacing=dp(8),
                       padding=(0, dp(8), 0, 0))
@@ -134,7 +223,9 @@ def _measure_form(measure: dict | None = None):
     box.kind = measure["kind"] if measure else "table"
     if measure:
         box.name.text = measure["name"]
+        _freq_row(box, measure)
         return box
+    _freq_row(box)
     row = MDBoxLayout(adaptive_height=True, spacing=dp(8))
     hint = MDLabel(font_style="Caption", adaptive_height=True, theme_text_color="Custom",
                    text_color=c(theme.MUTED))
@@ -177,6 +268,8 @@ def new_measure_dialog():
                 a.db.fill_sheet_rows(mid, a.week["id"], reps)
             else:
                 mid = a.db.add_measure(form.name.text, form.kind)
+            if form.freq["mode"] != "weekly":
+                a.db.set_measure_schedule(a.db.get_measure(mid), form.freq["mode"], form.freq["weeks"])
         except ValueError as exc:
             a.toast(str(exc))
             return False
@@ -1316,6 +1409,7 @@ class MeasureScreen(MDScreen):
         def ok(f):
             try:
                 a.db.update_measure(m["id"], name=f.name.text)
+                a.db.set_measure_schedule(m, f.freq["mode"], f.freq["weeks"])
             except ValueError as exc:
                 a.toast(str(exc))
                 return False

@@ -88,3 +88,25 @@ def test_web_sheet_matches_python():
     assert tuple(js["n"][0:1]) == (SL.next_group(py)[0],) and js["n"][1] == SL.next_group(py)[1]
     assert js["d"] == SL.describe(py[1:]) and js["w"] == SL.unit_word(py) and js["a"] == SL.add_sub(py, "Diámetro")
     assert js["t"] == [["1", "2"], ["3", "4"]]
+
+
+def test_measure_schedule_and_sync(tmp_path):
+    """Mediciones de una sola vez o de semanas elegidas; la web las fija con un ajuste sincronizado."""
+    import sync
+    db = make_db(tmp_path)
+    w1 = db.week_for_date(dt.date(2026, 11, 16))
+    w2 = db.week_for_date(dt.date(2026, 11, 23))
+    m = db.get_measure(db.add_measure("Altura final", "table"))
+    assert db.measure_schedule(m)["mode"] == "weekly" and db.measure_due(m, w2)
+    db.set_measure_schedule(m, "once", [w1["start_date"], w2["start_date"]])
+    assert db.measure_schedule(m) == {"mode": "once", "weeks": ["2026-11-16"]}
+    assert db.measure_due(m, w1) and not db.measure_due(m, w2)
+    assert db.schedule_text(m).startswith("Una sola vez · semana 47")
+    with pytest.raises(ValueError):
+        db.set_measure_schedule(m, "weeks", [])
+    # Lo que manda la web (texto JSON en el paquete) llega igual a la app.
+    bundle = {"format": 1, "device": "web1", "workspace": "", "changes": [],
+              "settings": {f"measure_schedule:{m['uid']}": json.dumps({"mode": "weeks", "weeks": ["2026-11-23"]})}}
+    sync.apply_changes(db, bundle, str(tmp_path))
+    assert db.measure_schedule(m)["weeks"] == ["2026-11-23"] and db.measure_due(m, w2) and not db.measure_due(m, w1)
+    assert any(k.startswith("measure_schedule:") for k in sync.export_changes(db, str(tmp_path))["settings"])

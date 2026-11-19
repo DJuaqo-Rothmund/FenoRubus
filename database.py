@@ -1490,6 +1490,49 @@ class Database:
                     n += 1
         return n
 
+    # Frecuencia de una medición: todas las semanas (por defecto), una sola vez o en semanas
+    # elegidas. Se guarda como ajuste sincronizado «measure_schedule:<uid>» (la web lo lee igual).
+    MEASURE_FREQ = {"weekly": "Todas las semanas", "once": "Una sola vez", "weeks": "Semanas específicas"}
+
+    def measure_schedule(self, m: dict) -> dict:
+        got = self.get_setting(f"measure_schedule:{m.get('uid')}") if m.get("uid") else None
+        if not isinstance(got, dict) or got.get("mode") not in self.MEASURE_FREQ:
+            return {"mode": "weekly", "weeks": []}
+        return {"mode": got["mode"], "weeks": sorted({str(w)[:10] for w in got.get("weeks") or []})}
+
+    def set_measure_schedule(self, m: dict, mode: str, weeks: list[str] | None = None) -> dict:
+        if mode not in self.MEASURE_FREQ:
+            raise ValueError("Frecuencia desconocida.")
+        weeks = sorted({str(w)[:10] for w in weeks or []})
+        if mode == "weekly":
+            weeks = []
+        elif not weeks:
+            raise ValueError("Elija al menos una semana.")
+        if mode == "once":
+            weeks = weeks[:1]
+        self.set_setting(f"measure_schedule:{m['uid']}", {"mode": mode, "weeks": weeks})
+        return {"mode": mode, "weeks": weeks}
+
+    def measure_due(self, m: dict, week: dict) -> bool:
+        """¿Toca esta medición en esa semana? (siempre, si ya tiene datos en ella)."""
+        sch = self.measure_schedule(m)
+        return sch["mode"] == "weekly" or str(week["start_date"])[:10] in sch["weeks"] or bool(m.get("n"))
+
+    def schedule_text(self, m: dict) -> str:
+        sch = self.measure_schedule(m)
+        if sch["mode"] == "weekly":
+            return "Todas las semanas"
+        import phenology as ph
+        nums = []
+        for w in sch["weeks"]:
+            try:
+                nums.append(str(ph.iso_week(w)[0]))
+            except Exception:  # noqa: BLE001
+                continue
+        if sch["mode"] == "once":
+            return f"Una sola vez · semana {nums[0]}" if nums else "Una sola vez"
+        return "Semanas " + ", ".join(nums)
+
     def delete_measure(self, measure_id: int) -> None:
         self.execute("DELETE FROM measures WHERE id=?", (measure_id,))
         self.log("delete", "measure", measure_id)

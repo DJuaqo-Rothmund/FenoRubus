@@ -384,6 +384,8 @@
           <div id="mkind" class="place"></div>
           <input id="mname" class="title-in" aria-label="Nombre de la medición">
           <div id="mweek" class="muted small"></div>
+          <div class="mfreq small"><span class="muted">¿Cuándo se toma?</span> <select id="mfreq"><option value="weekly">Todas las semanas</option><option value="once">Una sola vez</option><option value="weeks">Semanas específicas</option></select> <span id="mfreqtxt" class="muted"></span></div>
+          <div id="mweeks" class="weekpick" hidden></div>
         </div>
         <button value="cancel" class="round" aria-label="Cerrar">✕</button>
       </div>
@@ -408,6 +410,10 @@
       <label class="field">Tipo
         <select id="nkind"><option value="table">Planilla de datos</option><option value="images">Registro de imágenes</option></select>
       </label>
+      <label class="field">¿Cuándo se toma?
+        <select id="nfreq"><option value="weekly">Todas las semanas</option><option value="once">Una sola vez (esta semana)</option><option value="weeks">Semanas específicas…</option></select>
+      </label>
+      <div id="nweeks" class="weekpick" hidden></div>
       <div id="nstruct" class="nstruct">
         <b>Cómo tomará los datos</b>
         <p id="nrows" class="muted small"></p>

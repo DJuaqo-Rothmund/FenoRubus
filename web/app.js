@@ -979,10 +979,52 @@ async function extraPicked() {
 // ================================================================== mediciones
 const KIND_NAME = { table: "Planilla de datos", images: "Registro de imágenes" };
 
+// Frecuencia de una medición (= Database.measure_schedule / measure_due): todas las semanas, una
+// sola vez o semanas elegidas; ajuste sincronizado «measure_schedule:<uid>».
+function schedOf(m) {
+  const s = C.setting(S.state, `measure_schedule:${m.uid}`, null);
+  return s && ["weekly", "once", "weeks"].includes(s.mode) ? { mode: s.mode, weeks: [...(s.weeks || [])].map((w) => String(w).slice(0, 10)).sort() } : { mode: "weekly", weeks: [] };
+}
+function measureDue(m) {
+  const s = schedOf(m);
+  return s.mode === "weekly" || s.weeks.includes(S.week) || C.entriesFor(S.state, m.uid, S.week).some(C.entryFilled);
+}
+function schedText(m) {
+  const s = schedOf(m);
+  if (s.mode === "weekly") return "";
+  const nums = s.weeks.map((w) => C.weekTitle(w).match(/\d+/)?.[0]).filter(Boolean);
+  return s.mode === "once" ? `Una sola vez · semana ${nums[0] || ""}` : `Semanas ${nums.join(", ")}`;
+}
+const addDays = (iso, d) => { const x = C.parseDate(iso); x.setUTCDate(x.getUTCDate() + d); return x.toISOString().slice(0, 10); };
+// Casillas de semanas (12 atrás y 30 adelante de la semana abierta).
+function weekPicker(box, selected) {
+  box.innerHTML = "";
+  for (let k = -12; k <= 30; k++) {
+    const w = addDays(S.week, 7 * k);
+    const l = document.createElement("label");
+    l.innerHTML = `<input type="checkbox" value="${w}"> <span></span>`;
+    l.querySelector("input").checked = selected.includes(w);
+    l.querySelector("span").textContent = `${C.weekTitle(w).replace(", año", " ·")}${k === 0 ? " (esta)" : ""}`;
+    box.appendChild(l);
+  }
+  setTimeout(() => box.querySelector(`input[value="${S.week}"]`)?.parentElement.scrollIntoView({ block: "center" }), 50);
+}
+const pickedWeeks = (box) => [...box.querySelectorAll("input:checked")].map((i) => i.value).sort();
+function schedSettings(m, mode, weeks) {
+  if (mode === "weekly") weeks = [];
+  else if (!weeks.length) throw new Error("Elija al menos una semana.");
+  if (mode === "once") weeks = weeks.slice(0, 1);
+  const cur = schedOf(m);
+  if (cur.mode === mode && JSON.stringify(cur.weeks) === JSON.stringify(weeks)) return null;
+  return { [`measure_schedule:${m.uid}`]: JSON.stringify({ mode, weeks }) };
+}
+
 function renderMeasures() {
   const box = $("mlist");
   box.innerHTML = "";
-  for (const m of C.measures(S.state)) {
+  const all = C.measures(S.state);
+  const rest = all.filter((m) => !measureDue(m));
+  for (const m of all.filter(measureDue)) {
     const n = C.entriesFor(S.state, m.uid, S.week).filter(C.entryFilled).length;
     const el = document.createElement("button");
     el.className = "card row mrow";
@@ -991,15 +1033,30 @@ function renderMeasures() {
       <div class="badges"><span class="badge ${n ? "bbch" : "none"}">${n ? n + (m.kind === "images" ? " FOTO" : " FILA") + (n > 1 ? "S" : "") : "SIN DATOS"}</span></div>`;
     el.querySelector(".place").textContent = KIND_NAME[m.kind] || m.kind;
     el.querySelector(".name").textContent = m.name;
-    el.querySelector(".sub").textContent = m.kind === "table" ? (SH.isGrouped(m.columns) ? SH.describe(m.columns) : m.columns.join(" · ")) : "Fotos con descripción";
+    el.querySelector(".sub").textContent = (m.kind === "table" ? (SH.isGrouped(m.columns) ? SH.describe(m.columns) : m.columns.join(" · ")) : "Fotos con descripción")
+      + (schedText(m) ? ` · ${schedText(m)}` : "");
     el.onclick = () => openMeasure(m.uid);
     box.appendChild(el);
+  }
+  if (rest.length) {      // una sola vez o en otras semanas: aparte, plegadas
+    const d = document.createElement("details");
+    d.className = "card mrest";
+    d.innerHTML = `<summary>Otras mediciones (${rest.length}) · no tocan esta semana</summary>`;
+    for (const m of rest) {
+      const b = document.createElement("button");
+      b.type = "button"; b.className = "ghost";
+      b.textContent = `${m.kind === "images" ? "📷" : "📋"} ${m.name} · ${schedText(m)}`;
+      b.onclick = () => openMeasure(m.uid);
+      d.appendChild(b);
+    }
+    box.appendChild(d);
   }
   const add = document.createElement("button");
   add.className = "card row mrow add";
   add.textContent = "＋ Nueva medición";
   add.onclick = () => {
     $("nname").value = ""; $("nmsg").textContent = ""; $("nvars").value = ""; $("nsamples").value = "1"; $("nreps").value = "1";
+    $("nfreq").value = "weekly"; $("nweeks").hidden = true;
     structPreview(); $("newmeasure").showModal();
   };
   box.appendChild(add);
@@ -1055,8 +1112,13 @@ async function createMeasure(ev) {
   let plan = null;
   try { plan = kind === "table" ? structPlan() : null; } catch (e) { $("nmsg").textContent = e.message; return; }
   const ch = C.measureChange(null, { name, kind, sort_order: order, columns: kind === "table" ? (plan ? plan.cols : ["Columna 1", "Columna 2", "Columna 3"]) : [] });
+  let sched = null;
   try {
-    await send([ch]);
+    const mode = $("nfreq").value;
+    sched = schedSettings({ uid: ch.uid }, mode, mode === "once" ? [S.week] : pickedWeeks($("nweeks")));
+  } catch (e) { $("nmsg").textContent = e.message; return; }
+  try {
+    await send([ch], sched || {});
     $("newmeasure").close();
     render();
     openMeasure(ch.uid, plan ? plan.reps : null);
@@ -1095,6 +1157,12 @@ function openMeasure(uid, reps = null) {
   if (m.kind === "table" && !S.meas.rows.length && (reps || SH.isGrouped(m.columns))) sheetRows(S.meas, reps);
   if (m.kind === "table" && !S.meas.rows.length) S.meas.rows.push({ e: null, variety_id: "", data: {}, caption: "", gone: false });
   $("mkind").textContent = KIND_NAME[m.kind] || m.kind;
+  const sc = schedOf(m);
+  $("mfreq").value = sc.mode;
+  $("mfreqtxt").textContent = schedText(m);
+  $("mweeks").hidden = sc.mode !== "weeks";
+  if (sc.mode === "weeks") weekPicker($("mweeks"), sc.weeks);
+  S.meas.sched = sc;
   $("mname").value = m.name;
   $("mweek").textContent = `${C.weekTitle(S.week)} · ${C.weekLabel(S.week)}`;
   $("mmsg").textContent = "";
@@ -1485,12 +1553,17 @@ async function deleteMeasure(all) {
 
 async function saveMeasure(ev) {
   ev.preventDefault();
-  let changes;
-  try { changes = measureChanges(); } catch (e) { $("mmsg").textContent = e.message; return; }
-  if (!changes.length) { $("measure").close(); return; }
+  let changes, sched = null;
+  try {
+    changes = measureChanges();
+    const mode = $("mfreq").value;
+    const weeks = mode === "weeks" ? pickedWeeks($("mweeks")) : mode === "once" ? (S.meas.sched.mode === "once" ? S.meas.sched.weeks : [S.week]) : [];
+    sched = schedSettings(S.meas.m, mode, weeks);
+  } catch (e) { $("mmsg").textContent = e.message; return; }
+  if (!changes.length && !sched) { $("measure").close(); return; }
   $("msave").disabled = true;
   try {
-    await send(changes);
+    await send(changes, sched || {});
     $("measure").close();
     render();
   } catch (e) {
@@ -2660,6 +2733,13 @@ async function boot() {
   $("clearweek").onclick = clearWeek;
   $("ncreate").onclick = createMeasure;
   for (const id of ["nkind", "nvars", "nsamples", "nsname", "nreps"]) $(id).addEventListener("input", structPreview);
+  $("nfreq").onchange = () => { $("nweeks").hidden = $("nfreq").value !== "weeks"; if (!$("nweeks").hidden) weekPicker($("nweeks"), [S.week]); };
+  $("mfreq").onchange = () => {
+    const mode = $("mfreq").value;
+    $("mweeks").hidden = mode !== "weeks";
+    if (mode === "weeks") weekPicker($("mweeks"), S.meas.sched.weeks.length ? S.meas.sched.weeks : [S.week]);
+    $("mfreqtxt").textContent = mode === "once" ? "(esta semana)" : "";
+  };
   $("dseldel").onclick = () => deletePhotos([...S.photoSel]);
   $("dgps").onclick = locateMe;
   $("dmap").onclick = openPickMap;

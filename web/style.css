@@ -658,3 +658,11 @@ dialog.rcfg { width: min(720px, 96vw); background: #FBF8F1; }
   .ttools .tcount { position: static; transform: none; max-width: none; flex-basis: 100%; justify-content: center; text-align: center; }
 }
 .mcount .mia { color: #E65100; }
+/* Mediciones: frecuencia (todas las semanas / una vez / semanas elegidas) */
+.weekpick { max-height: 190px; overflow: auto; border: 1px solid var(--line); border-radius: 12px; padding: 6px 10px; display: grid; gap: 2px; margin: 4px 0 8px; }
+.weekpick[hidden] { display: none; }
+.weekpick label { font-size: 13px; display: flex; gap: 6px; align-items: center; }
+.mfreq { margin-top: 4px; display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.mfreq select { font: inherit; padding: 2px 6px; border-radius: 8px; border: 1px solid var(--line); }
+.mrest summary { cursor: pointer; color: var(--muted); font-size: 14px; }
+.mrest button { display: block; margin: 6px 0 0; text-align: left; width: 100%; }
