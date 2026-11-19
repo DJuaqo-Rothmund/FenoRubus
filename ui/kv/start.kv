@@ -403,7 +403,7 @@
         Widget:
         MDBoxLayout:
             size_hint: None, None
-            size: dp(150) * 2 + dp(16), dp(170)
+            size: (dp(150) * 2 + dp(16)) * app.ui_k, dp(170) * app.ui_k
             pos_hint: {"center_x": .5}
             spacing: dp(16)
             StartIcon:
@@ -412,7 +412,7 @@
                 bubble: theme.BLOB_ID
                 label: "I+D"
                 color: theme.on_bg("#AB1D59")
-                diameter: dp(112)
+                diameter: dp(112) * app.ui_k
                 on_release: root.open_profile("id")
             StartIcon:
                 id: ic_predio
@@ -420,12 +420,12 @@
                 bubble: theme.BLOB_PREDIO
                 label: "Predio"
                 color: theme.on_bg("#2F5643")
-                diameter: dp(112)
+                diameter: dp(112) * app.ui_k
                 on_release: root.open_profile("predio")
         # La IA y la IA+ están en la pantalla principal de AeonCrop (eligen el cultivo).
         MDBoxLayout:
             size_hint: None, None
-            size: dp(150) * 2 + dp(16), dp(170)
+            size: (dp(150) * 2 + dp(16)) * app.ui_k, dp(170) * app.ui_k
             pos_hint: {"center_x": .5}
             spacing: dp(16)
             StartIcon:
@@ -434,7 +434,7 @@
                 bubble: theme.BLOB_NOTEBOOK
                 label: "Cuaderno de campo"
                 color: theme.on_bg("#6B4423")
-                diameter: dp(112)
+                diameter: dp(112) * app.ui_k
                 on_release: app.open_notebook()
             StartIcon:
                 id: ic_yield
@@ -442,7 +442,7 @@
                 bubble: theme.BLOB_YIELD
                 label: "Rendimiento"
                 color: theme.on_bg("#2F7F92")
-                diameter: dp(112)
+                diameter: dp(112) * app.ui_k
                 on_release: app.open_yield()
         Widget:
         AnchorLayout:

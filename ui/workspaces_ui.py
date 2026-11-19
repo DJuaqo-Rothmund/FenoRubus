@@ -137,10 +137,11 @@ class WorkspacesScreen(MDScreen):
                                              subtitle=KINDS.get(ws["kind"], ws["kind"]),
                                              current=ws["id"] == cur.get("id"), ws=ws, screen=self)
                 row.c1, row.c2 = ws_cards.colors_for(i, ws["profile"])
-            else:
-                row = WorkspaceRow(title=ws["name"], code=ws["code"], profile=ws["profile"],
-                                   subtitle=KINDS.get(ws["kind"], ws["kind"]),
-                                   current=ws["id"] == cur.get("id"), ws=ws, screen=self)
+            else:      # lista: el mismo estilo, en filas anchas
+                row = ws_cards.WorkspaceRowCard(title=ws["name"], code=ws["code"], profile=ws["profile"],
+                                                subtitle=KINDS.get(ws["kind"], ws["kind"]),
+                                                current=ws["id"] == cur.get("id"), ws=ws, screen=self)
+                row.c1, row.c2 = ws_cards.colors_for(i, ws["profile"])
             row.bind(on_release=lambda w: self.choose(w.ws))
             box.add_widget(row)
             rows.append(row)

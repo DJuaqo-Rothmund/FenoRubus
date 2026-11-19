@@ -92,7 +92,8 @@ class _Card(ButtonBehavior, BoxLayout):
 class _Square(Label):
     """Código del ensayo en un cuadrado redondeado translúcido."""
 
-    def __init__(self, **kw):
+    def __init__(self, min_w=46, **kw):
+        self.min_w = dp(min_w)
         super().__init__(size_hint=(None, None), size=(dp(46), dp(46)), bold=True, font_size=sp(14),
                          color=(1, 1, 1, 1), halign="center", valign="middle", **kw)
         self.bind(pos=self._d, size=self._d, text=self._fit)
@@ -100,7 +101,7 @@ class _Square(Label):
     def _fit(self, *_):
         self.font_size = sp(14 if len(self.text) <= 3 else 12)
         self.texture_update()
-        self.width = max(dp(46), self.texture_size[0] + dp(18))
+        self.width = max(self.min_w, self.texture_size[0] + dp(18))
 
     def _d(self, *_):
         self.text_size = self.size
@@ -150,6 +151,43 @@ class WorkspaceCard(_Card):
         self.t.text = self.title
         self.s.text = self.subtitle
         self.st.text = self.stats
+
+
+class WorkspaceRowCard(_Card):
+    """Vista de lista con el mismo estilo: una fila ancha con degradado (sin «Continuar»)."""
+    RADIUS = 22
+    title = StringProperty()
+    subtitle = StringProperty()
+    code = StringProperty()
+    profile = StringProperty("id")
+    ws = ObjectProperty(None, allownone=True)
+    screen = ObjectProperty(None, allownone=True)
+
+    def __init__(self, **kw):
+        super().__init__(orientation="horizontal", size_hint_y=None, height=dp(90),
+                         padding=(dp(16), dp(10), dp(4), dp(10)), spacing=dp(14), **kw)
+        self.sq = _Square(min_w=56, pos_hint={"center_y": .5})
+        self.add_widget(self.sq)
+        col = BoxLayout(orientation="vertical", spacing=dp(3))
+        col.add_widget(Widget())
+        self.t = _lab(size=15.5, bold=True)
+        self.s = _lab(size=11.5, alpha=.88, lines=2)
+        col.add_widget(self.t)
+        col.add_widget(self.s)
+        col.add_widget(Widget())
+        self.add_widget(col)
+        from kivymd.uix.button import MDIconButton
+        self.dots = MDIconButton(icon="dots-vertical", theme_icon_color="Custom", icon_color=(1, 1, 1, .9),
+                                 pos_hint={"center_y": .5})
+        self.dots.bind(on_release=lambda *_: self.screen.item_menu(self.ws) if self.screen else None)
+        self.add_widget(self.dots)
+        self.bind(title=self._text, subtitle=self._text, code=self._text)
+        self._text()
+
+    def _text(self, *_):
+        self.sq.text = self.code
+        self.t.text = self.title
+        self.s.text = self.subtitle
 
 
 class ContinueCard(_Card):

@@ -100,6 +100,13 @@ MIME = {".html": "text/html", ".zip": "application/zip", ".sqlite3": "applicatio
 
 class FenoRubusApp(MDApp):
     title = "AeonCrop"
+    # Escala de los botones grandes del inicio: 1 en teléfono, hasta 1,6 en tablet.
+    from kivy.properties import NumericProperty as _NP
+    ui_k = _NP(1.0)
+
+    def _ui_scale(self, *_):
+        from kivy.metrics import dp as _dp
+        self.ui_k = max(1.0, min(1.6, min(Window.size) / _dp(412)))
 
     # ------------------------------------------------------------ build
     def build(self):
@@ -155,6 +162,8 @@ class FenoRubusApp(MDApp):
         self.sm.add_widget(LaunchScreen(name="launch"))
         self.home = None
         Window.bind(on_keyboard=self._on_keyboard)
+        Window.bind(size=self._ui_scale)
+        self._ui_scale()
         Window.clearcolor = theme.c(theme.SPLASH_BG)  # sin destello entre presplash e inicio
         # Fondo difuminado (color de la fruta o del estilo) detrás de las pantallas translúcidas.
         root = FloatLayout()
