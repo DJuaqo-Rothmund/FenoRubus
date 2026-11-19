@@ -111,26 +111,58 @@ class WorkspacesScreen(MDScreen):
 
     def refresh(self):
         a = app()
-        box = self.ids.ws_list
+        box = self.ids.ws_list.__self__        # ids da un proxy: «parent is box» fallaba siempre
         fast_clear(box)
         items = a.workspaces.list(self.profile, archived=self.show_archived)
         cur = getattr(a, "workspace", None) or {}
         from workspaces import KINDS
+        from ui import ws_cards
+        hero_box = self.ids.hero_box.__self__
+        fast_clear(hero_box)
         rows = []
-        for ws in items:
-            cls = WorkspaceTile if self.view_mode == "grid" else WorkspaceRow
-            row = cls(title=ws["name"], code=ws["code"], profile=ws["profile"],
-                               subtitle=KINDS.get(ws["kind"], ws["kind"]),
-                               current=ws["id"] == cur.get("id"), ws=ws, screen=self)
+        grid = self.view_mode == "grid"
+        # Arriba, «Continuar» con el ensayo en uso (o el primero de la lista).
+        hero = None
+        if grid and items and not self.show_archived:
+            ws0 = next((w for w in items if w["id"] == cur.get("id")), items[0])
+            i0 = items.index(ws0)
+            hero = ws_cards.ContinueCard(ws0, current=False)
+            hero.c1, hero.c2 = ws_cards.colors_for(i0, ws0["profile"])
+            hero.bind(on_release=lambda w: self.choose(w.ws))
+            hero_box.padding = (0, 0, 0, dp(4))
+            hero_box.add_widget(hero)
+        for i, ws in enumerate(items):
+            if grid:
+                row = ws_cards.WorkspaceCard(title=ws["name"], code=ws["code"], profile=ws["profile"],
+                                             subtitle=KINDS.get(ws["kind"], ws["kind"]),
+                                             current=ws["id"] == cur.get("id"), ws=ws, screen=self)
+                row.c1, row.c2 = ws_cards.colors_for(i, ws["profile"])
+            else:
+                row = WorkspaceRow(title=ws["name"], code=ws["code"], profile=ws["profile"],
+                                   subtitle=KINDS.get(ws["kind"], ws["kind"]),
+                                   current=ws["id"] == cur.get("id"), ws=ws, screen=self)
             row.bind(on_release=lambda w: self.choose(w.ws))
             box.add_widget(row)
             rows.append(row)
+
         # Las estadísticas abren la base de cada ensayo: una por cuadro, ya con la lista a la vista.
         def fill(i=0):
             if i < len(rows) and rows[i].parent is box:
-                rows[i].subtitle = self._stats(rows[i].ws)
+                if grid:
+                    rows[i].stats = self._card_stats(rows[i].ws)
+                else:
+                    rows[i].subtitle = self._stats(rows[i].ws)
                 Clock.schedule_once(lambda *_: fill(i + 1), 0)
-        Clock.schedule_once(lambda *_: fill(), 0.05)
+
+        def fill_hero():
+            if hero is None or hero.parent is not hero_box:
+                return
+            try:
+                text, frac = ws_cards.week_progress(app().open_db(hero.ws), hero.ws["profile"])
+            except Exception:  # noqa: BLE001
+                text, frac = "", 0.0
+            hero.set_progress(f"{hero.ws['code']} · {text}" if text else hero.ws["code"], frac)
+        Clock.schedule_once(lambda *_: (fill_hero(), fill()), 0.05)
         if not items:
             box.add_widget(MDLabel(text="No hay archivados." if self.show_archived else
                                    "Aún no hay nada aquí: toque + para crear el primero.",
@@ -144,6 +176,23 @@ class WorkspacesScreen(MDScreen):
             self.ids.hint.text = "Archivados: no aparecen en la lista, pero sus datos se conservan."
         self.ids.add_btn.opacity, self.ids.add_btn.disabled = (0, True) if self.show_archived else (1, False)
         self.ids.archived_btn.text = "Volver a la lista" if self.show_archived else "Ver archivados"
+
+    def _card_stats(self, ws) -> str:
+        """Pie de la tarjeta: «7 parcelas · Sem. 47» (última semana con estados)."""
+        try:
+            db = app().open_db(ws)
+            n = db.query_one("SELECT COUNT(*) AS n FROM varieties WHERE active=1 AND pheno_unit=0")["n"]
+            one, many = {"tratamientos": ("parcela", "parcelas"), "predio": ("sector", "sectores")
+                         }.get(ws["kind"], ("variedad", "variedades"))
+            last = db.query_one("SELECT w.start_date FROM observations o JOIN sampling_weeks w "
+                                "ON w.id = o.week_id WHERE o.bbch_code IS NOT NULL "
+                                "ORDER BY w.start_date DESC LIMIT 1")
+            out = f"{n} {one if n == 1 else many}"
+            if last:
+                out += f"   ·   Sem. {ph.iso_week(last['start_date'])[0]}"
+            return out
+        except Exception:  # noqa: BLE001
+            return ""
 
     def choose(self, ws):
         if ws["archived"]:
