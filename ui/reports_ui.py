@@ -40,7 +40,7 @@ class ReportGroup(GlassButton):
 
 
 # --------------------------------------------- filas de informe (opción B)
-from kivy.graphics import Color, RoundedRectangle  # noqa: E402
+from kivy.graphics import Color, Line, RoundedRectangle  # noqa: E402
 from kivy.metrics import dp, sp  # noqa: E402
 from kivy.uix.behaviors import ButtonBehavior  # noqa: E402
 from kivy.uix.boxlayout import BoxLayout  # noqa: E402
@@ -55,20 +55,42 @@ def _glyph(name: str) -> str:
     return md_icons.get(name, "")
 
 
+# Íconos dibujados (Flow) de cada informe. ART_STYLE: "tile" (cuadro claro), "blob" (burbuja de
+# su color) o "free" (sin fondo, más grande).
+ART_STYLE = os.environ.get("AEON_REP_STYLE", "tile")
+_ART_TEX: dict = {}
+
+
+def _art_texture(name: str, light: bool = False):
+    """Textura del dibujo; light=True: la versión con trazos claros (estilos oscuros)."""
+    key = (name, light)
+    if key not in _ART_TEX:
+        from kivy.core.image import Image as CoreImage
+        from platform_utils import resource_path
+        _ART_TEX[key] = CoreImage(resource_path("assets", "ui", "rep", f"{name}{'_light' if light else ''}.png"),
+                                  mipmap=True).texture
+    return _ART_TEX[key]
+
+
 class GradIcon(Widget):
-    """Ícono de línea (Material) blanco sobre un cuadrado redondeado con degradado."""
+    """Ícono del informe: el dibujo propio (art) o, si no hay, uno de línea blanco sobre degradado."""
     icon = StringProperty("file-document-outline")
+    art = StringProperty("")
     c1 = StringProperty("#3E8A63")
     c2 = StringProperty("#1E4A3A")
 
     def __init__(self, **kw):
-        super().__init__(size_hint=(None, None), size=(dp(48), dp(48)), **kw)
-        self.bind(pos=self._draw, size=self._draw, icon=self._draw, c1=self._draw, c2=self._draw)
+        side = {"blob": 60, "free": 64}.get(ART_STYLE, 56)
+        super().__init__(size_hint=(None, None), size=(dp(side), dp(side)), **kw)
+        self.bind(pos=self._draw, size=self._draw, icon=self._draw, c1=self._draw, c2=self._draw, art=self._draw)
 
     def _draw(self, *_):
+        self.canvas.clear()
+        if self.art:
+            self._draw_art()
+            return
         from kivy.core.text import Label as CoreLabel
         from ui.ws_cards import gradient
-        self.canvas.clear()
         lab = CoreLabel(text=_glyph(self.icon), font_name="Icons", font_size=sp(25), color=(1, 1, 1, 1))
         lab.refresh()
         t = lab.texture
@@ -78,6 +100,34 @@ class GradIcon(Widget):
             Color(1, 1, 1, 1)
             RoundedRectangle(pos=self.pos, size=self.size, radius=[dp(16)], texture=gradient(self.c1, self.c2))
             RoundedRectangle(texture=t, size=t.size, pos=(self.center_x - t.width / 2, self.center_y - t.height / 2))
+
+    def _draw_art(self):
+        from kivy.graphics import Ellipse, Rectangle
+        w, h = self.size
+        with self.canvas:
+            if ART_STYLE == "tile":
+                Color(0, 0, 0, .07)
+                RoundedRectangle(pos=(self.x, self.y - dp(2)), size=self.size, radius=[dp(18)])
+                Color(1, 1, 1, .96)
+                RoundedRectangle(pos=self.pos, size=self.size, radius=[dp(18)])
+                Color(*c(self.c1)[:3], .35)
+                Line(rounded_rectangle=(self.x, self.y, w, h, dp(18)), width=dp(1))
+                k = .80
+            elif ART_STYLE == "blob":
+                r1, g1, b1 = c(self.c1)[:3]
+                Color(r1, g1, b1, .16)
+                Ellipse(pos=(self.x - dp(2), self.y + dp(1)), size=(w * .92, h * .86))
+                Color(r1, g1, b1, .10)
+                Ellipse(pos=(self.x + w * .22, self.y - dp(2)), size=(w * .8, h * .8))
+                Color(1, 1, 1, .9)
+                Ellipse(pos=(self.x + w * .12, self.y + h * .1), size=(w * .76, h * .76))
+                k = .92
+            else:
+                k = 1.0
+            Color(1, 1, 1, 1)
+            s = min(w, h) * k
+            tex = _art_texture(self.art, light=ART_STYLE == "free" and theme.is_dark())
+            Rectangle(texture=tex, pos=(self.center_x - s / 2, self.center_y - s / 2), size=(s, s))
 
 
 class ChipButton(ButtonBehavior, BoxLayout):
@@ -125,6 +175,7 @@ class ChipButton(ButtonBehavior, BoxLayout):
 class ReportItem(GlassCard):
     """Fila de un informe: ícono con degradado · título, descripción y pastillas · botón PDF."""
     icon = StringProperty("file-document-outline")
+    art = StringProperty("")
     c1 = StringProperty("#3E8A63")
     c2 = StringProperty("#1E4A3A")
     title = StringProperty("")
@@ -158,7 +209,7 @@ class ReportItem(GlassCard):
         super().add_widget(self.col)
         super().add_widget(self.go)
         self.col.bind(height=self._fit)
-        self.bind(icon=self._sync, c1=self._sync, c2=self._sync, title=self._sync, desc=self._sync,
+        self.bind(icon=self._sync, art=self._sync, c1=self._sync, c2=self._sync, title=self._sync, desc=self._sync,
                   go_text=self._sync)
         self._ready = True
         self._sync()
@@ -170,7 +221,7 @@ class ReportItem(GlassCard):
         (self.chips if isinstance(widget, ChipButton) else self.extra).add_widget(widget)
 
     def _sync(self, *_):
-        self.gi.icon, self.gi.c1, self.gi.c2 = self.icon, self.c1, self.c2
+        self.gi.icon, self.gi.c1, self.gi.c2, self.gi.art = self.icon, self.c1, self.c2, self.art
         self.t.text, self.d.text = self.title, self.desc
         self.go.text = self.go_text
 

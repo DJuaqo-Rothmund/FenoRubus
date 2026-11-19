@@ -45,6 +45,7 @@
                     text_color: c(theme.LEAF_DARK)
             ReportItem:
                 icon: "calendar-week"
+                art: "weekly"
                 c1: "#3E8A63"
                 c2: "#1E4A3A"
                 title: "Semanal inter-varietal"
@@ -61,6 +62,7 @@
                     on_release: root.generate_all_weekly()
             ReportItem:
                 icon: "chart-timeline-variant"
+                art: "period"
                 c1: "#C2365F"
                 c2: "#7E1238"
                 title: "Evolución mensual / rango"
@@ -84,6 +86,7 @@
             ReportItem:
                 id: variety_title
                 icon: "sprout-outline"
+                art: "variety"
                 c1: "#4B7F8C"
                 c2: "#23485A"
                 title: "Ficha completa por variedad"
@@ -96,6 +99,7 @@
                     on_release: root.pick_variety(self)
             ReportItem:
                 icon: "view-grid-outline"
+                art: "matrix"
                 c1: "#8A7A3E"
                 c2: "#5A4A1E"
                 title: "Matriz comparativa global"
@@ -104,6 +108,7 @@
             ReportItem:
                 id: trial_card
                 icon: "scale-balance"
+                art: "treatments"
                 c1: "#6A5AA8"
                 c2: "#3E2F7E"
                 title: "Comparación de tratamientos"
@@ -111,6 +116,7 @@
                 on_go: root.generate("treatments")
             ReportItem:
                 icon: "thermometer-lines"
+                art: "gdd"
                 c1: "#B8642E"
                 c2: "#7A3A12"
                 title: "Fenología y días grado"
@@ -132,6 +138,7 @@
                     on_release: root.gdd_pick_predio()
             ReportItem:
                 icon: "compare-horizontal"
+                art: "seasons"
                 c1: "#2F7F92"
                 c2: "#1C4F5E"
                 title: "Comparación entre temporadas"
