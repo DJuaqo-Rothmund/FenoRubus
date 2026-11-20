@@ -104,15 +104,27 @@ class GlassCard(BoxLayout):
 
 
 class NeonCard(GlassCard):
-    """Tarjeta de la IA: borde morado neón que respira, con un destello que recorre el borde.
-    Solo se anima mientras está en pantalla (30 cuadros/s; se detiene al salir)."""
+    """Tarjeta de la IA: un aura púrpura → azulada que emana del recuadro hacia todos lados
+    (anillos difusos que respiran, un poco fuera del borde) y estrellas tenues adentro.
+    Solo se anima mientras está en pantalla (24 cuadros/s; se detiene al salir)."""
     NEON = "#B14DFF"       # = ui.ai_style.PURPLE
     NEON_2 = "#3D5AFE"     # = ui.ai_style.INDIGO (violeta → azulado)
+    RINGS = 9              # capas del aura (de adentro hacia afuera)
 
     def __init__(self, **kw):
         super().__init__(**kw)
-        from kivy.graphics import Color, Ellipse, Line
+        from kivy.graphics import Color, Ellipse, InstructionGroup, Line
         import random as _r
+        # Aura DETRÁS de la tarjeta (antes que su fondo de vidrio): solo se ve hacia afuera.
+        self._aura = []
+        group = InstructionGroup()
+        for _ in range(self.RINGS):
+            col = Color(0, 0, 0, 0)
+            line = Line(width=dp(2.4))
+            group.add(col)
+            group.add(line)
+            self._aura.append((col, line))
+        self.canvas.before.insert(0, group)
         rnd = _r.Random(11)
         self._stars = []                       # cielo estelar tenue (sobre el vidrio, bajo el texto)
         with self.canvas.before:
@@ -121,84 +133,49 @@ class NeonCard(GlassCard):
                 self._stars.append((rnd.random(), rnd.random(), rnd.uniform(.7, 1.8), rnd.random() * 6, col,
                                     Ellipse(size=(1, 1))))
         with self.canvas.after:
-            self._halo_c = Color(0, 0, 0, 0)
-            self._halo = Line(width=dp(4))
             self._edge_c = Color(0, 0, 0, 0)
-            self._edge = Line(width=dp(1.6))
-            self._tail_c = Color(0, 0, 0, 0)
-            self._tail = Line(width=dp(4.5), cap="round")
-            self._spark_c = Color(0, 0, 0, 0)
-            self._spark = Line(width=dp(2), cap="round")
-        self._path, self._t, self._ev = [], 0.0, None
-        self.bind(pos=self._shape, size=self._shape, radius=self._shape, parent=self._watch)
+            self._edge = Line(width=dp(1.5))
+        self._t, self._ev = 0.0, None
+        self.bind(pos=self._tick0, size=self._tick0, radius=self._tick0, parent=self._watch)
 
     def _watch(self, *_):
         if self.parent is not None and self._ev is None:
-            self._ev = Clock.schedule_interval(self._tick, 1 / 30)
+            self._ev = Clock.schedule_interval(self._tick, 1 / 24)
         elif self.parent is None and self._ev is not None:
             self._ev.cancel()
             self._ev = None
 
-    def _shape(self, *_):
-        """Puntos del borde redondeado (sentido horario), para que el destello lo recorra."""
-        import math
-        x, y, w, h = self.x + dp(1), self.y + dp(1), self.width - dp(2), self.height - dp(2)
-        if w < 10 or h < 10:
-            self._path = []
-            return
-        r = min(self.radius[0] if self.radius else dp(20), w / 2.1, h / 2.1)
-        rr = (x, y, w, h, r)
-        self._halo.rounded_rectangle = rr
-        self._edge.rounded_rectangle = rr
-        pts = []
-        corners = [(x + w - r, y + h - r, 0), (x + w - r, y + r, -90), (x + r, y + r, -180), (x + r, y + h - r, -270)]
-        for cx, cy, a0 in corners:                      # 4 esquinas unidas por rectas
-            for i in range(9):
-                a = math.radians(90 + a0 - i * 90 / 8)
-                pts.append((cx + r * math.cos(a), cy + r * math.sin(a)))
-        pts.append(pts[0])
-        dens = []                                       # remuestreo uniforme
-        total = sum(math.dist(pts[i], pts[i + 1]) for i in range(len(pts) - 1))
-        step = total / 160
-        acc, i, cur = 0.0, 0, pts[0]
-        dens.append(cur)
-        while len(dens) < 160 and i < len(pts) - 1:
-            seg = math.dist(cur, pts[i + 1])
-            if acc + seg >= step:
-                k = (step - acc) / seg if seg else 0
-                cur = (cur[0] + (pts[i + 1][0] - cur[0]) * k, cur[1] + (pts[i + 1][1] - cur[1]) * k)
-                dens.append(cur)
-                acc = 0.0
-            else:
-                acc += seg
-                cur = pts[i + 1]
-                i += 1
-        self._path = dens
+    def _tick0(self, *_):
+        self._tick(0)
 
     def _tick(self, dt):
         import math
-        if self.get_root_window() is None or not self._path:
+        if dt and self.get_root_window() is None:
             return
         self._t = (self._t + dt) % 1000
-        pulse = .5 + .5 * math.sin(self._t * 2.4)
+        x, y, w, h = self.x, self.y, self.width, self.height
+        if w < 10 or h < 10:
+            return
+        r = min(self.radius[0] if self.radius else dp(20), w / 2.1, h / 2.1)
+        pulse = .5 + .5 * math.sin(self._t * 1.8)
         a, b = c(self.NEON), c(self.NEON_2)
-        mix = .5 + .5 * math.sin(self._t * .9)
-        col = [a[i] + (b[i] - a[i]) * mix for i in range(3)]
-        self._halo_c.rgba = (*col, .10 + .14 * pulse)
-        self._edge_c.rgba = (*col, .65 + .3 * pulse)
-        n = len(self._path)
-        head = int((self._t * .22 % 1) * n)
-        tail = [self._path[(head - k) % n] for k in range(int(n * .16), -1, -1)]
-        spark = tail[-int(n * .06):]
-        self._tail.points = [v for p in tail for v in p]
-        self._spark.points = [v for p in spark for v in p]
-        self._tail_c.rgba = (*col, .28)
-        self._spark_c.rgba = (1, .92, 1, .95)
+        shift = .5 + .5 * math.sin(self._t * .7)          # el color va y viene: púrpura ↔ azul
+        reach = dp(1.6) + dp(.5) * pulse                   # cuánto se abre cada anillo
+        for k, (col, line) in enumerate(self._aura):
+            d = reach * (k + .6)
+            line.rounded_rectangle = (x - d, y - d, w + 2 * d, h + 2 * d, r + d)
+            t = min(1, k / (self.RINGS - 1) * .8 + shift * .35)
+            rgb = [a[i] + (b[i] - a[i]) * t for i in range(3)]
+            fade = (1 - k / self.RINGS) ** 1.6
+            col.rgba = (*rgb, (.26 + .16 * pulse) * fade)
+        mix = [a[i] + (b[i] - a[i]) * shift for i in range(3)]
+        self._edge.rounded_rectangle = (x + dp(.8), y + dp(.8), w - dp(1.6), h - dp(1.6), r)
+        self._edge_c.rgba = (*mix, .75 + .25 * pulse)
         dark = theme.is_dark()
         for fx, fy, sz, ph, cc, el in self._stars:
-            d = dp(sz)
-            el.pos = (self.x + dp(8) + fx * (self.width - dp(16)) - d / 2, self.y + dp(8) + fy * (self.height - dp(16)) - d / 2)
-            el.size = (d, d)
+            dd = dp(sz)
+            el.pos = (x + dp(8) + fx * (w - dp(16)) - dd / 2, y + dp(8) + fy * (h - dp(16)) - dd / 2)
+            el.size = (dd, dd)
             tw = .5 + .5 * math.sin(self._t * 1.6 + ph)
             cc.rgba = (1, 1, 1, .15 + .55 * tw) if dark else (*c(self.NEON)[:3], .10 + .35 * tw)
 
@@ -719,9 +696,10 @@ def _cover_texture(source: str, aspect: float):
     try:
         from PIL import Image
         from kivy.graphics.texture import Texture
+        from PIL import ImageOps
         img = Image.open(source)
         img.draft("RGB", (900, 900))
-        img = img.convert("RGB")
+        img = ImageOps.exif_transpose(img).convert("RGB")      # orientación de la cámara
         w, h = img.size
         if w / h > aspect:                       # más ancha: se recortan los lados
             cw = max(1, round(h * aspect))
@@ -731,9 +709,9 @@ def _cover_texture(source: str, aspect: float):
             img = img.crop((0, (h - ch) // 2, w, (h - ch) // 2 + ch))
         if max(img.size) > 900:
             img.thumbnail((900, 900))
-        img = img.transpose(Image.FLIP_TOP_BOTTOM)   # Kivy dibuja de abajo hacia arriba
         tex = Texture.create(size=img.size, colorfmt="rgb")
         tex.blit_buffer(img.tobytes(), colorfmt="rgb", bufferfmt="ubyte")
+        tex.flip_vertical()           # filas de PIL de arriba hacia abajo (sin esto, la foto sale invertida)
     except Exception:  # noqa: BLE001 - archivo dañado: queda el fondo suave
         return None
     if len(_COVER) > 240:
