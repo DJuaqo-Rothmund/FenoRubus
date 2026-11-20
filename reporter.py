@@ -294,6 +294,9 @@ class LabeledDB:
         if v and names and self._db.is_parcel(v):
             v = dict(v)
             v["name"] = self._db.display_name(v, names)
+        elif v and ph.is_unit(v):            # predio: variedad, equipo y sector, siempre
+            v = dict(v)
+            v["name"] = ph.unit_report_name(v)
         return v
 
     def list_varieties(self, *a, **kw):
@@ -317,12 +320,13 @@ class LabeledDB:
     def list_entries(self, *a, **kw):
         names = self._names()
         rows = self._db.list_entries(*a, **kw)
-        if names:
-            by_id = {v["id"]: v for v in self._db.list_varieties(include_archived=True)}
-            for e in rows:
-                v = by_id.get(e.get("variety_id"))
-                if v and self._db.is_parcel(v):
-                    e["variety_name"] = self._db.display_name(v, names)
+        by_id = {v["id"]: v for v in self._db.list_varieties(include_archived=True)}
+        for e in rows:
+            v = by_id.get(e.get("variety_id"))
+            if v and names and self._db.is_parcel(v):
+                e["variety_name"] = self._db.display_name(v, names)
+            elif v and ph.is_unit(v):
+                e["variety_name"] = ph.unit_report_name(v)
         return rows
 
 

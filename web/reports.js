@@ -60,7 +60,7 @@ ${ctx.plain ? "" : `<footer class="doc"><span>AeonCrop — seguimiento fenológi
   // ------------------------------------------------------------ gráfico semana × BBCH
   function chart(heat, weeks, onlyUid = null) {
     const rowsSel = onlyUid ? heat.filter((r) => r.variety.uid === onlyUid) : heat;
-    return chartSeries(rowsSel.map((r) => ({ name: C.unitMain(r.variety), pts: r.pts.map(([i, c]) => [i, C.bbchValue(c)]) })), weeks);
+    return chartSeries(rowsSel.map((r) => ({ name: C.unitReportName(r.variety), pts: r.pts.map(([i, c]) => [i, C.bbchValue(c)]) })), weeks);
   }
 
   function chartSeries(series, weeks) {
@@ -144,7 +144,7 @@ ${ctx.plain ? "" : `<footer class="doc"><span>AeonCrop — seguimiento fenológi
       } else {
         const u = await urls(es.map((e) => e.path).filter(Boolean));
         html += `<div class="attach">${es.map((e) => { const v = vs.get(e.variety_id);
-          return `<figure>${u.get(e.path) ? `<img src="${u.get(e.path)}" alt="">` : `<div class="nophoto">sin foto</div>`}<figcaption>${esc(e.caption || "")}${v ? `<span class="muted">${esc(C.unitMain(v))}</span>` : ""}</figcaption></figure>`; }).join("")}</div>`;
+          return `<figure>${u.get(e.path) ? `<img src="${u.get(e.path)}" alt="">` : `<div class="nophoto">sin foto</div>`}<figcaption>${esc(e.caption || "")}${v ? `<span class="muted">${esc(C.unitReportName(v))}</span>` : ""}</figcaption></figure>`; }).join("")}</div>`;
       }
     }
     return html ? `<h2>Mediciones de la semana</h2>${html}` : "";

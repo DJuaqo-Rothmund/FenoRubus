@@ -669,7 +669,7 @@ def groups_for(db) -> tuple[dict, str, str]:
         return ({u["id"]: tname(u["treatment"]) for u in units if u.get("treatment") is not None},
                 "Tratamiento", "tratamiento")
     word = "sector" if getattr(db, "is_predio", False) else "variedad"
-    return {u["id"]: ph.unit_compact(u) for u in units}, word.capitalize(), word
+    return {u["id"]: ph.unit_report_name(u) for u in units}, word.capitalize(), word
 
 
 def analyze(db, season: int, weather_rows: list[dict], prev_weather_rows: list[dict] | None = None,
