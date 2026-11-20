@@ -129,6 +129,7 @@ class Player:
 
     def __init__(self, path: str):
         self.path, self.mp, self.snd = path, None, None
+        self.speed = 1.0
 
     def _ensure(self):
         if IS_ANDROID and self.mp is None:
@@ -151,7 +152,8 @@ class Player:
                 self.mp.pause()
                 return False
             self.mp.start()
-            return True
+            self._apply_speed()          # después de start: con el audio en pausa, cambiar la
+            return True                  # velocidad lo haría sonar solo
         if self.snd is not None:
             if self.snd.state == "play":
                 self.snd.stop()
@@ -159,6 +161,24 @@ class Player:
             self.snd.play()
             return True
         return False
+
+    def set_speed(self, speed: float) -> None:
+        """Velocidad de reproducción (1× o 2×). Android 6+; en el computador no cambia."""
+        self.speed = float(speed)
+        try:
+            if self.mp is not None and self.mp.isPlaying():
+                self._apply_speed()
+        except Exception:  # noqa: BLE001
+            pass
+
+    def _apply_speed(self):
+        if self.mp is None:
+            return
+        try:
+            params = self.mp.getPlaybackParams()
+            self.mp.setPlaybackParams(params.setSpeed(self.speed))
+        except Exception as exc:  # noqa: BLE001 (Android antiguo: queda a 1×)
+            print("velocidad del audio:", exc)
 
     def position(self) -> tuple[float, float]:
         try:

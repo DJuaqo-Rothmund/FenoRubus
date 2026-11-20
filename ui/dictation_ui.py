@@ -274,6 +274,10 @@ class NumChip(ButtonBehavior, Label):
                 Line(points=[self.x + dp(8), self.center_y, self.right - dp(8), self.center_y], width=dp(1.2))
 
 
+class SpeedPill(ButtonBehavior, Label):
+    """«1×» / «2×» en el reproductor del dictado."""
+
+
 def _word(text):
     lb = Label(text=text, font_size=sp(13.5), color=c(theme.INK), size_hint=(None, None), height=dp(28))
     lb.texture_update()
@@ -300,6 +304,13 @@ class DictationCard(GlassCard):
         self.time_lb.bind(size=lambda w, s: setattr(w, "text_size", s))
         pl.add_widget(self.play_b)
         pl.add_widget(self.time_lb)
+        # 1× / 2×: escuchar el dictado más rápido (se recuerda para la próxima vez).
+        self.speed_b = SpeedPill(text="", bold=True, font_size=sp(12.5), color=(1, 1, 1, 1),
+                              size_hint=(None, None), size=(dp(44), dp(28)), pos_hint={"center_y": .5})
+        self.speed_b.bind(pos=self._speed_bg, size=self._speed_bg, on_release=lambda *_: self.toggle_speed())
+        pl.add_widget(self.speed_b)
+        self._show_speed()
+        Clock.schedule_once(lambda *_: self._show_speed(), 0)     # ya con su lugar en la fila
         more = Label(text=(f"Dictados de la semana: {n_total}" if n_total > 1 else "Dictado"), font_size=sp(11),
                      color=(1, 1, 1, .75), halign="right", valign="middle", size_hint_x=None, width=dp(150))
         more.bind(size=lambda w, s: setattr(w, "text_size", s))
@@ -323,9 +334,35 @@ class DictationCard(GlassCard):
             Color(*c("#1E4A3A"))
             RoundedRectangle(pos=self.pl.pos, size=self.pl.size, radius=[dp(14)])
 
+    def _speed(self) -> float:
+        from platform_utils import global_get
+        return float(global_get("dictation_speed", 1.0) or 1.0)
+
+    def _show_speed(self):
+        self.speed_b.text = "2×" if self._speed() >= 2 else "1×"
+        self._speed_bg()
+
+    def _speed_bg(self, *_):
+        b = self.speed_b
+        fast = self._speed() >= 2
+        b.canvas.before.clear()
+        with b.canvas.before:
+            Color(*c("#FFFFFF", .95) if fast else c("#FFFFFF", .16))
+            RoundedRectangle(pos=b.pos, size=b.size, radius=[b.height / 2])
+        b.color = c("#1E4A3A") if fast else (1, 1, 1, 1)
+
+    def toggle_speed(self):
+        from platform_utils import global_set
+        new = 1.0 if self._speed() >= 2 else 2.0
+        global_set("dictation_speed", new)
+        if self.player is not None:
+            self.player.set_speed(new)
+        self._show_speed()
+
     def toggle_play(self):
         if self.player is None:
             self.player = voice.Player(self.rec["path"])
+            self.player.speed = self._speed()
         on = self.player.toggle()
         self.play_b.set_icon("pause" if on else "play")
         ev = getattr(self, "_pev", None)
