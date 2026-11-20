@@ -110,3 +110,36 @@ def test_measure_schedule_and_sync(tmp_path):
     sync.apply_changes(db, bundle, str(tmp_path))
     assert db.measure_schedule(m)["weeks"] == ["2026-11-23"] and db.measure_due(m, w2) and not db.measure_due(m, w1)
     assert any(k.startswith("measure_schedule:") for k in sync.export_changes(db, str(tmp_path))["settings"])
+
+
+def test_legend_colors_and_excel(tmp_path):
+    """Leyenda creada por la persona: pinta celdas, viaja por la sincronización y sale en el Excel."""
+    import sync
+    from measures_export import export_measures
+    db = make_db(tmp_path)
+    db.setup_trial(2, 1)
+    week = db.week_for_date(dt.date(2026, 11, 16))
+    mid = db.add_measure("Altura", "table", SL.build(["Altura"], 2))
+    db.fill_sheet_rows(mid, week["id"])
+    m = db.get_measure(mid)
+    e = db.list_entries(mid, week_id=week["id"])[0]
+    db.update_entry(e["id"], data={"Planta 1 · Altura": "35", "Planta 2 · Altura": "40"})
+    with pytest.raises(ValueError):
+        db.save_legend("  ", "#E53935")
+    sick = db.save_legend("Planta enferma", "#E53935")
+    db.set_cell_mark(m, e["uid"], "Planta 2 · Altura", sick["id"])
+    assert db.cell_colors(m) == {(e["uid"], "Planta 2 · Altura"): ("#E53935", "Planta enferma")}
+    path = export_measures(db, [mid], week["season"], str(tmp_path))
+    z = zipfile.ZipFile(path)
+    styles = z.read("xl/styles.xml").decode()
+    assert 'rgb="FFE53935"' in styles and 'cellXfs count="3"' in styles
+    sheet = z.read("xl/worksheets/sheet1.xml").decode()
+    assert '<v>40</v>' in sheet and 's="2"><v>40</v>' in sheet and 's="2"><v>35</v>' not in sheet
+    names = [n for n in z.namelist() if n.startswith("xl/worksheets/")]
+    assert "Planta enferma" in z.read(sorted(names)[-1]).decode()          # hoja «Leyenda»
+    bundle = sync.export_changes(db, str(tmp_path))
+    assert "sheet_legend" in bundle["settings"] and f"sheet_marks:{m['uid']}" in bundle["settings"]
+    db.set_cell_mark(m, e["uid"], "Planta 2 · Altura", None)
+    assert db.cell_colors(m) == {}
+    db.delete_legend(sick["id"])
+    assert db.sheet_legend() == []

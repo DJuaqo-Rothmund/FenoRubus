@@ -34,6 +34,17 @@ def as_number(value):
     return int(n) if n.is_integer() and "." not in text and "," not in text else n
 
 
+class Colored(str):
+    """Valor de celda con color de letra (la leyenda de la planilla). Es un str: el resto del
+    código lo trata como el valor de siempre."""
+    color = ""
+
+    def __new__(cls, value, color: str):
+        obj = super().__new__(cls, value)
+        obj.color = color
+        return obj
+
+
 def _col(i: int) -> str:
     name = ""
     i += 1
@@ -43,7 +54,9 @@ def _col(i: int) -> str:
     return name
 
 
-def _cell(ref: str, value, style: int = 0) -> str:
+def _cell(ref: str, value, style: int = 0, colors: dict | None = None) -> str:
+    if isinstance(value, Colored) and colors and value.color in colors:
+        style = colors[value.color]
     s = f' s="{style}"' if style else ""
     n = as_number(value)
     if n is not None:
@@ -52,7 +65,7 @@ def _cell(ref: str, value, style: int = 0) -> str:
     return f'<c r="{ref}"{s} t="inlineStr"><is><t xml:space="preserve">{text}</t></is></c>'
 
 
-def _sheet_xml(rows: list[list]) -> str:
+def _sheet_xml(rows: list[list], colors: dict | None = None) -> str:
     widths = {}
     for row in rows:
         for j, v in enumerate(row):
@@ -61,7 +74,7 @@ def _sheet_xml(rows: list[list]) -> str:
                    for j, w in sorted(widths.items()))
     body = []
     for i, row in enumerate(rows):
-        cells = "".join(_cell(f"{_col(j)}{i + 1}", v, 1 if i == 0 else 0) for j, v in enumerate(row))
+        cells = "".join(_cell(f"{_col(j)}{i + 1}", v, 1 if i == 0 else 0, colors) for j, v in enumerate(row))
         body.append(f'<row r="{i + 1}">{cells}</row>')
     return ('<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
             '<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">'
@@ -82,6 +95,10 @@ def write_xlsx(path: str, sheets: list[tuple[str, list[list]]]) -> str:
             cand = f"{base[:28]} {n}"
         used.add(cand.lower())
         names.append(cand)
+    # Colores de letra usados (leyenda): una fuente y un estilo por color.
+    used_colors = sorted({v.color for _n, rows in sheets for row in rows for v in row
+                          if isinstance(v, Colored) and re.fullmatch(r"#[0-9A-Fa-f]{6}", v.color or "")})
+    color_style = {col: 2 + i for i, col in enumerate(used_colors)}
     ct = "".join(f'<Override PartName="/xl/worksheets/sheet{i + 1}.xml" ContentType="application/'
                  f'vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>'
                  for i in range(len(sheets)))
@@ -117,18 +134,22 @@ def write_xlsx(path: str, sheets: list[tuple[str, list[list]]]) -> str:
         zf.writestr("xl/styles.xml",
                     '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
                     '<styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">'
-                    '<fonts count="2"><font><sz val="11"/><name val="Calibri"/></font>'
-                    '<font><b/><sz val="11"/><name val="Calibri"/></font></fonts>'
+                    f'<fonts count="{2 + len(used_colors)}"><font><sz val="11"/><name val="Calibri"/></font>'
+                    '<font><b/><sz val="11"/><name val="Calibri"/></font>'
+                    + "".join(f'<font><b/><color rgb="FF{col[1:].upper()}"/><sz val="11"/><name val="Calibri"/></font>'
+                              for col in used_colors) + '</fonts>'
                     '<fills count="2"><fill><patternFill patternType="none"/></fill>'
                     '<fill><patternFill patternType="gray125"/></fill></fills>'
                     '<borders count="1"><border/></borders>'
                     '<cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs>'
-                    '<cellXfs count="2"><xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/>'
-                    '<xf numFmtId="0" fontId="1" fillId="0" borderId="0" xfId="0" applyFont="1"/></cellXfs>'
+                    f'<cellXfs count="{2 + len(used_colors)}"><xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/>'
+                    '<xf numFmtId="0" fontId="1" fillId="0" borderId="0" xfId="0" applyFont="1"/>'
+                    + "".join(f'<xf numFmtId="0" fontId="{2 + i}" fillId="0" borderId="0" xfId="0" applyFont="1"/>'
+                              for i in range(len(used_colors))) + '</cellXfs>'
                     '<cellStyles count="1"><cellStyle name="Normal" xfId="0" builtinId="0"/></cellStyles>'
                     '</styleSheet>')
         for i, (_name, rows) in enumerate(sheets):
-            zf.writestr(f"xl/worksheets/sheet{i + 1}.xml", _sheet_xml(rows))
+            zf.writestr(f"xl/worksheets/sheet{i + 1}.xml", _sheet_xml(rows, color_style))
     return path
 
 
@@ -175,12 +196,13 @@ def measure_rows(db, measure: dict, season: int | None = None, labels: dict | No
             head += [tl.NAMES.get(k, k) for k in stages] + ["Total estructuras"]
     head.append("Registrado")
     rows = [head]
+    paints = db.cell_colors(measure) if measure["kind"] == "table" and hasattr(db, "cell_colors") else {}
     for e in entries:
         week, year = ph.iso_week(e["start_date"])
         start = _dt.date.fromisoformat(e["start_date"][:10])
         row = [week, year, f"{start:%d-%m-%Y}", db.sheet_label(vmap.get(e["variety_id"]), names, cfg)]
         if measure["kind"] == "table":
-            row += [e["data"].get(c, "") for c in head[4:-1]]
+            row += [_paint(e["data"].get(c, ""), paints.get((e.get("uid"), c))) for c in head[4:-1]]
         else:
             name = os.path.basename(e["path"] or "")
             row += [e["caption"] or "", name]
@@ -191,6 +213,25 @@ def measure_rows(db, measure: dict, season: int | None = None, labels: dict | No
         row.append(e["created_at"].replace("T", " ")[:16])
         rows.append(row)
     return rows
+
+
+def _paint(value, paint):
+    """Valor con el color de su leyenda (si la celda está pintada y tiene dato)."""
+    return Colored(value, paint[0]) if paint and str(value).strip() else value
+
+
+def legend_rows(db, measure_ids: list[int]) -> list[list] | None:
+    """Hoja «Leyenda»: los colores usados en esas planillas y qué significan."""
+    used = {}
+    for mid in measure_ids:
+        m = db.get_measure(mid)
+        if m and m["kind"] == "table" and hasattr(db, "cell_colors"):
+            for color, name in db.cell_colors(m).values():
+                used[(color, name)] = used.get((color, name), 0) + 1
+    if not used:
+        return None
+    return [["Color", "Significado", "Celdas"]] + [[Colored("■■■", color), name, n]
+                                                   for (color, name), n in sorted(used.items(), key=lambda x: x[0][1])]
 
 
 def long_rows(rows: list[list]) -> list[list] | None:
@@ -250,6 +291,12 @@ def export_measures(db, measure_ids: list[int], season: int | None = None,
             sheets.append((f"{m['name'][:20]} por muestra", longer))
     if failed and len(failed) == len(measures):
         raise ValueError("No se pudo exportar: " + sheets[0][1][1][0])
+    try:
+        legend = legend_rows(db, [m["id"] for m in measures])
+        if legend:
+            sheets.append(("Leyenda", legend))
+    except Exception as exc:  # noqa: BLE001 (la leyenda nunca impide bajar los datos)
+        print("leyenda del Excel:", exc)
     write_xlsx(path, sheets)
     db.log("export", "measures", None, os.path.basename(path))
     return path

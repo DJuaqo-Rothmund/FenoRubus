@@ -986,6 +986,17 @@ function schedOf(m) {
   const s = C.setting(S.state, `measure_schedule:${m.uid}`, null);
   return s && ["weekly", "once", "weeks"].includes(s.mode) ? { mode: s.mode, weeks: [...(s.weeks || [])].map((w) => String(w).slice(0, 10)).sort() } : { mode: "weekly", weeks: [] };
 }
+// Leyenda de colores de las planillas (la crea la persona en la app): {uid fila: {columna: id}}.
+function sheetPaints(m) {
+  const legend = C.setting(S.state, "sheet_legend", []);
+  const marks = C.setting(S.state, `sheet_marks:${m.uid}`, {}) || {};
+  const byId = new Map((Array.isArray(legend) ? legend : []).map((x) => [x.id, x]));
+  const out = new Map();
+  for (const [uid, row] of Object.entries(marks)) {
+    for (const [col, lid] of Object.entries(row || {})) if (byId.has(lid)) out.set(`${uid}|${col}`, byId.get(lid));
+  }
+  return out;
+}
 function measureDue(m) {
   const s = schedOf(m);
   return s.mode === "weekly" || s.weeks.includes(S.week) || C.entriesFor(S.state, m.uid, S.week).some(C.entryFilled);
@@ -1239,6 +1250,7 @@ function renderMeasureBody() {
     thead.appendChild(hr); t.appendChild(thead);
     const tb = document.createElement("tbody");
     const cells = [];
+    const paints = sheetPaints(M.m);
     M.rows.filter((r) => !r.gone).forEach((r, i) => {
       const tr = document.createElement("tr");
       tr.innerHTML = `<td class="n fix0">${i + 1}</td>`;
@@ -1256,6 +1268,12 @@ function renderMeasureBody() {
         inp._set = (v) => { inp.value = v; r.data[c.orig] = v; };
         inp._key = `${i}|${c.orig}`;
         if (M.ia?.has(inp._key)) inp.classList.add("mia");
+        const paint = r.e && paints.get(`${r.e.uid}|${c.orig}`);
+        if (paint && /^#[0-9a-f]{6}$/i.test(paint.color)) {   // pintada en la app (leyenda)
+          inp.style.color = paint.color; inp.style.fontWeight = "700";
+          inp.style.background = `color-mix(in srgb, ${paint.color} 10%, white)`;
+          inp.title = paint.name;
+        }
         inp.addEventListener("focus", () => {                 // número del dictado elegido -> esta celda
           const pk = M.dict?.pick;
           if (pk == null) return;
@@ -1297,6 +1315,18 @@ function renderMeasureBody() {
       };
     }));
     t.appendChild(tb);
+    const usedPaints = [...new Map([...paints.values()].map((x) => [x.id, x])).values()];
+    if (usedPaints.length) {                           // la leyenda bajo la planilla
+      const lg = document.createElement("div");
+      lg.className = "sheetlegend";
+      const bt = document.createElement("b"); bt.textContent = "Leyenda:"; lg.appendChild(bt);
+      for (const x of usedPaints) {                    // texto como texto (nombres escritos por la persona)
+        const sp = document.createElement("span"); sp.className = "chip";
+        const dot = document.createElement("i"); dot.style.background = /^#[0-9a-f]{6}$/i.test(x.color) ? x.color : "#999";
+        sp.append(dot, document.createTextNode(x.name)); lg.appendChild(sp);
+      }
+      queueMicrotask(() => t.parentNode?.insertBefore(lg, t.nextSibling));
+    }
     if (M.dict) box.appendChild(dictationCard(M));
     const wrap = document.createElement("div"); wrap.className = "heatwrap"; wrap.appendChild(t);
     box.appendChild(wrap);

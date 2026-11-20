@@ -491,6 +491,41 @@ class _ImgCircle(ButtonBehavior, Widget):
             Rectangle(texture=self.tex, pos=(self.center_x - s / 2, self.center_y - s / 2), size=(s, s))
 
 
+def _paint_cell(ti, color: str | None):
+    """Número de la celda en el color de su leyenda (con un fondo muy suave del mismo tono)."""
+    if not color:
+        ti.foreground_color, ti.background_color = ti.base_fg, ti.base_bg
+        return
+    r, g, b = c(color)[:3]
+    ti.foreground_color = (r, g, b, 1)
+    ti.background_color = (1 - (1 - r) * .1, 1 - (1 - g) * .1, 1 - (1 - b) * .1, 1)
+
+
+class _LegendChip(Widget):
+    """● Planta enferma (punto del color + nombre) bajo la planilla."""
+
+    def __init__(self, name: str, color: str, **kw):
+        from kivy.uix.label import Label
+        super().__init__(size_hint=(None, None), height=dp(28), **kw)
+        self.color = color
+        self.lb = Label(text=name, font_size=sp_(12), color=c(theme.INK))
+        self.lb.texture_update()
+        self.width = self.lb.texture_size[0] + dp(34)
+        self.add_widget(self.lb)
+        self.bind(pos=self._d, size=self._d)
+
+    def _d(self, *_):
+        from kivy.graphics import Color, RoundedRectangle
+        self.lb.size = (self.width - dp(24), self.height)
+        self.lb.pos = (self.x + dp(22), self.y)
+        self.canvas.before.clear()
+        with self.canvas.before:
+            Color(*c(theme.SURFACE, .85))
+            RoundedRectangle(pos=self.pos, size=self.size, radius=[self.height / 2])
+            Color(*c(self.color))
+            RoundedRectangle(pos=(self.x + dp(8), self.center_y - dp(5)), size=(dp(10), dp(10)), radius=[dp(5)])
+
+
 def _round_action(icon, cb, bg=None, fg=None):
     """Botón redondo solo con ícono (la barra de abajo de la planilla)."""
     from kivymd.uix.button import MDIconButton
@@ -656,7 +691,13 @@ class MeasureScreen(MDScreen):
         num_w = self.NUM_W * (0.85 + 0.15 * z)
         self._build_tools()
         varieties = a.db.list_varieties(include_archived=True)
+        prev = getattr(self, "_kp_cell", None)       # se redibuja: el teclado sigue en la misma celda
+        target = (prev.entry_id, prev.col) if prev is not None else None
+        if prev is not None:
+            prev.unbind(text=self._kp_value)
+            self._kp_cell = None
         self._rows = {e["id"]: dict(e["data"]) for e in entries}
+        self._paints = a.db.cell_colors(self.measure)
         self._cells = []
         self._row_label = {}
         sp = dp(2)
@@ -699,6 +740,14 @@ class MeasureScreen(MDScreen):
                                background_active="", background_color=c(SHEET_IA if ia else SHEET_CELL),
                                foreground_color=c("#4B2BB3" if ia else SHEET_INK), cursor_color=c(SHEET_HEAD))
                 ti.entry_id, ti.col = e["id"], col
+                ti.entry_uid = e.get("uid")
+                ti.base_fg, ti.base_bg = ti.foreground_color[:], ti.background_color[:]
+                paint = self._paints.get((e.get("uid"), col))
+                if paint:
+                    _paint_cell(ti, paint[0])
+                # Números con el teclado propio (abajo): el del teléfono solo con «Texto».
+                ti.keyboard_mode = "managed"
+                ti.unfocus_on_touch = False
                 ti.native_edit = False   # planilla: se escribe de corrido con el teclado de la app
                 ti.on_hold = self.cell_menu
                 ti.bind(focus=self._cell_focus)
@@ -741,6 +790,17 @@ class MeasureScreen(MDScreen):
         content.bind(height=fit)
         fixed.bind(height=fit)
         self.ids.entries.add_widget(row)
+        from kivy.uix.stacklayout import StackLayout
+        self._legend_box = StackLayout(size_hint_y=None, height=0, spacing=dp(8), padding=(dp(2), dp(4), 0, 0))
+        self._legend_box.bind(minimum_height=self._legend_box.setter("height"))
+        self.ids.entries.add_widget(self._legend_box)
+        self._legend_row()
+        if target is not None:
+            again = next((t for row in self._cells for t in row if (t.entry_id, t.col) == target), None)
+            if again is not None:
+                Clock.schedule_once(lambda *_: setattr(again, "focus", True), 0)
+            else:
+                self._kp_close()
         if not entries:
             self.ids.entries.add_widget(MDLabel(
                 text="Sin filas esta semana: toque «Agregar fila».", font_style="Caption",
@@ -1126,7 +1186,14 @@ class MeasureScreen(MDScreen):
             sv = getattr(self, "_sv", None)
             if sv is not None and ti.parent is not None:
                 Clock.schedule_once(lambda *_: sv.scroll_to(ti, padding=dp(30), animate=False), 0)
+            self._kp_open(ti)
             return
+        if getattr(ti, "text_mode", False):          # salía del modo «Texto»: cierra el de Android
+            ti.text_mode = False
+            try:
+                ti.hide_keyboard()
+            except Exception:  # noqa: BLE001
+                pass
         data = self._rows.get(ti.entry_id)
         if data is None:
             return
@@ -1163,7 +1230,211 @@ class MeasureScreen(MDScreen):
                     ti.focus = False
                     self._cell_focus(ti, False)
 
+    # ------------------------------------------- teclado numérico propio (abajo, fijo)
+    def _kp_open(self, ti):
+        from ui.sheet_keypad import SheetKeypad
+        slot = self.ids.keypad_slot
+        kp = getattr(self, "_kp", None)
+        if kp is None:
+            kp = self._kp = SheetKeypad(self._kp_key)
+        if kp.parent is None:
+            slot.clear_widgets()
+            slot.add_widget(kp)
+        if not getattr(ti, "text_mode", False):
+            slot.height = kp.height
+        old = getattr(self, "_kp_cell", None)
+        if old is not None and old is not ti:
+            old.unbind(text=self._kp_value)
+            if old.focus:              # con el teclado propio no se suelta sola: se guarda aquí
+                old.focus = False
+        self._kp_cell = ti
+        ti.bind(text=self._kp_value)
+        self._kp_value()
+        Clock.schedule_once(lambda *_: setattr(ti, "cursor", (len(ti.text), 0)), 0)
+        # La celda queda a la vista sobre el teclado (la tabla se mueve en su espacio).
+        Clock.schedule_once(lambda *_: self.ids.scroll.scroll_to(ti, padding=dp(24), animate=False)
+                            if ti.parent is not None else None, .05)
+        self._outline(ti)
+
+    def _kp_value(self, *_):
+        ti = getattr(self, "_kp_cell", None)
+        kp = getattr(self, "_kp", None)
+        if ti is None or kp is None:
+            return
+        where = f"{self._row_label.get(ti.entry_id, '')} · {ti.col}".strip(" ·")
+        kp.show(where, ti.text)
+
+    def _outline(self, ti):
+        """Borde frambuesa en la celda elegida."""
+        from kivy.graphics import Color, Line
+        prev = getattr(self, "_outlined", None)
+        if prev is not None:
+            prev.canvas.after.clear()
+        self._outlined = ti
+
+        def draw(*_):
+            ti.canvas.after.clear()
+            if self._outlined is ti:
+                with ti.canvas.after:
+                    Color(*c(theme.BERRY))
+                    Line(rectangle=(ti.x + dp(1), ti.y + dp(1), ti.width - dp(2), ti.height - dp(2)), width=dp(1.6))
+        ti.bind(pos=draw, size=draw)
+        draw()
+
+    def _kp_close(self):
+        ti = getattr(self, "_kp_cell", None)
+        self._kp_cell = None
+        if ti is not None:
+            ti.unbind(text=self._kp_value)
+            ti.canvas.after.clear()
+            if ti.focus:
+                ti.focus = False
+        self._outlined = None
+        ev = getattr(self, "_kb_ev", None)
+        if ev:
+            ev.cancel()
+            self._kb_ev = None
+        slot = self.ids.keypad_slot
+        slot.clear_widgets()
+        slot.height = 0
+
+        def back_up(*_):              # vuelve a su lugar si ahora cabe todo
+            sc = self.ids.scroll
+            if sc.children and sc.children[0].height <= sc.height + dp(2):
+                sc.scroll_y = 1
+        Clock.schedule_once(back_up, .05)
+
+    def _neighbor(self, ti, where: str):
+        for r, row in enumerate(self._cells):
+            if ti in row:
+                k = row.index(ti)
+                if where == "right":
+                    if k + 1 < len(row):
+                        return row[k + 1]
+                    return self._cells[r + 1][0] if r + 1 < len(self._cells) and self._cells[r + 1] else None
+                if r + 1 < len(self._cells):
+                    return self._cells[r + 1][k]
+                return None
+        return None
+
+    def _kp_key(self, k: str):
+        ti = getattr(self, "_kp_cell", None)
+        if k == "done":
+            self._kp_close()
+            return
+        if ti is None:
+            return
+        if not ti.focus:
+            ti.focus = True
+        if k.isdigit() or k == ",":
+            if k == "," and "," in ti.text:
+                return
+            ti.insert_text(k)
+        elif k == "back":
+            ti.do_backspace()
+        elif k == "clear":
+            ti.text = ""
+        elif k in ("down", "right"):
+            nxt = self._neighbor(ti, k)
+            if nxt is None:
+                app().toast("Última celda")
+                return
+            ti.focus = False            # guarda la celda actual
+            nxt.focus = True
+        elif k == "color":
+            self.paint_menu(ti)
+        elif k == "text":
+            self._text_mode(ti)
+
+    def _text_mode(self, ti):
+        """«Texto»: el teclado de Android para esta celda, encima del espacio del numérico."""
+        ti.text_mode = True
+        try:
+            ti.show_keyboard()
+        except Exception:  # noqa: BLE001
+            pass
+        from android_bridge import keyboard_height
+        slot, kp = self.ids.keypad_slot, self._kp
+        seen = {"open": False}
+
+        def watch(*_):
+            if not getattr(ti, "text_mode", False) or self._kp_cell is not ti:
+                slot.height = kp.height if self._kp_cell is not None else 0
+                return False
+            kb = keyboard_height()
+            if kb:
+                seen["open"] = True
+                slot.height = max(kp.height, kb)        # la celda queda justo sobre el teclado
+                kp.opacity = 0
+            elif seen["open"]:                         # se cerró el teclado de Android
+                ti.text_mode = False
+                slot.height = kp.height
+                kp.opacity = 1
+                return False
+        self._kb_ev = Clock.schedule_interval(watch, .25)
+
+    # ------------------------------------------- leyenda de colores
+    def paint_menu(self, ti):
+        a = app()
+        legend = a.db.sheet_legend()
+        counts = {}
+        for row in a.db.sheet_marks(self.measure).values():
+            for lid in row.values():
+                counts[lid] = counts.get(lid, 0) + 1
+
+        def apply(lid):
+            if not ti.entry_uid:
+                return
+            a.db.set_cell_mark(self.measure, ti.entry_uid, ti.col, lid)
+            self._paints = a.db.cell_colors(self.measure)
+            p = self._paints.get((ti.entry_uid, ti.col))
+            _paint_cell(ti, p[0] if p else None)
+            self._legend_row()
+
+        def new():
+            from ui.sheet_keypad import legend_editor
+
+            def save(name, color):
+                it = a.db.save_legend(name, color)
+                apply(it["id"])
+            Clock.schedule_once(lambda *_: legend_editor(save), .2)
+
+        def remove(it):
+            def go():
+                a.db.delete_legend(it["id"])
+                self._paints = a.db.cell_colors(self.measure)
+                self.refresh()
+            confirm("Borrar leyenda", f"Se quita «{it['name']}» y su color de todas las planillas del ensayo "
+                    "(los números quedan).", [("Borrar", go)])
+
+        items = [(it["name"], f"{counts.get(it['id'], 0)} celda(s) en esta planilla",
+                  lambda it=it: apply(it["id"]), it["color"], lambda it=it: remove(it)) for it in legend]
+        items.append(("Sin color", "Quitar el color de la celda", lambda: apply(None), "#9AA5A0"))
+        where = f"{self._row_label.get(ti.entry_id, '')} · {ti.col}".strip(" ·")
+        pick_dialog(f"Pintar celda · {where}", items,
+                    subtitle="Toque una leyenda para pintar el número" if legend else
+                    "Cree una leyenda (qué significa y su color) para pintar números",
+                    footer=[("plus", "Nueva leyenda", new)])
+
+    def _legend_row(self):
+        """Bajo la planilla: los colores usados y qué significan."""
+        box = getattr(self, "_legend_box", None)
+        if box is None:
+            return
+        box.clear_widgets()
+        used = {}
+        for color, name in self._paints.values():
+            used[(color, name)] = True
+        if not used:
+            return
+        from kivy.uix.label import Label
+        box.add_widget(Label(text="[b]Leyenda:[/b]", markup=True, color=c(theme.LEAF_DARK), font_size=sp_(12),
+                             size_hint=(None, None), size=(dp(60), dp(28))))
+        for color, name in sorted(used, key=lambda x: x[1]):
+            box.add_widget(_LegendChip(name, color))
+
     def on_pre_leave(self, *_):
+        self._kp_close()
         self.commit_cells()
         card = getattr(self, "_dict_card", None)
         if card is not None:

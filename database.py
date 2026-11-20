@@ -1513,6 +1513,58 @@ class Database:
         self.set_setting(f"measure_schedule:{m['uid']}", {"mode": mode, "weeks": weeks})
         return {"mode": mode, "weeks": weeks}
 
+    # ---------------------------------------------------------- leyenda de colores (planillas)
+    # La leyenda la crea la persona (nombre + color) y es del ensayo: la usan todas sus
+    # planillas. Qué celda lleva qué color va por medición: {uid de la fila: {columna: id}}.
+    # Ambas son ajustes sincronizados (sync.SETTING_PREFIXES), igual que la frecuencia.
+    def sheet_legend(self) -> list[dict]:
+        got = self.get_setting("sheet_legend")
+        return [dict(x) for x in got if isinstance(x, dict) and x.get("id")] if isinstance(got, list) else []
+
+    def save_legend(self, name: str, color: str, item_id: str | None = None) -> dict:
+        name = (name or "").strip()
+        if not name:
+            raise ValueError("Escriba qué significa el color.")
+        items = self.sheet_legend()
+        for it in items:
+            if it["id"] == item_id:
+                it.update(name=name, color=color)
+                self.set_setting("sheet_legend", items)
+                return it
+        import uuid
+        it = {"id": uuid.uuid4().hex[:8], "name": name, "color": color}
+        items.append(it)
+        self.set_setting("sheet_legend", items)
+        return it
+
+    def delete_legend(self, item_id: str) -> None:
+        self.set_setting("sheet_legend", [x for x in self.sheet_legend() if x["id"] != item_id])
+
+    def sheet_marks(self, m: dict) -> dict:
+        got = self.get_setting(f"sheet_marks:{m.get('uid')}") if m.get("uid") else None
+        return {k: dict(v) for k, v in got.items() if isinstance(v, dict)} if isinstance(got, dict) else {}
+
+    def set_cell_mark(self, m: dict, entry_uid: str, col: str, legend_id: str | None) -> None:
+        marks = self.sheet_marks(m)
+        row = marks.setdefault(entry_uid, {})
+        if legend_id:
+            row[col] = legend_id
+        else:
+            row.pop(col, None)
+            if not row:
+                marks.pop(entry_uid, None)
+        self.set_setting(f"sheet_marks:{m['uid']}", marks)
+
+    def cell_colors(self, m: dict) -> dict:
+        """{(uid de la fila, columna): (color, nombre)} con las leyendas que existen."""
+        legend = {x["id"]: x for x in self.sheet_legend()}
+        out = {}
+        for uid, row in self.sheet_marks(m).items():
+            for col, lid in row.items():
+                if lid in legend:
+                    out[(uid, col)] = (legend[lid]["color"], legend[lid]["name"])
+        return out
+
     def measure_due(self, m: dict, week: dict) -> bool:
         """¿Toca esta medición en esa semana? (siempre, si ya tiene datos en ella)."""
         sch = self.measure_schedule(m)

@@ -676,3 +676,9 @@ dialog.rcfg { width: min(720px, 96vw); background: #FBF8F1; }
 .dnum.sel { background: #A8184A; color: #fff; box-shadow: 0 0 0 4px rgba(168, 24, 74, .2); }
 .mgrid input.mia { background: #FFF1C9; box-shadow: inset 0 0 0 1.5px #F2B705; font-weight: 700; }
 .mgrid td input { text-align: center; }
+
+/* Leyenda de colores bajo la planilla (la crea la persona en la app) */
+.sheetlegend { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin: 8px 2px; font-size: 13px; }
+.sheetlegend .chip { display: inline-flex; align-items: center; gap: 6px; padding: 3px 10px; border-radius: 99px;
+  background: rgba(255,255,255,.85); border: 1px solid rgba(30,74,58,.15); }
+.sheetlegend .chip i { width: 10px; height: 10px; border-radius: 50%; display: inline-block; }

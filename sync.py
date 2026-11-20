@@ -77,7 +77,7 @@ PATH_COLUMNS = {"photos": "path", "variety_attachments": "path", "measure_entrie
                 "notebook_photos": "path", "yield_photos": "path", "scout_photos": "path"}
 # Ajustes del ensayo que también viajan (semana de referencia, primera semana fijada…).
 SETTING_PREFIXES = ("season_start:", "first_week:", "treatment_", "trial_", "reportcfg", "share_",
-                    "measure_schedule:")
+                    "measure_schedule:", "sheet_legend", "sheet_marks:")
 
 _NOW = "strftime('%Y-%m-%dT%H:%M:%f', 'now')"
 
