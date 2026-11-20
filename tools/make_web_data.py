@@ -110,12 +110,12 @@ def images():
 
 PY_MODULES = ["phenology", "crops", "database", "sync", "reporter", "pdf_report", "pdfdoc", "platform_utils",
               "trial_stats", "measures_export", "workspaces", "geo", "report_config", "photo_cache",
-              "degree_days", "season_compare", "training_labels", "sheet_layout"]
+              "degree_days", "season_compare", "training_labels", "sheet_layout", "perf"]
 
 
-def py_zip():
+def py_zip(out: str | None = None):
     import zipfile
-    out = os.path.join(ROOT, "web", "py.zip")
+    out = out or os.path.join(ROOT, "web", "py.zip")
     with zipfile.ZipFile(out, "w", zipfile.ZIP_DEFLATED) as z:
         for m in PY_MODULES:
             z.write(os.path.join(ROOT, f"{m}.py"), f"{m}.py")
