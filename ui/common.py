@@ -106,12 +106,20 @@ class GlassCard(BoxLayout):
 class NeonCard(GlassCard):
     """Tarjeta de la IA: borde morado neón que respira, con un destello que recorre el borde.
     Solo se anima mientras está en pantalla (30 cuadros/s; se detiene al salir)."""
-    NEON = "#A64DFF"
-    NEON_2 = "#E040FB"
+    NEON = "#B14DFF"       # = ui.ai_style.PURPLE
+    NEON_2 = "#3D5AFE"     # = ui.ai_style.INDIGO (violeta → azulado)
 
     def __init__(self, **kw):
         super().__init__(**kw)
-        from kivy.graphics import Color, Line
+        from kivy.graphics import Color, Ellipse, Line
+        import random as _r
+        rnd = _r.Random(11)
+        self._stars = []                       # cielo estelar tenue (sobre el vidrio, bajo el texto)
+        with self.canvas.before:
+            for _ in range(16):
+                col = Color(1, 1, 1, 0)
+                self._stars.append((rnd.random(), rnd.random(), rnd.uniform(.7, 1.8), rnd.random() * 6, col,
+                                    Ellipse(size=(1, 1))))
         with self.canvas.after:
             self._halo_c = Color(0, 0, 0, 0)
             self._halo = Line(width=dp(4))
@@ -186,6 +194,13 @@ class NeonCard(GlassCard):
         self._spark.points = [v for p in spark for v in p]
         self._tail_c.rgba = (*col, .28)
         self._spark_c.rgba = (1, .92, 1, .95)
+        dark = theme.is_dark()
+        for fx, fy, sz, ph, cc, el in self._stars:
+            d = dp(sz)
+            el.pos = (self.x + dp(8) + fx * (self.width - dp(16)) - d / 2, self.y + dp(8) + fy * (self.height - dp(16)) - d / 2)
+            el.size = (d, d)
+            tw = .5 + .5 * math.sin(self._t * 1.6 + ph)
+            cc.rgba = (1, 1, 1, .15 + .55 * tw) if dark else (*c(self.NEON)[:3], .10 + .35 * tw)
 
 
 class LongPress:
