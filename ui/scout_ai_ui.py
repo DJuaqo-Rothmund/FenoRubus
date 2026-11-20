@@ -30,6 +30,12 @@ AUTO_KEY = "scout_ai_auto"
 _running: dict[int, dict] = {}
 
 
+def _ai_ghost(icon: str, text: str):
+    """Botón de IA (borde neón violeta) con la misma forma de uso que GhostButton."""
+    from ui.ai_style import AIGhost
+    return AIGhost(text, icon)
+
+
 def app():
     return MDApp.get_running_app()
 
@@ -294,12 +300,12 @@ def ai_block(record_id: int, refresh):
         txt = (f"IA ({prov}): {top['name']} {top['confidence']:.0%}" if top else f"IA ({prov}): sin candidatas")
         if job["accepted"]:
             txt += f" · asignada: {job['accepted']}"
-        b = Factory.GhostButton(icon="robot-outline", text=txt)
+        b = _ai_ghost(icon="robot-outline", text=txt)
         b.bind(on_release=lambda *_: result_dialog(record_id, refresh))
         box.add_widget(b)
     elif running(record_id):
         st = running(record_id)
-        b = Factory.GhostButton(icon="robot-outline", text="")
+        b = _ai_ghost(icon="robot-outline", text="")
 
         def tick(*_):
             cur = running(record_id)
@@ -315,7 +321,7 @@ def ai_block(record_id: int, refresh):
         box.add_widget(b)
     elif job and job["status"] in ("pending", "error"):
         msg = "IA: pendiente" if job["status"] == "pending" else "IA: no se pudo"
-        b = Factory.GhostButton(icon="robot-confused-outline", text=msg + " · tocar para reintentar")
+        b = _ai_ghost(icon="robot-confused-outline", text=msg + " · tocar para reintentar")
         b.bind(on_release=lambda *_: (scout_ai.queue(db(), record_id), run(record_id, refresh)))
         box.add_widget(b)
         if job["error"]:            # el motivo real (sin señal, sin cuota, clave, modelo…)
@@ -328,7 +334,7 @@ def ai_block(record_id: int, refresh):
             b = Factory.GhostButton(icon="key-outline", text="Identificar con IA (poner las claves)")
             b.bind(on_release=lambda *_: keys_dialog(refresh))
         else:
-            b = Factory.GhostButton(icon="robot-outline", text="Identificar con IA")
+            b = _ai_ghost(icon="robot-outline", text="Identificar con IA")
             b.bind(on_release=lambda *_: run(record_id, refresh))
         box.add_widget(b)
     return box

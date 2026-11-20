@@ -57,6 +57,19 @@ def _grad(c1: str, c2: str):
     return gradient(c1, c2)
 
 
+def _with_icon(text: str, icon: str, size: float) -> str:
+    """«[ícono]  texto» con la fuente de íconos (markup). Idempotente: no repite el ícono."""
+    import os
+    from kivymd import fonts_path
+    from kivymd.icon_definitions import md_icons
+    base = text.split("[/font]  ", 1)[-1]
+    g = md_icons.get(icon or "", "")
+    if not g:
+        return base
+    font = os.path.join(fonts_path, "materialdesignicons-webfont.ttf")
+    return f"[font={font}][size={int(sp(size))}]{g}[/size][/font]  {base}"
+
+
 class _Pulse:
     """Mezcla: `pulse` 0..1 que respira mientras el widget está en pantalla."""
     pulse = NumericProperty(0)
@@ -87,7 +100,7 @@ class AIButton(_Pulse, ButtonBehavior, Label):
     def __init__(self, text="", icon="creation", on_press_cb=None, **kw):
         kw.setdefault("size_hint_y", None)
         kw.setdefault("height", dp(46))
-        super().__init__(text=text, bold=True, font_size=sp(14.5), color=(1, 1, 1, 1), halign="center",
+        super().__init__(text=text, bold=True, font_size=sp(14), color=(1, 1, 1, 1), halign="center",
                          valign="middle", shorten=True, shorten_from="right", **kw)
         self.icon = icon
         if on_press_cb:
@@ -98,17 +111,11 @@ class AIButton(_Pulse, ButtonBehavior, Label):
         self._pad()
 
     def _pad(self, *_):
-        from kivymd.icon_definitions import md_icons
-        g = md_icons.get(self.icon, "")
         self.markup = True
-        from kivymd import fonts_path
-        import os
-        font = os.path.join(fonts_path, "materialdesignicons-webfont.ttf")
-        base = self.text.split("[/font]  ", 1)[-1]
-        self.text = f"[font={font}][size={int(sp(18))}]{g}[/size][/font]  {base}" if g else base
+        self.text = _with_icon(self.text, self.icon, 18)
 
     def _draw(self, *_):
-        self.text_size = (self.width - dp(24), None)
+        self.text_size = (self.width - dp(12), None)
         r = self.height / 2
         self.canvas.before.clear()
         with self.canvas.before:
@@ -130,23 +137,24 @@ class AIButton(_Pulse, ButtonBehavior, Label):
 
 class AIGhost(_Pulse, ButtonBehavior, Label):
     """Acción secundaria de IA: borde neón fino y texto violeta."""
+    icon = StringProperty("creation")
 
     def __init__(self, text="", icon="creation", on_press_cb=None, **kw):
         kw.setdefault("size_hint_y", None)
         kw.setdefault("height", dp(44))
-        super().__init__(bold=True, font_size=sp(14), halign="center", valign="middle", markup=True,
+        super().__init__(text=text, bold=True, font_size=sp(14), halign="center", valign="middle", markup=True,
                          shorten=True, shorten_from="right", **kw)
-        from kivymd.icon_definitions import md_icons
-        from kivymd import fonts_path
-        import os
-        font = os.path.join(fonts_path, "materialdesignicons-webfont.ttf")
-        g = md_icons.get(icon, "")
-        self.text = f"[font={font}][size={int(sp(17))}]{g}[/size][/font]  {text}" if g else text
+        self.icon = icon
         self.color = c(ink())
         if on_press_cb:
             self.bind(on_release=lambda *_: on_press_cb())
-        self.bind(pos=self._draw, size=self._draw, state=self._draw, pulse=self._draw)
+        self.bind(pos=self._draw, size=self._draw, state=self._draw, pulse=self._draw,
+                  text=self._pad, icon=self._pad)
         self._start_pulse()
+        self._pad()
+
+    def _pad(self, *_):
+        self.text = _with_icon(self.text, self.icon, 17)
 
     def _draw(self, *_):
         self.text_size = (self.width - dp(20), None)

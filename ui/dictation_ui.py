@@ -6,7 +6,7 @@ Dictar datos a una planilla (app):
 * RecordPanel: barra de grabación abajo (tiempo, onda, pausa, terminar, descartar, bolsillo).
 * PocketView: «modo bolsillo», pantalla negra y brillo al mínimo mientras sigue grabando.
 * DictationCard: la transcripción con cada número como pastilla: se toca un número y luego la
-  celda; o «Ordenar con IA» (las celdas quedan en amarillo hasta «Confirmar todo»).
+  celda; o «Ordenar con IA» (las celdas quedan en lavanda hasta «Confirmar todo»).
 """
 from __future__ import annotations
 
@@ -71,14 +71,21 @@ class Wave(Widget):
         self.levels = self.levels[1:] + [v]
         self.draw()
 
+    # Color de cada barra según cómo suena: tenue (bajo), rosado (bien), ámbar (alto, satura).
+    LOW, OK, HIGH = "#8A7F86", "#FF6A93", "#FFB300"
+
     def draw(self, *_):
         self.canvas.clear()
         n = len(self.levels)
         w = self.width / n
         with self.canvas:
-            Color(*c("#FF6A93"))
+            Color(1, 1, 1, .10)                       # línea de «bien» (mínimo recomendado)
+            y_ok = self.height * (0.1 + 0.9 * .38) / 2
+            RoundedRectangle(pos=(self.x, self.center_y + y_ok), size=(self.width, dp(1)))
+            RoundedRectangle(pos=(self.x, self.center_y - y_ok), size=(self.width, dp(1)))
             for i, v in enumerate(self.levels):
-                h = max(dp(4), self.height * (0.1 + 0.9 * v))
+                Color(*c(self.HIGH if v > .93 else (self.OK if v >= .38 else self.LOW)))
+                h = max(dp(4), self.height * (0.08 + 0.92 * v))
                 RoundedRectangle(pos=(self.x + i * w + w * .2, self.center_y - h / 2), size=(w * .6, h),
                                  radius=[w * .3])
 
@@ -135,6 +142,10 @@ class RecordPanel(ModalView):
         box.add_widget(top)
         self.wave = Wave()
         box.add_widget(self.wave)
+        self.vol_lb = Label(text="Volumen: —", font_size=sp(12.5), bold=True, color=(1, 1, 1, .7),
+                            size_hint_y=None, height=dp(18))
+        box.add_widget(self.vol_lb)
+        self._vol = 0.0
         row = BoxLayout(size_hint_y=None, height=dp(66), spacing=dp(18))
         row.add_widget(Widget())
         self.pause_b = RoundBtn("pause", "#333338")
@@ -184,7 +195,16 @@ class RecordPanel(ModalView):
 
     def _tick(self, *_):
         self.state_lb.text = f"{'En pausa' if self.rec.paused else 'Grabando'} · {fmt_time(self.elapsed())}"
-        self.wave.push(0 if self.rec.paused else self.rec.level())
+        v = 0 if self.rec.paused else self.rec.level()
+        self.wave.push(v)
+        self._vol = self._vol * .8 + v * .2               # suavizado: el texto no parpadea
+        if self.rec.paused:
+            self.vol_lb.text, self.vol_lb.color = "En pausa", (1, 1, 1, .5)
+        else:
+            word = voice.level_word(max(self._vol, v if v > .93 else 0))
+            self.vol_lb.text = {"bajo": "Volumen: bajo · hable más fuerte o acérquese",
+                                "bien": "Volumen: bien", "alto": "Volumen: alto · aléjese un poco"}[word]
+            self.vol_lb.color = c({"bajo": "#B9AEB4", "bien": "#7CE3A6", "alto": "#FFB300"}[word])
 
     def toggle_pause(self):
         if self.rec.paused:
@@ -330,12 +350,31 @@ class DictationCard(GlassCard):
             self.player.release()
             self.player = None
 
-    def _btn(self, text, cb, gold=False, primary=False):
+    def _btn(self, text, cb, gold=False, primary=False, danger=False):
         from kivymd.uix.button import MDRoundFlatButton
+        dark = theme.is_dark()
+        if gold:
+            fg, bg = c(GOLD_INK), c(GOLD)
+        elif primary:
+            fg, bg = c("#FFFFFF"), c(theme.BERRY)
+        elif danger:
+            fg, bg = c("#FF7A9A" if dark else theme.BERRY), c("#FFFFFF", .06 if dark else .55)
+        else:
+            fg, bg = c("#E6EDF3" if dark else theme.LEAF_DARK), c("#FFFFFF", .06 if dark else .55)
         b = MDRoundFlatButton(text=text, font_size=sp(13), on_release=lambda *_: cb(),
-                              theme_text_color="Custom", line_color=c(theme.LEAF_DARK, .25),
-                              text_color=c(GOLD_INK if gold else ("#FFFFFF" if primary else theme.LEAF_DARK)),
-                              md_bg_color=c(GOLD) if gold else (c(theme.BERRY) if primary else c("#FFFFFF", .55)))
+                              theme_text_color="Custom", text_color=fg, md_bg_color=bg,
+                              line_color=c(theme.BERRY if danger else ("#FFFFFF" if dark else theme.LEAF_DARK), .25))
+        self.actions.add_widget(b)
+
+    def _ai_btn(self, text, cb, icon, main=False):
+        """Acciones de la IA con su identidad violeta (el dictado en sí sigue dorado)."""
+        from kivy.core.text import Label as CoreLabel
+        from ui.ai_style import AIButton, AIGhost
+        cl = CoreLabel(text=text, font_size=sp(14), bold=True)
+        cl.refresh()
+        w = cl.texture.size[0] + dp(64)
+        b = (AIButton if main else AIGhost)(text, icon, on_press_cb=cb, size_hint=(None, None),
+                                           size=(w, dp(44)))
         self.actions.add_widget(b)
 
     def render(self):
@@ -350,7 +389,7 @@ class DictationCard(GlassCard):
             self.status.text = f"No se pudo transcribir: {rec.get('error', '')[:140]}"
         else:
             ia = self.screen.ia_pending()
-            self.status.text = (f"[b]La IA ordenó {ia} dato(s):[/b] revise los amarillos y confirme." if ia else
+            self.status.text = (f"[b]La IA ordenó {ia} dato(s):[/b] revise los violetas y confirme." if ia else
                                 "Toque un número y luego la celda donde va · o «Ordenar con IA».")
             self.status.markup = True
         text = rec.get("text") or ""
@@ -371,12 +410,13 @@ class DictationCard(GlassCard):
             self._btn("Transcribir", lambda: self.screen.transcribe(rec), gold=True)
         elif st == "done":
             if self.screen.ia_pending():
-                self._btn("Confirmar todo", self.screen.ia_confirm, primary=True)
-                self._btn("Deshacer", self.screen.ia_undo)
+                self._ai_btn("Confirmar todo", self.screen.ia_confirm, "check-all", main=True)
+                self._ai_btn("Deshacer", self.screen.ia_undo, "undo")
             else:
-                self._btn("Ordenar con IA", lambda: self.screen.arrange(rec), gold=True)
+                self._ai_btn("Ordenar con IA", lambda: self.screen.arrange(rec), "auto-fix", main=True)
         self._btn("Dictar más", self.screen.dictate)
         self._btn("Otros dictados", self.screen.pick_dictation)
+        self._btn("Borrar audio", lambda: self.screen.delete_dictation(self.rec), danger=True)
         self._btn("Cerrar", self.screen.close_dictation)
 
     def mark_used(self, idx: int):

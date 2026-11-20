@@ -1,6 +1,7 @@
 # ui/kv/observation.kv · Registro fenológico (fotos, BBCH, notas)
 # (antes en ui/layout.kv; se carga en segundo plano: ui/kvload.py)
 #:import theme ui.theme
+#:import ai_style ui.ai_style
 #:import c ui.theme.c
 #:import dp kivy.metrics.dp
 #:import NoTransition kivy.uix.screenmanager.NoTransition
@@ -114,6 +115,8 @@
                     adaptive_height: True
                     SectionLabel:
                         text: "SUGERENCIA AUTOMÁTICA (IA LOCAL)"
+                        theme_text_color: "Custom"
+                        text_color: c(ai_style.ink())
                     MDBoxLayout:
                         adaptive_height: True
                         spacing: dp(10)
@@ -123,7 +126,7 @@
                             size: dp(22), dp(22)
                             active: False
                             opacity: 1 if self.active else 0
-                            color: c(theme.LEAF)
+                            color: c(ai_style.PURPLE)
                             pos_hint: {"center_y": .5}
                         MDLabel:
                             id: ai_label
@@ -136,14 +139,9 @@
                     MDBoxLayout:
                         adaptive_height: True
                         spacing: dp(10)
-                        MDProgressBar:
+                        AIBar:
                             id: ai_conf
-                            max: 1
                             value: 0
-                            color: c(theme.LEAF)
-                            back_color: c(theme.LEAF_SOFT)
-                            size_hint_y: None
-                            height: dp(6)
                             pos_hint: {"center_y": .5}
                         Muted:
                             id: ai_conf_text
@@ -159,12 +157,13 @@
                     MDBoxLayout:
                         adaptive_height: True
                         spacing: dp(8)
-                        PrimaryButton:
+                        AIButton:
                             id: accept_btn
+                            icon: "check-decagram"
                             text: "Aceptar sugerencia"
                             disabled: True
                             on_release: root.accept_ai()
-                        GhostButton:
+                        AIGhost:
                             icon: "refresh"
                             text: "Re-analizar"
                             on_release: root.analyze()

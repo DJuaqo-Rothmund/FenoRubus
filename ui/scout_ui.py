@@ -41,6 +41,12 @@ from ui.theme import c
 CROP_CODES = {"frambuesa": "FR", "arandano": "AR", "cranberry": "CR"}
 
 
+def _ai_ghost(icon: str, text: str):
+    """Botón de IA (borde neón violeta) con la misma forma de uso que GhostButton."""
+    from ui.ai_style import AIGhost
+    return AIGhost(text, icon)
+
+
 def app():
     return MDApp.get_running_app()
 
@@ -243,7 +249,7 @@ class ScoutHome(ScoutScreenBase):
         card.add_widget(b)
         n_pend = len(scout_ai.pending(db()))
         if n_pend:
-            b = Factory.GhostButton(icon="robot-outline", text=f"Identificar pendientes ({n_pend})")
+            b = _ai_ghost(icon="robot-outline", text=f"Identificar pendientes ({n_pend})")
             b.bind(on_release=lambda *_: ai.run_pending(self.refresh))
             card.add_widget(b)
         body.add_widget(card)

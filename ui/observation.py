@@ -243,11 +243,11 @@ class ObservationScreen(MDScreen):
     def _alternatives(self, top):
         box = self.ids.alternatives
         fast_clear(box)
+        from ui.ai_style import AIChip
         for code, p in top[1:3]:
-            box.add_widget(MDRectangleFlatButton(
-                text=f"BBCH {ph.code_str(code)} · {p:.0%}", theme_text_color="Custom",
-                text_color=c(theme.LEAF_DARK), line_color=c(theme.LINE),
-                on_release=lambda b, code=code: self._set_bbch(code)))
+            chip = AIChip(f"BBCH {ph.code_str(code)} · {p:.0%}")
+            chip.bind(on_release=lambda b, code=code: self._set_bbch(code))
+            box.add_widget(chip)
 
     def _set_bbch(self, code: int):
         self.ids.bbch.text = ph.bbch_label(code, app().db.bbch_names())

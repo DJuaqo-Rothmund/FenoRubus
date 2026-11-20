@@ -946,3 +946,7 @@ class NavTile(ButtonBehavior, BoxLayout):
     name = StringProperty()
     text = StringProperty()
     active = BooleanProperty(False)
+
+
+# Piezas de IA (AIButton, AIGhost, AIBar…): se registran para usarlas en las reglas KV.
+from ui import ai_style  # noqa: E402,F401

@@ -19,7 +19,7 @@ from kivymd.uix.screen import MDScreen
 import phenology as ph
 from android_bridge import store_photo
 from platform_utils import data_subdir
-from ui import theme
+from ui import ai_style, theme
 from ui.theme import c
 from ui.common import app, confirm, fast_clear, form_dialog, pick_dialog, thumb_widget
 
@@ -356,7 +356,7 @@ SHEET_NUM, SHEET_NUM_FG = "#DCEFE4", "#1B2A23"       # n.º de fila
 SHEET_CELL, SHEET_INK = "#FFFFFF", "#1B2A23"         # celdas
 SHEET_FIRST_FG = "#1E5A45"                           # 1.ª columna (tratamiento / variedad)
 SHEET_GROUP = "#123A2C"
-SHEET_IA = "#FFF1C9"                                 # dato puesto por la IA (por confirmar)                              # grupos («Planta 1») sobre las subcolumnas
+SHEET_IA = "#EEE6FF"   # lavanda (identidad IA: ui/ai_style.py)                                 # dato puesto por la IA (por confirmar)                              # grupos («Planta 1») sobre las subcolumnas
 
 
 def rename_entry_photo(entry_id: int) -> None:
@@ -554,8 +554,8 @@ class MeasureScreen(MDScreen):
                                                    on_release=lambda *_: self.add_images("camera")))
             actions.add_widget(Factory.GhostButton(icon="image-multiple-outline", text="Desde galería",
                                                    on_release=lambda *_: self.add_images("gallery")))
-            self._ac_btn = Factory.GhostButton(icon="creation", text="",
-                                               on_release=lambda *_: self.autocount_menu())
+            from ui.ai_style import AIGhost
+            self._ac_btn = AIGhost("", "creation", on_press_cb=self.autocount_menu)
             actions.add_widget(self._ac_btn)
             self._autocount_btn()
         # «Pasar conteos a una planilla»: solo en registros de imágenes (encima de Exportar).
@@ -627,7 +627,7 @@ class MeasureScreen(MDScreen):
             row = EntryRow(title=e["caption"] or "Sin descripción",
                            subtitle=_variety_label(e["variety_id"], varieties), item=e,
                            screen=self, has_thumb=True, can_count=bool(e["path"]),
-                           counts=("[color=#E65100][b]IA · falta confirmar:[/b][/color] " if needs_review(rec) else "")
+                           counts=(ai_style.review_markup("IA · falta confirmar:") + " " if needs_review(rec) else "")
                            + count_text(rec, markup=True))
             row.ids.thumb_box.add_widget(thumb_widget(e["path"], 160))
             box.add_widget(row)
@@ -697,7 +697,7 @@ class MeasureScreen(MDScreen):
                                size_hint=(None, None), size=(cw, rh), font_size=fz, halign="center",
                                padding=(dp(4), max(0, (rh - fz * 1.25) / 2)), background_normal="",
                                background_active="", background_color=c(SHEET_IA if ia else SHEET_CELL),
-                               foreground_color=c(SHEET_INK), cursor_color=c(SHEET_HEAD))
+                               foreground_color=c("#4B2BB3" if ia else SHEET_INK), cursor_color=c(SHEET_HEAD))
                 ti.entry_id, ti.col = e["id"], col
                 ti.native_edit = False   # planilla: se escribe de corrido con el teclado de la app
                 ti.on_hold = self.cell_menu
@@ -884,7 +884,7 @@ class MeasureScreen(MDScreen):
         self._cell_focus(ti, False)
 
     def arrange(self, rec):
-        """La IA ubica los números en la planilla (en amarillo hasta «Confirmar todo»)."""
+        """La IA ubica los números en la planilla (en lavanda hasta «Confirmar todo»)."""
         a = app()
         import scout_ai
         try:
@@ -940,7 +940,7 @@ class MeasureScreen(MDScreen):
             rec["used"] = sorted(used)
             self.dictations.update(rec["id"], used=rec["used"])
             self.refresh()
-            a.toast(f"La IA ubicó {n} dato(s): revise los amarillos y toque «Confirmar todo»" if n
+            a.toast(f"La IA ubicó {n} dato(s): revise los violetas y toque «Confirmar todo»" if n
                     else "La IA no encontró dónde ubicar los datos")
         a.workers.submit(work)
 
@@ -979,12 +979,7 @@ class MeasureScreen(MDScreen):
             self.refresh()
 
         def remove(r):
-            def go():
-                self.dictations.delete(r["id"])
-                if self._dict_rec and self._dict_rec["id"] == r["id"]:
-                    self._dict_rec = None
-                self.refresh()
-            confirm("Borrar dictado", "Se borra el audio y su transcripción del teléfono.", [("Borrar", go)])
+            self.delete_dictation(r)
 
         import voice
         from ui.dictation_ui import fmt_time
@@ -993,6 +988,20 @@ class MeasureScreen(MDScreen):
                                       "error": "Error al transcribir"}.get(r.get("status"), ""))[:70],
                   lambda r=r: show(r), None, lambda r=r: remove(r)) for r in reversed(got)]
         pick_dialog("Dictados de esta semana", items)
+
+    def delete_dictation(self, rec: dict):
+        """Borra un dictado (audio + transcripción). Los datos ya puestos en la planilla quedan."""
+        def go():
+            if self._dict_card is not None and self._dict_rec and self._dict_rec["id"] == rec["id"]:
+                self._dict_card.stop_audio()
+            self.dictations.delete(rec["id"])
+            if self._dict_rec and self._dict_rec["id"] == rec["id"]:
+                self._dict_rec, self._pick = None, None
+                self._ia = {}
+            self.refresh()
+            app().toast("Audio borrado")
+        confirm("Borrar audio", "Se borra este audio y su transcripción del teléfono. Los datos que ya "
+                "puso en la planilla se quedan.", [("Borrar", go)])
 
     def close_dictation(self):
         if self._dict_card is not None:

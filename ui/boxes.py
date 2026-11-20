@@ -428,7 +428,7 @@ class BoxesScreen(MDScreen):
         card.add_widget(Factory.MindSection(text="CAJAS PARA EL DETECTOR · TODOS LOS ENSAYOS"))
         card.add_widget(Factory.MindText(
             text=f"[b]{len(done)}[/b] fotos confirmadas de {len(self.photos)} · meta {GOAL}"
-                 + (f"\n[color=#FFB74D][b]{len(review)}[/b] analizadas por IA · falta confirmar[/color]" if review else ""),
+                 + (f"\n[color=#B9A2FF][b]{len(review)}[/b] analizadas por IA · falta confirmar[/color]" if review else ""),
             markup=True))
         bar = Widget(size_hint_y=None, height=dp(6))
         k = min(1.0, len(done) / GOAL)
@@ -1219,7 +1219,7 @@ class BoxEditor(ModalView):
             self.count.text = f"{dots}\n[b]{total} en total[/b]" if total else "Sin cajas"
         self.empty_b.set_on(bool(self.rec.get("empty")))
         review = bool(self.rec.get("review"))
-        self.hint.text = ("[color=#FFB74D][b]IA · falta confirmar:[/b][/color] corrija y toque el botón verde"
+        self.hint.text = ("[color=#B9A2FF][b]IA · falta confirmar:[/b][/color] corrija y toque el botón verde"
                           if review else self.HINT)
         self.save_b.set_icon("check-bold" if review else "content-save-outline")
 

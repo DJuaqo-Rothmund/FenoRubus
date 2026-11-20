@@ -30,6 +30,21 @@ MAX_BYTES = 18 * 1024 * 1024          # Gemini acepta ~20 MB por consulta (≈ 1
 NUM_RE = re.compile(r"(?<![A-Za-z\d])\d+(?:[.,]\d+)?(?![A-Za-z\d])")
 
 
+def level_from_amp(amp: float) -> float:
+    """Amplitud (0..32767, MediaRecorder.getMaxAmplitude) → 0..1 en decibeles: −50 dB = 0 y
+    0 dB = 1. En escala lineal la voz normal quedaba casi en 0 (la onda se veía plana)."""
+    import math
+    if not amp or amp <= 0:
+        return 0.0
+    db = 20 * math.log10(min(amp, 32767) / 32767.0)
+    return max(0.0, min(1.0, (db + 50) / 50))
+
+
+def level_word(v: float) -> str:
+    """Cómo suena: «bajo», «bien» o «alto» (saturando)."""
+    return "bajo" if v < .38 else ("alto" if v > .93 else "bien")
+
+
 class NotAvailable(RuntimeError):
     pass
 
@@ -79,9 +94,13 @@ class Recorder:
             self.paused = False
 
     def level(self) -> float:
+        """Volumen desde la última lectura, 0..1 en escala de decibeles (como un vúmetro)."""
         try:
-            return min(1.0, (self.rec.getMaxAmplitude() if self.rec else 0) / 22000.0)
-        except Exception:  # noqa: BLE001
+            return level_from_amp(self.rec.getMaxAmplitude() if self.rec else 0)
+        except Exception as exc:  # noqa: BLE001
+            if not getattr(self, "_lvl_err", False):        # una vez al registro (para revisarlo)
+                self._lvl_err = True
+                print("nivel del micrófono:", exc)
             return 0.0
 
     def stop(self) -> str:
@@ -244,9 +263,16 @@ class Store:
         return None
 
     def delete(self, rec_id: str) -> None:
+        """Quita el dictado de la lista y borra su archivo de audio del teléfono."""
         with self._lock:
-            items = [i for i in self.all() if i["id"] != rec_id]
-            self._save(items)
+            all_ = self.all()
+            gone = [i for i in all_ if i["id"] == rec_id]
+            self._save([i for i in all_ if i["id"] != rec_id])
+        for it in gone:
+            try:
+                os.remove(it.get("path") or "")
+            except OSError:
+                pass
 
     def for_measure(self, measure: str, week: str) -> list[dict]:
         return [i for i in self.all() if i["measure"] == measure and i["week"] == week]

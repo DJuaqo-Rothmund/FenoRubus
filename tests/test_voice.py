@@ -53,12 +53,13 @@ def test_transcribe_and_arrange_with_gemini(monkeypatch, tmp_path):
 
 def test_store(tmp_path):
     st = voice.Store(str(tmp_path))
+    (tmp_path / "x.m4a").write_bytes(b"audio")
     r = st.add("m1", "2026-11-16", str(tmp_path / "x.m4a"), 41.6)
     assert r["seconds"] == 42 and r["status"] == "pending"
     st.update(r["id"], status="done", text="hola 12", used=[0])
     assert st.for_measure("m1", "2026-11-16")[0]["used"] == [0] and st.for_measure("m1", "2026-11-23") == []
     st.delete(r["id"])
-    assert st.all() == []
+    assert st.all() == [] and not (tmp_path / "x.m4a").exists()      # el audio también se borra
 
 
 def test_web_voice_matches_python():
@@ -73,3 +74,12 @@ def test_web_voice_matches_python():
                                     text=True, cwd=root, check=True).stdout)
     assert [tuple(x) for x in out["n"]] == voice.numbers(text)
     assert out["p"] == voice.TRANSCRIBE_PROMPT and out["a"] == voice.arrange_prompt("x", ["A", "B"], ["c"])
+
+
+def test_level_scale():
+    """Nivel en decibeles: la voz normal (≈ 2 000–8 000) se ve; el silencio es 0 y saturar es 1."""
+    assert voice.level_from_amp(0) == 0 and voice.level_from_amp(32767) == 1
+    assert .4 < voice.level_from_amp(3000) < .8
+    assert voice.level_word(voice.level_from_amp(150)) == "bajo"
+    assert voice.level_word(voice.level_from_amp(5000)) == "bien"
+    assert voice.level_word(voice.level_from_amp(32000)) == "alto"
