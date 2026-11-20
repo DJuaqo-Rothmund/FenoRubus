@@ -50,6 +50,18 @@ class PhotoSlot(GlassCard):
                                  color=c(theme.BERRY)))
         self.meta = text
 
+    def _tap_main(self, box, touch):
+        if not box.collide_point(*touch.pos) or not _is_tap(touch) or not getattr(self, "_photos", None):
+            return False
+        from ui.photo_viewer import open_viewer
+        title = self.caption.title().replace("Foto 1 · ", "").replace("Foto 2 · ", "")
+        try:
+            title = f"{self.screen.ids.bar.title} · {title}"
+        except Exception:  # noqa: BLE001
+            pass
+        open_viewer([{"path": p["path"]} for p in self._photos], 0, title)
+        return True
+
     def show(self, photos: list[dict]):
         """photos: todas las fotos de este tipo, la principal primero."""
         box, strip = self.ids.image_box, self.ids.strip
@@ -57,12 +69,17 @@ class PhotoSlot(GlassCard):
         fast_clear(strip)
         self.count = len(photos)
         self.has_photo = bool(photos)
+        self._photos = photos
         if not photos:
             box.add_widget(thumb_widget(None, icon="camera-plus-outline"))
             self.meta = "Sin foto · la cámara suma una foto por toma"
             return
         main = photos[0]
         box.add_widget(thumb_widget(main["path"], 640))
+        self._photos = photos
+        if not getattr(self, "_tap_bound", False):      # tocar la foto principal: pantalla grande
+            self._tap_bound = True
+            box.bind(on_touch_up=self._tap_main)
         origin = {"camera": "cámara", "gallery": "galería"}.get(main["source"], main["source"])
         self.meta = (f"Principal: {origin} · {main['captured_at'][11:16]}"
                      + (" · toque una miniatura para cambiarla" if len(photos) > 1 else ""))
@@ -72,6 +89,10 @@ class PhotoSlot(GlassCard):
                 t.add_widget(thumb_widget(ph_["path"], 160))
                 t.bind(on_release=lambda w: self.screen.make_primary(self.kind, w.photo_id))
                 strip.add_widget(t)
+
+
+def _is_tap(touch) -> bool:
+    return abs(touch.x - touch.ox) < dp(12) and abs(touch.y - touch.oy) < dp(12) and not touch.is_mouse_scrolling
 
 
 class ObservationScreen(MDScreen):
