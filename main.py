@@ -1145,12 +1145,13 @@ class FenoRubusApp(MDApp):
             if kind == "iaplus":
                 from ui import boxes
                 boxes.open_screen()
-            else:
+            else:                              # la frambuesa cibernética: solo los juegos
+                self.ailab.games_only = True
                 self.go("ailab")
             self._history = ["crops"]
-            self.toast(f"{'IA+' if kind == 'iaplus' else 'Entrenador IA'} · {crops.get(crop_id).app}")
+            self.toast(f"{'IA+' if kind == 'iaplus' else 'Juegos IA'} · {crops.get(crop_id).app}")
 
-        self._ask_pin(lambda: self.pick_crop("¿Qué IA quiere entrenar?" if kind == "ia"
+        self._ask_pin(lambda: self.pick_crop("Juegos IA · ¿qué cultivo?" if kind == "ia"
                                              else "IA+ · ¿de qué cultivo?", go_crop))
 
     def pick_crop(self, title: str, on_pick) -> None:
@@ -1259,6 +1260,7 @@ class FenoRubusApp(MDApp):
 
         def ok(f):
             if self.pin.verify(f.ids.pin.text):
+                self.ailab.games_only = False      # desde Ajustes: el entrenador completo
                 self.go("ailab")
                 return True
             wait = self.pin.locked_seconds

@@ -302,8 +302,8 @@ from ui.common import NeonCard as _Neon  # noqa: E402
 
 
 class TrainerCard(_BB, _Neon):
-    """Entrada al Entrenador IA (desafíos, juegos, modelo y datos) dentro de IA+: la frambuesa
-    cibernética con aura morada, en una tarjeta de borde neón."""
+    """Entrada al Entrenador IA completo (modelo y datos, fotos extra y juegos) dentro de IA+:
+    la frambuesa cibernética con aura morada, en una tarjeta de borde neón."""
 
     def __init__(self, **kw):
         from kivy.uix.boxlayout import BoxLayout
@@ -318,7 +318,7 @@ class TrainerCard(_BB, _Neon):
         col = BoxLayout(orientation="vertical", padding=(0, dp(14)))
         t = Label(text="Entrenador IA", bold=True, font_size=sp(17), color=c("#F1E9FF"), halign="left",
                   valign="bottom")
-        d = Label(text="Desafíos, juegos, modelo y datos", font_size=sp(12.5), color=c("#B9A8E8"),
+        d = Label(text="Modelo y datos · fotos extra · juegos", font_size=sp(12.5), color=c("#B9A8E8"),
                   halign="left", valign="top")
         for w in (t, d):
             w.bind(size=lambda w, v: setattr(w, "text_size", v))
@@ -328,7 +328,9 @@ class TrainerCard(_BB, _Neon):
                               font_size=sp(26), color=c("#C9B6FF"), size_hint_x=None, width=dp(26)))
 
     def on_release(self):
-        app().go("ailab")
+        a = app()
+        a.ailab.games_only = False                     # desde IA+: el entrenador completo
+        a.go("ailab")
 
 
 KV = """

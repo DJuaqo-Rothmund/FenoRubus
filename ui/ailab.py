@@ -73,9 +73,15 @@ def _mind(cls_name: str, **kw):
 
 
 class AILabScreen(MDScreen):
-    """«Mente del sistema»: desafío diario, etiquetado, modelo y datos históricos."""
+    """«Mente del sistema»: desafío diario, etiquetado, modelo y datos históricos.
+
+    games_only=True: «Juegos IA» (la frambuesa cibernética de AeonCrop): solo los desafíos de
+    entrenamiento. Desde IA+ se abre completo (desafíos, modelo y datos, fotos extra)."""
+    games_only = BooleanProperty(False)
 
     def on_pre_enter(self, *_):
+        if self.games_only:
+            self.ids.seg.current = "challenge"
         self.refresh()
 
     def on_enter(self, *_):
