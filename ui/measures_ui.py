@@ -517,7 +517,7 @@ class MeasureScreen(MDScreen):
             print("renombrar fotos de mediciones:", exc)
         kind = "PLANILLA DE DATOS" if self.measure["kind"] == "table" else "REGISTRO DE IMÁGENES"
         self.ids.kicker.text = f"{kind} · {ph.week_title(self.week).upper()}"
-        self.ids.columns_text.text = (
+        self._hint_widgets()[0].text = (
             "Toque una celda o un encabezado para escribir · mantenga presionada una celda para copiar o "
             "pegar · los 3 puntos mueven o eliminan la columna · toque el n.º de fila para eliminarla · "
             "las lupas de arriba agrandan o achican la letra."
@@ -589,12 +589,19 @@ class MeasureScreen(MDScreen):
     def toggle_hint(self):
         self.show_hint(not getattr(self, "_hint_on", False))
 
+    def _hint_widgets(self):
+        """La ayuda y el conteo (referencias fuertes: los ids de kv son débiles y, al sacarlos de
+        la pantalla con el bombillo, Python los borraba → «weakly-referenced object no longer exists»)."""
+        if getattr(self, "_hints", None) is None:
+            self._hints = (self.ids.columns_text.__self__, self.ids.count_text.__self__)
+        return self._hints
+
     def show_hint(self, on: bool):
         """El bombillo muestra u oculta la ayuda (y el conteo de filas/fotos)."""
         self._hint_on = on
         ids = self.ids
         card = ids.entries.parent
-        for w in (ids.columns_text, ids.count_text):
+        for w in self._hint_widgets():
             if on and w.parent is None:
                 card.add_widget(w, index=card.children.index(ids.entries) + 1)
             elif not on and w.parent is not None:
@@ -607,7 +614,7 @@ class MeasureScreen(MDScreen):
         fast_clear(box)
         entries = a.db.list_entries(self.measure["id"], week_id=self.week["id"])
         unit = "fila(s)" if self.measure["kind"] == "table" else "foto(s)"
-        self.ids.count_text.text = f"{len(entries)} {unit} esta semana"
+        self._hint_widgets()[1].text = f"{len(entries)} {unit} esta semana"
         if self.measure["kind"] == "table":
             self._build_grid(entries)
             return

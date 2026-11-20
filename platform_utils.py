@@ -81,6 +81,9 @@ def crop_data_dir(subdir: str | None) -> str:
     return path
 
 
+_BASE_DIR: dict = {}
+
+
 def get_base_dir() -> str:
     """
     Directorio persistente y privado de la app (raíz común a todos los cultivos).
@@ -92,7 +95,11 @@ def get_base_dir() -> str:
     if override:
         path = override
     elif IS_ANDROID:
-        path = android_context().getFilesDir().getAbsolutePath()
+        # Se pregunta a Android UNA vez: llamarlo desde varios hilos a la vez (al volver a la app,
+        # con la sincronización corriendo) cerró la app con un error nativo.
+        if "android" not in _BASE_DIR:
+            _BASE_DIR["android"] = android_context().getFilesDir().getAbsolutePath()
+        path = _BASE_DIR["android"]
     elif sys.platform.startswith("win"):
         path = os.path.join(os.environ.get("APPDATA", os.path.expanduser("~")), DATA_DIR_NAME)
     elif sys.platform == "darwin":

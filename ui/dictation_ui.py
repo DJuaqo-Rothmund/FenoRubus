@@ -313,6 +313,8 @@ class DictationCard(GlassCard):
             ev.cancel()
         if on:
             def tick(*_):
+                if self.player is None:          # se cerró la tarjeta o se detuvo el audio
+                    return False
                 pos, dur = self.player.position()
                 self.time_lb.text = f"{fmt_time(pos)} / {fmt_time(dur or self.rec.get('seconds', 0))}"
                 if dur and pos >= dur - .2:
@@ -321,6 +323,9 @@ class DictationCard(GlassCard):
             self._pev = Clock.schedule_interval(tick, .3)
 
     def stop_audio(self):
+        ev = getattr(self, "_pev", None)
+        if ev:
+            ev.cancel()
         if self.player is not None:
             self.player.release()
             self.player = None

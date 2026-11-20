@@ -103,6 +103,91 @@ class GlassCard(BoxLayout):
             self.height = self.minimum_height
 
 
+class NeonCard(GlassCard):
+    """Tarjeta de la IA: borde morado neón que respira, con un destello que recorre el borde.
+    Solo se anima mientras está en pantalla (30 cuadros/s; se detiene al salir)."""
+    NEON = "#A64DFF"
+    NEON_2 = "#E040FB"
+
+    def __init__(self, **kw):
+        super().__init__(**kw)
+        from kivy.graphics import Color, Line
+        with self.canvas.after:
+            self._halo_c = Color(0, 0, 0, 0)
+            self._halo = Line(width=dp(4))
+            self._edge_c = Color(0, 0, 0, 0)
+            self._edge = Line(width=dp(1.6))
+            self._tail_c = Color(0, 0, 0, 0)
+            self._tail = Line(width=dp(4.5), cap="round")
+            self._spark_c = Color(0, 0, 0, 0)
+            self._spark = Line(width=dp(2), cap="round")
+        self._path, self._t, self._ev = [], 0.0, None
+        self.bind(pos=self._shape, size=self._shape, radius=self._shape, parent=self._watch)
+
+    def _watch(self, *_):
+        if self.parent is not None and self._ev is None:
+            self._ev = Clock.schedule_interval(self._tick, 1 / 30)
+        elif self.parent is None and self._ev is not None:
+            self._ev.cancel()
+            self._ev = None
+
+    def _shape(self, *_):
+        """Puntos del borde redondeado (sentido horario), para que el destello lo recorra."""
+        import math
+        x, y, w, h = self.x + dp(1), self.y + dp(1), self.width - dp(2), self.height - dp(2)
+        if w < 10 or h < 10:
+            self._path = []
+            return
+        r = min(self.radius[0] if self.radius else dp(20), w / 2.1, h / 2.1)
+        rr = (x, y, w, h, r)
+        self._halo.rounded_rectangle = rr
+        self._edge.rounded_rectangle = rr
+        pts = []
+        corners = [(x + w - r, y + h - r, 0), (x + w - r, y + r, -90), (x + r, y + r, -180), (x + r, y + h - r, -270)]
+        for cx, cy, a0 in corners:                      # 4 esquinas unidas por rectas
+            for i in range(9):
+                a = math.radians(90 + a0 - i * 90 / 8)
+                pts.append((cx + r * math.cos(a), cy + r * math.sin(a)))
+        pts.append(pts[0])
+        dens = []                                       # remuestreo uniforme
+        total = sum(math.dist(pts[i], pts[i + 1]) for i in range(len(pts) - 1))
+        step = total / 160
+        acc, i, cur = 0.0, 0, pts[0]
+        dens.append(cur)
+        while len(dens) < 160 and i < len(pts) - 1:
+            seg = math.dist(cur, pts[i + 1])
+            if acc + seg >= step:
+                k = (step - acc) / seg if seg else 0
+                cur = (cur[0] + (pts[i + 1][0] - cur[0]) * k, cur[1] + (pts[i + 1][1] - cur[1]) * k)
+                dens.append(cur)
+                acc = 0.0
+            else:
+                acc += seg
+                cur = pts[i + 1]
+                i += 1
+        self._path = dens
+
+    def _tick(self, dt):
+        import math
+        if self.get_root_window() is None or not self._path:
+            return
+        self._t = (self._t + dt) % 1000
+        pulse = .5 + .5 * math.sin(self._t * 2.4)
+        a, b = c(self.NEON), c(self.NEON_2)
+        mix = .5 + .5 * math.sin(self._t * .9)
+        col = [a[i] + (b[i] - a[i]) * mix for i in range(3)]
+        self._halo_c.rgba = (*col, .10 + .14 * pulse)
+        self._edge_c.rgba = (*col, .65 + .3 * pulse)
+        n = len(self._path)
+        head = int((self._t * .22 % 1) * n)
+        tail = [self._path[(head - k) % n] for k in range(int(n * .16), -1, -1)]
+        spark = tail[-int(n * .06):]
+        self._tail.points = [v for p in tail for v in p]
+        self._spark.points = [v for p in spark for v in p]
+        self._tail_c.rgba = (*col, .28)
+        self._spark_c.rgba = (1, .92, 1, .95)
+
+
 class LongPress:
     """Mezcla para botones: mantener presionado HOLD s = on_long_press (y entonces no se
     dispara el toque normal). Se cancela si el dedo se mueve (desplazar la lista)."""
@@ -587,26 +672,59 @@ class RoundThumb(Widget):
 
     def _load(self, *_):
         self._tex = None
-        if self.source:
-            try:
-                from kivy.core.image import Image as CoreImage
-                self._tex = CoreImage(self.source).texture   # Kivy guarda la textura en caché
-            except Exception:  # noqa: BLE001 - archivo dañado: queda el fondo suave
-                self._tex = None
-        self._bg.rgba = (1, 1, 1, 1) if self._tex else c(theme.LEAF_SOFT, .8)
+        self._crop_key = None
+        self._bg.rgba = (1, 1, 1, 1) if self.source and os.path.exists(self.source) else c(theme.LEAF_SOFT, .8)
         self._layout()
 
     def _layout(self, *_):
         r = self._rect
         r.pos, r.size, r.radius = self.pos, self.size, [self.radius]
-        tex = self._tex
-        if tex is None or not self.width or not self.height:
+        if not self.source or self.width < 2 or self.height < 2:
             r.texture = None
             return
-        tw, th = tex.size
-        scale = max(self.width / tw, self.height / th)
-        cw, ch = self.width / scale, self.height / scale          # recorte centrado
-        r.texture = tex.get_region((tw - cw) / 2, (th - ch) / 2, cw, ch)
+        # RoundedRectangle no respeta las coordenadas de una región de textura (estiraba la foto
+        # entera al cuadro): se recorta la imagen «cover» a la proporción exacta del cuadro.
+        key = (self.source, round(self.width / self.height, 2))
+        if key != getattr(self, "_crop_key", None):
+            self._crop_key = key
+            self._tex = _cover_texture(*key)
+            self._bg.rgba = (1, 1, 1, 1) if self._tex else c(theme.LEAF_SOFT, .8)
+        r.texture = self._tex
+
+
+_COVER: dict = {}
+
+
+def _cover_texture(source: str, aspect: float):
+    """Textura de la imagen recortada al centro con la proporción `aspect` (ancho/alto). En caché."""
+    key = (source, aspect)
+    tex = _COVER.get(key)
+    if tex is not None:
+        return tex
+    try:
+        from PIL import Image
+        from kivy.graphics.texture import Texture
+        img = Image.open(source)
+        img.draft("RGB", (900, 900))
+        img = img.convert("RGB")
+        w, h = img.size
+        if w / h > aspect:                       # más ancha: se recortan los lados
+            cw = max(1, round(h * aspect))
+            img = img.crop(((w - cw) // 2, 0, (w - cw) // 2 + cw, h))
+        else:                                    # más alta: arriba y abajo
+            ch = max(1, round(w / aspect))
+            img = img.crop((0, (h - ch) // 2, w, (h - ch) // 2 + ch))
+        if max(img.size) > 900:
+            img.thumbnail((900, 900))
+        img = img.transpose(Image.FLIP_TOP_BOTTOM)   # Kivy dibuja de abajo hacia arriba
+        tex = Texture.create(size=img.size, colorfmt="rgb")
+        tex.blit_buffer(img.tobytes(), colorfmt="rgb", bufferfmt="ubyte")
+    except Exception:  # noqa: BLE001 - archivo dañado: queda el fondo suave
+        return None
+    if len(_COVER) > 240:
+        _COVER.pop(next(iter(_COVER)))
+    _COVER[key] = tex
+    return tex
 
 
 def thumb_widget(path: str | None, size: int = 320, icon: str = "image-off-outline"):
