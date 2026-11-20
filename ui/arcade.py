@@ -612,7 +612,7 @@ _ki_tex = None
 
 
 def ki_texture():
-    """Mancha roja difusa (degradado radial), una sola textura para todas las volutas."""
+    """Mancha difusa (degradado radial), una sola textura para todas las volutas."""
     global _ki_tex
     if _ki_tex is None:
         from kivy.graphics.texture import Texture
@@ -622,16 +622,21 @@ def ki_texture():
             for x in range(n):
                 d = math.hypot((x - n / 2 + .5) / (n / 2), (y - n / 2 + .5) / (n / 2))
                 a = max(0.0, 1 - d) ** 1.8
-                buf += bytes((255, 45, 75, int(255 * a)))
+                buf += bytes((255, 255, 255, int(255 * a)))     # blanca: el color lo pone Color()
         tex = Texture.create(size=(n, n), colorfmt="rgba")
         tex.blit_buffer(bytes(buf), colorfmt="rgba", bufferfmt="ubyte")
         _ki_tex = tex
     return _ki_tex
 
 
+# Volutas del «ki» de IA+: violeta, índigo y magenta (identidad IA: ui/ai_style.py).
+KI_COLORS = [(.69, .30, 1.0), (.24, .35, 1.0), (.88, .25, .98), (.49, .30, 1.0)]
+
+
 class KiButton(ButtonBehavior, Widget):
-    """Botón IA+: el logo con un «ki» rojo que emana del dibujo y se evapora hacia arriba
-    (volutas difusas que suben, crecen y se desvanecen, y un aura que respira). Las
+    """Botón IA+: el logo (con sus colores de siempre) dentro de un aura estelar violeta → azul
+    que gira lenta y respira, con un «ki» violeta que emana del dibujo y se evapora hacia arriba
+    (volutas difusas que suben, crecen y se desvanecen). Las
     instrucciones se crean una vez; cada cuadro solo las mueve (30 por segundo; mientras
     no se ve, ni la pantalla ni el botón, el cuadro no hace nada)."""
     source = StringProperty("")
@@ -645,12 +650,18 @@ class KiButton(ButtonBehavior, Widget):
         rnd = random.Random(3)
         self._wisps = [{"x": rnd.uniform(.12, .78), "ph": i / self.N, "w": rnd.uniform(.32, .46)}
                        for i in range(self.N)]
+        from kivy.core.image import Image as CoreImage
+        from kivy.graphics import PopMatrix, PushMatrix, Rotate
+        from ui import theme
         with self.canvas.before:
             self._aura_col = Color(1, 1, 1, .5)
-            self._aura = Rectangle(texture=tex)
+            PushMatrix()
+            self._rot = Rotate(angle=0)
+            self._aura = Rectangle(texture=CoreImage(theme.AI_AURA, mipmap=True).texture)
+            PopMatrix()
             self._cols, self._rects = [], []
-            for _ in self._wisps:
-                self._cols.append(Color(1, 1, 1, 0))
+            for i, _ in enumerate(self._wisps):
+                self._cols.append(Color(*KI_COLORS[i % len(KI_COLORS)], 0))
                 self._rects.append(Rectangle(texture=tex))
         with self.canvas:
             self._img_col = Color(1, 1, 1, 1)
@@ -686,9 +697,11 @@ class KiButton(ButtonBehavior, Widget):
         self._t += dt
         x, y, w, h = self.x, self.y, self.width, self.height
         beat = .5 + .5 * math.sin(self._t * 2.4)
-        r = w * (.62 + .1 * beat)
+        r = w * (.80 + .05 * beat)                  # el aura: el logo ocupa ~60 % del centro
         self._aura.pos, self._aura.size = (x + w / 2 - r, y + h / 2 - r), (2 * r, 2 * r)
-        self._aura_col.a = .45 + .3 * beat
+        self._rot.origin = (x + w / 2, y + h / 2)
+        self._rot.angle = -self._t * 9              # giro lento: las estrellas «orbitan»
+        self._aura_col.a = .75 + .25 * beat
         life = 2.6
         for wsp, col, rect in zip(self._wisps, self._cols, self._rects):
             k = ((self._t / life) + wsp["ph"]) % 1.0           # 0 → 1 a lo largo de su vida

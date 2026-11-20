@@ -40,12 +40,12 @@ ON_BERRY = "#FFFFFF"      # texto sobre el color de la fruta (píldoras elegidas
 MIND_BG = resource_path("assets", "ui", "mind_bg.jpg")
 MIND_CARD = "#0F1A2CC7"      # vidrio oscuro
 MIND_CARD_2 = "#16233ACC"
-MIND_EDGE = "#4FC3F740"      # borde cian tenue
+MIND_EDGE = "#9E7CFF4D"      # borde violeta tenue (identidad IA: ui/ai_style.py)
 MIND_TEXT = "#DCE6F2"
 MIND_MUTED = "#8C9BB3"
-MIND_ACCENT = "#4FC3F7"      # cian
-MIND_ACCENT_2 = "#7C8CFF"    # índigo
-MIND_INK = "#06121F"         # texto sobre botones cian
+MIND_ACCENT = "#A98BFF"      # violeta (antes cian)
+MIND_ACCENT_2 = "#6F86FF"    # índigo azulado
+MIND_INK = "#12062E"         # texto sobre botones violeta
 MIND_OK = "#34D399"
 MIND_BAD = "#F87171"
 MIND_FIRE = "#FFB454"
@@ -67,6 +67,8 @@ def launch_image() -> str:
 AEON_IA = resource_path("assets", "ui", "aeon_ia.png")
 AEON_IA_GLOW = resource_path("assets", "ui", "aeon_ia_glow.png")
 AEON_IAPLUS = resource_path("assets", "ui", "aeon_iaplus.png")
+AI_AURA = resource_path("assets", "ui", "ai_aura.png")             # aura estelar detrás de IA+
+CYBER_BERRY = resource_path("assets", "ui", "cyber_berry.png")     # Entrenador IA (juegos, modelo, datos)
 WORDMARK = resource_path("assets", "ui", "wordmark.png")
 # Frambuesas ilustradas (vista previa): color = semana con registro; gris = sin registro.
 BERRY_KEYS = ("meeker", "wakefield", "lagorai", "cascade_harvest", "codigo_11", "codigo_24",

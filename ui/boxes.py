@@ -41,6 +41,7 @@ from kivymd.uix.screen import MDScreen
 
 from training_labels import (CLASSES, COLORS, GOAL, NAMES, LabelStore, ai_record, detail_photos, is_confirmed,
                              is_marked, measure_photos, needs_review)
+from ui import theme
 from ui.theme import c
 
 PAGE = 60                     # miniaturas por tanda («Ver más» agrega otras tantas)
@@ -296,6 +297,40 @@ class BoxThumb(ButtonBehavior, Widget):
         self._fit_image()
 
 
+from kivy.uix.behaviors import ButtonBehavior as _BB  # noqa: E402
+from ui.common import NeonCard as _Neon  # noqa: E402
+
+
+class TrainerCard(_BB, _Neon):
+    """Entrada al Entrenador IA (desafíos, juegos, modelo y datos) dentro de IA+: la frambuesa
+    cibernética con aura morada, en una tarjeta de borde neón."""
+
+    def __init__(self, **kw):
+        from kivy.uix.boxlayout import BoxLayout
+        from kivy.uix.image import Image
+        from kivy.uix.label import Label
+        from kivymd.icon_definitions import md_icons
+        from kivymd import fonts_path
+        super().__init__(orientation="horizontal", size_hint_y=None, height=dp(92), padding=(dp(8), dp(6), dp(14), dp(6)),
+                         spacing=dp(10), radius=[dp(22)], md_bg_color=c(theme.MIND_CARD), **kw)
+        self.add_widget(Image(source=theme.CYBER_BERRY, size_hint=(None, 1), width=dp(84), fit_mode="contain",
+                              mipmap=True))
+        col = BoxLayout(orientation="vertical", padding=(0, dp(14)))
+        t = Label(text="Entrenador IA", bold=True, font_size=sp(17), color=c("#F1E9FF"), halign="left",
+                  valign="bottom")
+        d = Label(text="Desafíos, juegos, modelo y datos", font_size=sp(12.5), color=c("#B9A8E8"),
+                  halign="left", valign="top")
+        for w in (t, d):
+            w.bind(size=lambda w, v: setattr(w, "text_size", v))
+            col.add_widget(w)
+        self.add_widget(col)
+        self.add_widget(Label(text=md_icons["chevron-right"], font_name=os.path.join(fonts_path, "materialdesignicons-webfont.ttf"),
+                              font_size=sp(26), color=c("#C9B6FF"), size_hint_x=None, width=dp(26)))
+
+    def on_release(self):
+        app().go("ailab")
+
+
 KV = """
 #:import c ui.theme.c
 <BoxesScreen>:
@@ -386,6 +421,7 @@ class BoxesScreen(MDScreen):
         st = store()
         done = [p for p in self.photos if is_confirmed(st.get(p["name"]))]
         review = [p for p in self.photos if needs_review(st.get(p["name"]))]
+        head.add_widget(TrainerCard())                # el Entrenador IA vive dentro de IA+
         card = Factory.MindCard()
         card.add_widget(Factory.MindSection(text="CAJAS PARA EL DETECTOR · TODOS LOS ENSAYOS"))
         card.add_widget(Factory.MindText(

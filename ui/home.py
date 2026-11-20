@@ -209,8 +209,8 @@ class FloatCrop(ButtonBehavior, FloatLayout):
 
 
 class AiLauncher(ButtonBehavior, FloatLayout):
-    """IA (con brillo neón cian que sube y baja) o IA+ (con ki rojo) en la pantalla
-    principal. Tocarlo pide el PIN y luego el cultivo a entrenar."""
+    """Entrenador IA (frambuesa cibernética con aura morada) o IA+ (su logo dentro de un aura
+    estelar violeta → azul) en la pantalla principal. Tocarlo pide el PIN y luego el cultivo a entrenar."""
     label = StringProperty()
     plus = BooleanProperty(False)
     side = NumericProperty(dp(86))
@@ -228,13 +228,11 @@ class AiLauncher(ButtonBehavior, FloatLayout):
             from ui.arcade import KiButton
             icon = KiButton(source=theme.AEON_IAPLUS, size_hint=(None, None), size=(s, s), pos_hint=top)
             icon.bind(on_release=lambda *_: self.dispatch("on_release"))
-        else:
-            self.glow = Image(source=theme.AEON_IA_GLOW, size_hint=(None, None), size=(s, s),
-                              fit_mode="contain", opacity=self.glow_level, pos_hint=top)
-            self.bind(glow_level=lambda *_: setattr(self.glow, "opacity", self.glow_level))
-            self.add_widget(self.glow)
-            icon = Image(source=theme.AEON_IA, size_hint=(None, None), size=(s, s),
-                         fit_mode="contain", mipmap=True, pos_hint=top)
+        else:                                   # Entrenador IA: la frambuesa cibernética (aura morada)
+            k = 1.3                              # la imagen trae el aura: un poco más grande
+            icon = Image(source=theme.CYBER_BERRY, size_hint=(None, None), size=(s * k, s * k),
+                         fit_mode="contain", mipmap=True, pos_hint={"center_x": .5, "top": 1 + (k - 1) / 2})
+            self.bind(glow_level=lambda *_: setattr(icon, "opacity", .85 + .2 * (self.glow_level - .7) / .25))
         self.add_widget(icon)
 
     def on_release(self):
