@@ -5,8 +5,24 @@ const PYODIDE = window.__PR_PYODIDE__ || "https://cdn.jsdelivr.net/pyodide/v0.26
 let worker = null, seq = 0;
 const jobs = new Map();
 
+// Si el generador se cae (p. ej. sin memoria), los trabajos pendientes terminan con un aviso
+// en vez de quedarse esperando para siempre; el próximo informe parte con uno nuevo.
+function crashed(e) {
+  const msg = "El generador de informes se cerró (poca memoria en el navegador). Cierre otras pestañas y pruebe de nuevo; "
+    + "si se repite, en «Ajustar» desactive «Todas las fotos» o la galería paralela.";
+  console.error("pdf-worker", e);
+  for (const job of jobs.values()) job.reject(new Error(msg));
+  jobs.clear();
+  try { worker?.terminate(); } catch { /* ya cerrado */ }
+  worker = null;
+}
+
 function call(msg, handlers = {}) {
-  worker ||= new Worker("pdf-worker.js", { type: "module" });
+  if (!worker) {
+    worker = new Worker("pdf-worker.js", { type: "module" });
+    worker.onerror = crashed;
+    worker.onmessageerror = crashed;
+  }
   worker.onmessage = ({ data: m }) => {
     const job = jobs.get(m.id);
     if (!job) return;

@@ -2246,9 +2246,14 @@ async function runReport(kind) {
   }
 }
 
+// Fotos para los PDF: reducidas a 1600 px (las originales de varios MB agotaban la memoria del
+// generador en el semanal, el informe con más fotos, y la descarga nunca llegaba).
 async function photoBlob(path) {
   const u = await photoUrl(path);
-  return u ? (await fetch(u)).blob() : null;
+  if (!u) return null;
+  const blob = await (await fetch(u)).blob();
+  if (/png/.test(blob.type) || blob.size < 400 * 1024) return blob;      // dibujos con transparencia o ya livianas
+  try { return (await resize(blob)) || blob; } catch { return blob; }
 }
 
 async function runPdf(kind) {
