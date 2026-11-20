@@ -87,6 +87,14 @@ export function unitMain(v) {
   if (!isUnit(v)) return v.name || "";
   return [v.cultivar.trim(), v.plant_year].filter(Boolean).join(" · ");
 }
+// En los informes: SIEMPRE variedad, equipo y sector (= phenology.unit_report_name).
+export function unitReportName(v) {
+  if (!isUnit(v)) return v.name || "";
+  const parts = [[v.cultivar.trim(), v.plant_year].filter(Boolean).join(" ")];
+  if (v.irrigation) parts.push(`Equipo ${v.irrigation}`);
+  if (v.sector) parts.push(`Sector ${v.sector}`);
+  return parts.filter(Boolean).join(" · ");
+}
 export function unitPlace(v) {
   if (!isUnit(v)) return "";
   const parts = [];

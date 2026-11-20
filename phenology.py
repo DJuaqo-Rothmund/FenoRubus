@@ -527,6 +527,20 @@ def unit_main(v: dict) -> str:
     return " · ".join(str(x) for x in (v["cultivar"].strip(), v.get("plant_year")) if x)
 
 
+def unit_report_name(v: dict) -> str:
+    """Nombre de una unidad de predio en los informes, SIEMPRE con variedad, equipo y sector:
+    «Meeker 2019 · Equipo 1 · Sector 2» (lo que no esté definido se omite)."""
+    if not is_unit(v):
+        return v.get("name") or ""
+    variety = " ".join(str(x) for x in ((v.get("cultivar") or "").strip(), v.get("plant_year")) if x)
+    parts = [variety]
+    if v.get("irrigation"):
+        parts.append(f"Equipo {int(v['irrigation'])}")
+    if v.get("sector"):
+        parts.append(f"Sector {int(v['sector'])}")
+    return " · ".join(p for p in parts if p)
+
+
 def unit_place(v: dict) -> str:
     """Ubicación de la unidad, para ir en letra chica: «Equipo de riego 1 · sector 1»."""
     return ph_unit_place(v.get("sector"), v.get("irrigation")) if is_unit(v) else ""
