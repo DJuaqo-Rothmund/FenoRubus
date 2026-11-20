@@ -68,7 +68,8 @@ AEON_IA = resource_path("assets", "ui", "aeon_ia.png")
 AEON_IA_GLOW = resource_path("assets", "ui", "aeon_ia_glow.png")
 AEON_IAPLUS = resource_path("assets", "ui", "aeon_iaplus.png")
 AI_AURA = resource_path("assets", "ui", "ai_aura.png")             # aura estelar detrás de IA+
-CYBER_BERRY = resource_path("assets", "ui", "cyber_berry.png")     # Entrenador IA (juegos, modelo, datos)
+CYBER_BERRY = resource_path("assets", "ui", "cyber_berry.png")     # Entrenador IA (tarjeta en IA+)
+CYBER_GAMES = resource_path("assets", "ui", "cyber_berry_games.png")   # Juegos IA (inicio, con «GAMES»)
 WORDMARK = resource_path("assets", "ui", "wordmark.png")
 # Frambuesas ilustradas (vista previa): color = semana con registro; gris = sin registro.
 BERRY_KEYS = ("meeker", "wakefield", "lagorai", "cascade_harvest", "codigo_11", "codigo_24",

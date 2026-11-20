@@ -229,8 +229,8 @@ class AiLauncher(ButtonBehavior, FloatLayout):
             icon = KiButton(source=theme.AEON_IAPLUS, size_hint=(None, None), size=(s, s), pos_hint=top)
             icon.bind(on_release=lambda *_: self.dispatch("on_release"))
         else:                                   # Entrenador IA: la frambuesa cibernética (aura morada)
-            k = 1.3                              # la imagen trae el aura: un poco más grande
-            icon = Image(source=theme.CYBER_BERRY, size_hint=(None, None), size=(s * k, s * k),
+            k = 1.35                             # la imagen trae el aura y «GAMES»: más grande
+            icon = Image(source=theme.CYBER_GAMES, size_hint=(None, None), size=(s * k, s * k),
                          fit_mode="contain", mipmap=True, pos_hint={"center_x": .5, "top": 1 + (k - 1) / 2})
             self.bind(glow_level=lambda *_: setattr(icon, "opacity", .85 + .2 * (self.glow_level - .7) / .25))
         self.add_widget(icon)
