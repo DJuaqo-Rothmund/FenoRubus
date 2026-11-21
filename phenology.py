@@ -38,9 +38,15 @@ BBCH_TABLE: list[tuple[int, str | None, str | None]] = [
     (14, "Cuarta hoja desplegada", "Cuarta hoja desplegada"),
     (15, "Quinta hoja desplegada", "Quinta hoja desplegada"),
     (16, "Seis o más hojas desplegadas", "Seis o más hojas desplegadas"),
+    (30, "Inicio del crecimiento de las cañas", None),
     (31, "10 % del crecimiento máximo alcanzado (25 cm)", None),
+    (32, "20 % del crecimiento máximo alcanzado (50 cm)", None),
     (33, "30 % del crecimiento máximo alcanzado (75 cm)", None),
+    (34, "40 % del crecimiento máximo alcanzado (100 cm)", None),
+    (35, "50 % del crecimiento máximo alcanzado (125 cm)", None),
     (36, "60 % del crecimiento máximo alcanzado (150 cm)", None),
+    (37, "70 % del crecimiento máximo alcanzado (175 cm)", None),
+    (38, "80 % del crecimiento máximo alcanzado (200 cm)", None),
     (39, "Longitud máxima alcanzada", None),
     (51, "Se hacen visibles los primeros capullos", "Se hacen visibles los primeros capullos"),
     (53, "Los tallos florales se estiran (capullos juntos)",
@@ -60,15 +66,25 @@ BBCH_TABLE: list[tuple[int, str | None, str | None]] = [
     (67, "La mayoría de las flores sin pétalos", "La mayoría de las flores sin pétalos"),
     (69, "Fin de la floración: la mayoría de las flores sin pétalos y fructifican",
      "Fin de la floración: la mayoría de las flores sin pétalos y fructifican"),
+    (70, "Inicio del desarrollo del fruto: primeros frutos jóvenes visibles", "Inicio del desarrollo del fruto: primeros frutos jóvenes visibles"),
     (71, "10 % de frutos jóvenes visibles", "10 % de frutos jóvenes visibles"),
+    (72, "20 % de frutos jóvenes visibles", "20 % de frutos jóvenes visibles"),
     (73, "30 % de frutos jóvenes visibles", "30 % de frutos jóvenes visibles"),
+    (74, "40 % de frutos jóvenes visibles", "40 % de frutos jóvenes visibles"),
     (75, "50 % de frutos jóvenes visibles", "50 % de frutos jóvenes visibles"),
+    (76, "60 % de frutos jóvenes visibles", "60 % de frutos jóvenes visibles"),
     (77, "70 % de frutos jóvenes visibles", "70 % de frutos jóvenes visibles"),
+    (78, "80 % de frutos jóvenes visibles", "80 % de frutos jóvenes visibles"),
     (79, "Casi todos los frutos jóvenes visibles", "Casi todos los frutos jóvenes visibles"),
+    (80, "Frutos verde intenso con drupéolos hinchados", "Frutos verde intenso con drupéolos hinchados"),
     (81, "Inicio de la coloración de los primeros frutos",
      "Inicio de la coloración de los primeros frutos"),
+    (82, "Frutos verde claro: pierden el verde intenso", "Frutos verde claro: pierden el verde intenso"),
+    (83, "Frutos verde amarillento o blanquecino", "Frutos verde amarillento o blanquecino"),
+    (84, "Primeros frutos rosados (coloración parcial)", "Primeros frutos rosados (coloración parcial)"),
     (85, "Progresión de la coloración de los primeros frutos",
      "Progresión de la coloración de los primeros frutos"),
+    (86, "Frutos rojo claro, casi en madurez de cosecha", "Frutos rojo claro, casi en madurez de cosecha"),
     (89, "Maduración completa: coloración típica de los primeros frutos alcanzada",
      "Maduración completa: coloración típica de los primeros frutos alcanzada"),
     (891, "10 % de los frutos cosechados", "10 % de los frutos cosechados"),
@@ -189,10 +205,10 @@ _PREVIOUS: list[tuple[int, str, str, str]] = [
      "fin caida hojas reposo"),
 ]
 
-BBCH_SCALE_VERSION = 4   # sube cuando cambia la escala base (se actualiza en las bases)
+BBCH_SCALE_VERSION = 5   # sube cuando cambia la escala base (se actualiza en las bases)
 # Estados quitados de la escala base: ya no se ofrecen; los registros guardados conservan
 # su código y su nombre.
-BBCH_REMOVED = {35}
+BBCH_REMOVED: set[int] = set()   # el 35 volvió (primocaña: 50 % del largo)
 # Códigos de la escala base que se corrigieron: antiguo -> nuevo (los registros se pasan solos).
 BBCH_RENAMED = {553: 53}
 

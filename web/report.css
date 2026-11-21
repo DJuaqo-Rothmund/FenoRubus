@@ -168,3 +168,8 @@ h3.sub { margin: 14px 0 6px; }
 .mapbox { margin: 8px 0 12px; } .mapbox svg { width: 100%; height: auto; max-height: 520px; background: var(--paper); border: 1px solid var(--rule, #ddd6c4); border-radius: 8px; }
 .sw, .dot { display: inline-block; width: 10px; height: 10px; border-radius: 2px; vertical-align: middle; margin: 0 2px; } .dot { border-radius: 50%; }
 .nb-day { padding: 12px 14px; margin: 8px 0; display: flex; flex-direction: column; gap: 8px; }
+.primo-line { display: flex; gap: 10px; align-items: center; margin-top: 8px; padding: 8px 10px; border-radius: 10px; background: rgba(168, 24, 74, .1); border-left: 3px solid #a8184a; font-size: 13px; }
+.primo-line img { width: 64px; height: 48px; object-fit: cover; border-radius: 6px; }
+h2.primo-h { color: #a8184a; }
+table.primo-len td { text-align: center; white-space: nowrap; }
+table.primo-len td:first-child { text-align: left; }

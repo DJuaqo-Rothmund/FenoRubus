@@ -1,5 +1,5 @@
 {
- "version": 4,
+ "version": 5,
  "stages": [
   {
    "code": 0,
@@ -86,10 +86,22 @@
    "text": "19"
   },
   {
+   "code": 30,
+   "label": "Cañas anuales: inicio del crecimiento de las cañas",
+   "macro": 3,
+   "text": "30"
+  },
+  {
    "code": 31,
    "label": "Cañas anuales: 10 % del crecimiento máximo alcanzado (25 cm)",
    "macro": 3,
    "text": "31"
+  },
+  {
+   "code": 32,
+   "label": "Cañas anuales: 20 % del crecimiento máximo alcanzado (50 cm)",
+   "macro": 3,
+   "text": "32"
   },
   {
    "code": 33,
@@ -98,10 +110,34 @@
    "text": "33"
   },
   {
+   "code": 34,
+   "label": "Cañas anuales: 40 % del crecimiento máximo alcanzado (100 cm)",
+   "macro": 3,
+   "text": "34"
+  },
+  {
+   "code": 35,
+   "label": "Cañas anuales: 50 % del crecimiento máximo alcanzado (125 cm)",
+   "macro": 3,
+   "text": "35"
+  },
+  {
    "code": 36,
    "label": "Cañas anuales: 60 % del crecimiento máximo alcanzado (150 cm)",
    "macro": 3,
    "text": "36"
+  },
+  {
+   "code": 37,
+   "label": "Cañas anuales: 70 % del crecimiento máximo alcanzado (175 cm)",
+   "macro": 3,
+   "text": "37"
+  },
+  {
+   "code": 38,
+   "label": "Cañas anuales: 80 % del crecimiento máximo alcanzado (200 cm)",
+   "macro": 3,
+   "text": "38"
   },
   {
    "code": 39,
@@ -176,10 +212,22 @@
    "text": "69"
   },
   {
+   "code": 70,
+   "label": "Inicio del desarrollo del fruto: primeros frutos jóvenes visibles",
+   "macro": 7,
+   "text": "70"
+  },
+  {
    "code": 71,
    "label": "10 % de frutos jóvenes visibles",
    "macro": 7,
    "text": "71"
+  },
+  {
+   "code": 72,
+   "label": "20 % de frutos jóvenes visibles",
+   "macro": 7,
+   "text": "72"
   },
   {
    "code": 73,
@@ -188,10 +236,22 @@
    "text": "73"
   },
   {
+   "code": 74,
+   "label": "40 % de frutos jóvenes visibles",
+   "macro": 7,
+   "text": "74"
+  },
+  {
    "code": 75,
    "label": "50 % de frutos jóvenes visibles",
    "macro": 7,
    "text": "75"
+  },
+  {
+   "code": 76,
+   "label": "60 % de frutos jóvenes visibles",
+   "macro": 7,
+   "text": "76"
   },
   {
    "code": 77,
@@ -200,10 +260,22 @@
    "text": "77"
   },
   {
+   "code": 78,
+   "label": "80 % de frutos jóvenes visibles",
+   "macro": 7,
+   "text": "78"
+  },
+  {
    "code": 79,
    "label": "Casi todos los frutos jóvenes visibles",
    "macro": 7,
    "text": "79"
+  },
+  {
+   "code": 80,
+   "label": "Frutos verde intenso con drupéolos hinchados",
+   "macro": 8,
+   "text": "80"
   },
   {
    "code": 81,
@@ -212,10 +284,34 @@
    "text": "81"
   },
   {
+   "code": 82,
+   "label": "Frutos verde claro: pierden el verde intenso",
+   "macro": 8,
+   "text": "82"
+  },
+  {
+   "code": 83,
+   "label": "Frutos verde amarillento o blanquecino",
+   "macro": 8,
+   "text": "83"
+  },
+  {
+   "code": 84,
+   "label": "Primeros frutos rosados (coloración parcial)",
+   "macro": 8,
+   "text": "84"
+  },
+  {
    "code": 85,
    "label": "Progresión de la coloración de los primeros frutos",
    "macro": 8,
    "text": "85"
+  },
+  {
+   "code": 86,
+   "label": "Frutos rojo claro, casi en madurez de cosecha",
+   "macro": 8,
+   "text": "86"
   },
   {
    "code": 87,
@@ -752,10 +848,22 @@
      "text": "19"
     },
     {
+     "code": 30,
+     "label": "Cañas anuales: inicio del crecimiento de las cañas",
+     "macro": 3,
+     "text": "30"
+    },
+    {
      "code": 31,
      "label": "Cañas anuales: 10 % del crecimiento máximo alcanzado (25 cm)",
      "macro": 3,
      "text": "31"
+    },
+    {
+     "code": 32,
+     "label": "Cañas anuales: 20 % del crecimiento máximo alcanzado (50 cm)",
+     "macro": 3,
+     "text": "32"
     },
     {
      "code": 33,
@@ -764,10 +872,34 @@
      "text": "33"
     },
     {
+     "code": 34,
+     "label": "Cañas anuales: 40 % del crecimiento máximo alcanzado (100 cm)",
+     "macro": 3,
+     "text": "34"
+    },
+    {
+     "code": 35,
+     "label": "Cañas anuales: 50 % del crecimiento máximo alcanzado (125 cm)",
+     "macro": 3,
+     "text": "35"
+    },
+    {
      "code": 36,
      "label": "Cañas anuales: 60 % del crecimiento máximo alcanzado (150 cm)",
      "macro": 3,
      "text": "36"
+    },
+    {
+     "code": 37,
+     "label": "Cañas anuales: 70 % del crecimiento máximo alcanzado (175 cm)",
+     "macro": 3,
+     "text": "37"
+    },
+    {
+     "code": 38,
+     "label": "Cañas anuales: 80 % del crecimiento máximo alcanzado (200 cm)",
+     "macro": 3,
+     "text": "38"
     },
     {
      "code": 39,
@@ -842,10 +974,22 @@
      "text": "69"
     },
     {
+     "code": 70,
+     "label": "Inicio del desarrollo del fruto: primeros frutos jóvenes visibles",
+     "macro": 7,
+     "text": "70"
+    },
+    {
      "code": 71,
      "label": "10 % de frutos jóvenes visibles",
      "macro": 7,
      "text": "71"
+    },
+    {
+     "code": 72,
+     "label": "20 % de frutos jóvenes visibles",
+     "macro": 7,
+     "text": "72"
     },
     {
      "code": 73,
@@ -854,10 +998,22 @@
      "text": "73"
     },
     {
+     "code": 74,
+     "label": "40 % de frutos jóvenes visibles",
+     "macro": 7,
+     "text": "74"
+    },
+    {
      "code": 75,
      "label": "50 % de frutos jóvenes visibles",
      "macro": 7,
      "text": "75"
+    },
+    {
+     "code": 76,
+     "label": "60 % de frutos jóvenes visibles",
+     "macro": 7,
+     "text": "76"
     },
     {
      "code": 77,
@@ -866,10 +1022,22 @@
      "text": "77"
     },
     {
+     "code": 78,
+     "label": "80 % de frutos jóvenes visibles",
+     "macro": 7,
+     "text": "78"
+    },
+    {
      "code": 79,
      "label": "Casi todos los frutos jóvenes visibles",
      "macro": 7,
      "text": "79"
+    },
+    {
+     "code": 80,
+     "label": "Frutos verde intenso con drupéolos hinchados",
+     "macro": 8,
+     "text": "80"
     },
     {
      "code": 81,
@@ -878,10 +1046,34 @@
      "text": "81"
     },
     {
+     "code": 82,
+     "label": "Frutos verde claro: pierden el verde intenso",
+     "macro": 8,
+     "text": "82"
+    },
+    {
+     "code": 83,
+     "label": "Frutos verde amarillento o blanquecino",
+     "macro": 8,
+     "text": "83"
+    },
+    {
+     "code": 84,
+     "label": "Primeros frutos rosados (coloración parcial)",
+     "macro": 8,
+     "text": "84"
+    },
+    {
      "code": 85,
      "label": "Progresión de la coloración de los primeros frutos",
      "macro": 8,
      "text": "85"
+    },
+    {
+     "code": 86,
+     "label": "Frutos rojo claro, casi en madurez de cosecha",
+     "macro": 8,
+     "text": "86"
     },
     {
      "code": 87,
