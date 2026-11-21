@@ -126,9 +126,57 @@ def _int_range(lo, hi) -> tuple[int, int]:
     return int(math.floor(lo)), int(math.ceil(hi))
 
 
+class BbchAxis:
+    """Eje vertical BBCH de un gráfico. La frambuesa grafica dos fenologías:
+
+    * floricaña (caña de la temporada pasada): no tiene brotes, el eje salta 30–39;
+    * primocaña (brotes del año): el eje parte en 30.
+    Los códigos no cambian: solo su posición en el eje."""
+
+    def __init__(self, lo: int = 0, hi: int = 99, skip: tuple[int, int] | None = None):
+        self.lo, self.hi, self.skip = lo, hi, skip
+
+    def _p(self, v) -> float:
+        p = ph.scale_pos(v)
+        if self.skip:
+            a, b = self.skip
+            if p >= b + 1:
+                p -= b + 1 - a
+            elif p > a - .5:
+                p = a - .5               # no debería pasar en floricaña: queda en el borde
+        return p
+
+    def frac(self, v) -> float:
+        """0 (abajo) … 1 (arriba)."""
+        lo, hi = self._p(self.lo), self._p(self.hi)
+        return max(0.0, min(1.0, (self._p(v) - lo) / max(1e-6, hi - lo)))
+
+    def bands(self) -> list[tuple[int, int, str]]:
+        return [(lo, hi, n) for lo, hi, n in BANDS
+                if hi >= self.lo and not (self.skip and self.skip[0] <= lo and hi <= self.skip[1])]
+
+    def ticks(self) -> list[int]:
+        base = (0, 50, 60, 70, 80, 99) if self.lo < 30 else (30, 40, 50, 60, 70, 80, 99)
+        return [t for t in base if t >= self.lo]
+
+
+FULL_AXIS = BbchAxis()
+PRIMO_AXIS = BbchAxis(lo=30)
+
+
+def flori_axis() -> BbchAxis:
+    """Eje de la fenología principal: en frambuesa (floricaña) sin el tramo 30–39."""
+    try:
+        import crops
+        rubus = crops.current().id == "frambuesa"
+    except Exception:  # noqa: BLE001
+        rubus = False
+    return BbchAxis(skip=(30, 39)) if rubus else FULL_AXIS
+
+
 def svg_progress(points: list[tuple[int, int]], week_min: int, week_max: int,
                  width: int = 640, height: int = 220, spark: bool = False,
-                 wlabel=None) -> str:
+                 wlabel=None, axis: BbchAxis | None = None) -> str:
     """Curva escalonada BBCH vs semana para una sola serie (una variedad)."""
     if not points:
         return ""
@@ -137,12 +185,13 @@ def svg_progress(points: list[tuple[int, int]], week_min: int, week_max: int,
     pad_l, pad_r, pad_t, pad_b = (4, 4, 4, 4) if spark else (40, 14, 12, 28)
     w, h = width - pad_l - pad_r, height - pad_t - pad_b
     span = max(1, week_max - week_min)
+    axis = axis or flori_axis()
 
     def x(week):
         return pad_l + (week - week_min) / span * w
 
     def y(code):
-        return pad_t + (1 - ph.bbch_value(code) / 99.0) * h
+        return pad_t + (1 - axis.frac(code)) * h
 
     pts = sorted(points)
     path = f"M{x(pts[0][0]):.1f},{y(pts[0][1]):.1f}"
@@ -151,7 +200,8 @@ def svg_progress(points: list[tuple[int, int]], week_min: int, week_max: int,
     parts = [f'<svg class="chart{" spark" if spark else ""}" viewBox="0 0 {width} {height}" '
              f'role="img" aria-label="Progresión BBCH por semana">']
     if not spark:
-        for code, name in ((0, "0"), (50, "50"), (60, "60"), (70, "70"), (80, "80"), (99, "99")):
+        for code in axis.ticks():
+            name = str(code)
             parts.append(f'<line class="grid" x1="{pad_l}" x2="{width - pad_r}" '
                          f'y1="{y(code):.1f}" y2="{y(code):.1f}"/>'
                          f'<text class="tick" x="{pad_l - 6}" y="{y(code) + 4:.1f}" '
@@ -183,7 +233,7 @@ MAX_SELECTED = 4
 
 
 def compare_chart(series: list[dict], week_min: int, week_max: int,
-                  selected_ids: list[int], wlabel=None) -> dict | None:
+                  selected_ids: list[int], wlabel=None, axis: BbchAxis | None = None) -> dict | None:
     """
     series: [{"id", "name", "points": [(semana, bbch), ...]}]. Todas las variedades se
     dibujan como contexto gris; las seleccionadas (máx. 4) en color con etiqueta
@@ -203,21 +253,29 @@ def compare_chart(series: list[dict], week_min: int, week_max: int,
     def x(wk):
         return pl + (wk - week_min) / (week_max - week_min) * w
 
+    axis = axis or flori_axis()
+
     def y(code):   # código BBCH o promedio de repeticiones (float)
-        return pt + (1 - ph.scale_pos(code) / 99.0) * h
+        return pt + (1 - axis.frac(code)) * h
 
     out = [f'<svg class="cmp" viewBox="0 0 {W} {H}" role="img" '
            f'aria-label="Estado BBCH por semana, comparación entre variedades">']
-    for i, (lo, hi, name) in enumerate(BANDS):
-        out.append(f'<rect class="band{" alt" if i % 2 else ""}" x="{pl}" y="{y(hi + .5):.1f}" '
-                   f'width="{w}" height="{y(lo - .5) - y(hi + .5):.1f}"/>'
-                   f'<text class="band-l" x="{pl - 8}" y="{(y(lo) + y(hi)) / 2 + 4:.1f}" '
+    for i, (lo, hi, name) in enumerate(axis.bands()):
+        top, bot = y(min(hi + .5, axis.hi)), y(max(lo - .5, axis.lo))
+        out.append(f'<rect class="band{" alt" if i % 2 else ""}" x="{pl}" y="{top:.1f}" '
+                   f'width="{w}" height="{bot - top:.1f}"/>'
+                   f'<text class="band-l" x="{pl - 8}" y="{(top + bot) / 2 + 4:.1f}" '
                    f'text-anchor="end">{name}</text>')
     step = 1 if week_max - week_min <= 14 else (2 if week_max - week_min <= 28 else 4)
     for wk in range(week_min, week_max + 1, step):
         out.append(f'<text class="tick" x="{x(wk):.1f}" y="{H - 10}" text-anchor="middle">S{wlabel(wk)}</text>')
     sel = [i for i in selected_ids if any(s_["id"] == i for s_ in series)][:MAX_SELECTED]
     ordered = sorted(series, key=lambda s_: s_["id"] in sel)  # seleccionadas al frente
+    # Etiquetas del final sin encimarse: se separan hacia abajo (14 px) en orden de altura.
+    end_y, last = {}, -1e9
+    for s_ in sorted(series, key=lambda s_: y(sorted(s_["points"])[-1][1])):
+        ly = max(y(sorted(s_["points"])[-1][1]) + 4, last + 14)
+        end_y[s_["id"]], last = ly, ly
     for s_ in ordered:
         pts = sorted(s_["points"])
         on = s_["id"] in sel
@@ -231,7 +289,7 @@ def compare_chart(series: list[dict], week_min: int, week_max: int,
                        f'{ph.bbch_label(c) if isinstance(c, int) else "BBCH medio " + f"{c:.1f}".replace(".", ",")}'
                        f'</title></circle>')
         lw, lc = pts[-1]
-        out.append(f'<text class="end" x="{x(lw) + 8:.1f}" y="{y(lc) + 4:.1f}">{escape(s_["name"])}</text></g>')
+        out.append(f'<text class="end" x="{x(lw) + 8:.1f}" y="{end_y[s_["id"]]:.1f}">{escape(s_["name"])}</text></g>')
     out.append(f'<line class="xhair" x1="0" x2="0" y1="{pt}" y2="{pt + h}"/>'
                f'<rect class="hit" x="{pl}" y="{pt}" width="{w}" height="{h}"/></svg>')
     data = {str(s_["id"]): {"name": s_["name"], "pts": {str(wk): c for wk, c in s_["points"]}}
@@ -246,7 +304,7 @@ def compare_chart(series: list[dict], week_min: int, week_max: int,
                                            for s_ in series],
             # Datos sin dibujar: el informe PDF traza su propio gráfico con ellos.
             "raw": {"series": series, "sel": sel, "wmin": week_min, "wmax": week_max,
-                    "labels": labels},
+                    "labels": labels, "axis": axis},
             "json": json.dumps({"series": data, "wmin": week_min, "wmax": week_max,
                                 "labels": {str(n): v for n, v in labels.items()},
                                 "pl": pl, "w": w, "vw": W}, ensure_ascii=False).replace("</", "<\\/")}
@@ -547,6 +605,38 @@ class ReportGenerator:
         return compare_chart(series, weeks[0]["week_number"], weeks[-1]["week_number"], sel,
                              self._wlabel(weeks[0]["season"]))
 
+    def _primo_ctx(self, season: int, weeks: list[dict], variety_id: int | None = None) -> dict | None:
+        """Primocaña (opcional, brotes del año) en esas semanas: gráfico con eje desde BBCH 30 y
+        tabla de largos (n, promedio y máximo por semana; máximo de la temporada). None si no hay."""
+        if not weeks:
+            return None
+        nums = {w["week_number"] for w in weeks}
+        wmin, wmax = weeks[0]["week_number"], weeks[-1]["week_number"]
+        units = [v for v in self.db.pheno_units() if variety_id is None or v["id"] == variety_id]
+        codes = self.db.primo_series(season)
+        lens = self.db.primo_length_series(season)
+        season_max = self.db.primo_max_lengths(season)
+        series = [{"id": v["id"], "name": v["name"],
+                   "points": [(wk, c) for wk, c in codes.get(v["id"], []) if wk in nums]} for v in units]
+        series = [s_ for s_ in series if s_["points"]]
+        lweeks = [w for w in weeks if any(x["week"] == w["week_number"] for v in units for x in lens.get(v["id"], []))]
+        rows = []
+        for v in units:
+            by = {x["week"]: x for x in lens.get(v["id"], [])}
+            cells = [by.get(w["week_number"]) for w in lweeks]
+            if any(cells):
+                rows.append({"variety": v, "cells": cells, "season_max": season_max.get(v["id"])})
+        if not series and not rows:
+            return None
+        wl = self._wlabel(season)
+        cmp = compare_chart(series, wmin, wmax, [s_["id"] for s_ in series][:MAX_SELECTED], wl,
+                            axis=PRIMO_AXIS) if series else None
+        if cmp:
+            cmp["raw"]["note"] = ("Primocaña (brotes del año): eje desde BBCH 30. En color las primeras "
+                                  f"{MAX_SELECTED} variedades; en gris el resto." if len(series) > MAX_SELECTED
+                                  else "Primocaña (brotes del año): eje desde BBCH 30.")
+        return {"compare": cmp, "weeks": lweeks, "rows": rows}
+
     def _wlabel(self, season: int):
         """n.º de semana de muestreo -> n.º de semana del año (rótulos de los gráficos)."""
         start = self.db.season_start(season)
@@ -604,6 +694,13 @@ class ReportGenerator:
                     "n_photos": len(row["photos"]) + (len([p for p in self.db.list_photos(obs["id"])
                                                            if not p["is_primary"]]) if obs else 0),
                     "missing": _missing_items(obs, row["photos"])}
+            pr = self.db.get_primo(row["variety"]["id"], week_id)
+            if pr:
+                pph = {p_["kind"]: p_ for p_ in self.db.list_primo_photos(pr["id"]) if p_["is_primary"]}
+                card["primo"] = {"code": pr["bbch_code"], "notes": pr["notes"] or "",
+                                 "stats": self.db.length_stats(self.db.primo_lengths(pr)),
+                                 "src": images.src(pph["canopy"]["path"], 480)
+                                 if show_photos and "canopy" in pph else None}
             card["raw_notes"] = card["notes"]      # para «Importar informes», aunque no se muestren
             if "notes" not in sec:
                 card["notes"] = ""
@@ -666,7 +763,8 @@ class ReportGenerator:
             + ("-extra" if ph.is_extra(week) else ""),
             "semanal", title, images, package, week=week, cards=cards, sec=sec, photo_mode=cfg["photo_mode"],
             photo_size=cfg["photo_size"], prev=prev, change=change, missing=missing, summary=summary,
-            evo=evo, trial=trial if trial and "treatments" in sec else None,
+            evo=evo, primo=self._primo_ctx(season, upto) if upto else None,
+            trial=trial if trial and "treatments" in sec else None,
             parcels=trial if trial and "parcels" in sec and not trial.get("unified") else None,
             progress=self._progress(season, upto) if "progress" in sec and upto else [],
             scout=scout, yields=yields if "yield" in sec else None, notebook=notebook, smap=smap,
@@ -965,6 +1063,7 @@ class ReportGenerator:
         return self._render(
             "period.html", f"periodo_{season}_S{int(ph.week_of_year(weeks[0])):02d}-S{int(ph.week_of_year(weeks[-1])):02d}", "periodo",
             title, images, package, weeks=weeks, heat=heat, strips=strips, compare=self._compare(heat, weeks),
+            primo=self._primo_ctx(season, weeks),
             progress=self._progress(season, weeks),
             subtitle=f"Del {ph.format_date_es(start, False)} al {ph.format_date_es(end)} · "
                      f"{ph.season_title(season)}")
@@ -1011,6 +1110,7 @@ class ReportGenerator:
             "variety.html", f"variedad_{slugify(v['name'])}_{season}", "variedad", title,
             images, package, variety=v, timeline=timeline, chart=chart, metrics=metrics,
             compare=compare, attachments=attachments,
+            primo=self._primo_ctx(season, all_weeks, variety_id),
             measures=self._measures(images, season=season, variety_id=variety_id),
             custom=custom, milestones=milestones,
             subtitle=f"Timeline longitudinal · {ph.season_title(season)}")
@@ -1031,6 +1131,7 @@ class ReportGenerator:
         title = "Matriz comparativa inter-varietal"
         return self._render(
             "matrix.html", f"matriz_{season}", "matriz", title, images, package, **ctx,
+            primo=self._primo_ctx(season, weeks),
             progress=self._progress(season, weeks),
             subtitle=f"Avance fenológico relativo · {ph.season_title(season)} · "
                      f"Semanas {ph.week_of_year(weeks[0])}–{ph.week_of_year(weeks[-1])}",

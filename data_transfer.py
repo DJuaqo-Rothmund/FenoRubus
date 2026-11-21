@@ -67,6 +67,7 @@ def _checkpoint_copy(db, dest: str) -> str:
 # ------------------------------------------------------------------ respaldo
 # Otras imágenes que viajan en la copia: (tabla, clave del manifiesto, carpeta en el ZIP)
 _EXTRA_IMAGES = (("variety_attachments", "attachments", "adjuntos"),
+                 ("primo_photos", "primo", "primocanas"),
                  ("measure_entries", "measures", "mediciones"),
                  ("notebook_photos", "notebook", "cuaderno"))
 

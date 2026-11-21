@@ -1,0 +1,25 @@
+{# Primocaña (opcional): gráfico con eje desde BBCH 30 y largos medidos. primo = reporter._primo_ctx #}
+{% from "_macros.html" import compare_chart %}
+{% if primo %}
+<h2 class="primo-h">Primocaña · brotes del año</h2>
+<p class="lead">Registro opcional, aparte de la floricaña (caña de la temporada pasada). Escala BBCH desde 30.</p>
+{% if primo.compare %}{{ compare_chart(primo.compare, primo_uid or "cmp-primo") }}{% endif %}
+{% if primo.rows %}
+<h3 style="margin-top:14px">Largo de primocañas (cm)</h3>
+<p class="small muted">Promedio y máximo de las primocañas medidas cada semana (n = cantidad medida).</p>
+<div class="scroll-x">
+<table class="primo-len">
+  <thead><tr><th>Variedad</th>{% for w in primo.weeks %}<th>{{ w|wks }}</th>{% endfor %}<th>Máximo temporada</th></tr></thead>
+  <tbody>
+  {% for r in primo.rows %}
+  <tr><td><strong>{{ r.variety.name }}</strong></td>
+    {% for c in r.cells %}<td>{% if c %}<strong>{{ c.mean|num }}</strong> / {{ c.max|num }}<br><span class="muted small">n = {{ c.n }}</span>{% else %}<span class="muted">—</span>{% endif %}</td>{% endfor %}
+    <td><strong>{% if r.season_max %}{{ r.season_max|num }} cm{% else %}—{% endif %}</strong></td>
+  </tr>
+  {% endfor %}
+  </tbody>
+</table>
+</div>
+<p class="small muted">Cada celda: promedio / máximo (cm).</p>
+{% endif %}
+{% endif %}

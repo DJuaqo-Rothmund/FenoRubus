@@ -124,6 +124,19 @@ class ObservationScreen(MDScreen):
         self.suggestion = None
         self._show_ai_from_obs()
         self.refresh_location()
+        # Primocaña (opcional, solo frambuesa): su sección bajo el estado fenológico.
+        rubus = _crop().id == "frambuesa"
+        self.ids.flori_label.text = "FLORICAÑA · caña lignificada de la temporada pasada" if rubus else ""
+        if not rubus:
+            if getattr(self, "_primo", None) is not None:
+                self.ids.primo_box.remove_widget(self._primo)
+                self._primo = None
+            return
+        if getattr(self, "_primo", None) is None:
+            from ui.primo_ui import PrimoSection
+            self._primo = PrimoSection(self)
+            self.ids.primo_box.add_widget(self._primo)
+        self._primo.load()
 
     # ------------------------------------------------ ubicación (opcional)
     GPS_SOURCES = {"gps": "GPS del teléfono", "foto": "desde la foto", "mapa": "marcada en el mapa"}
@@ -498,6 +511,9 @@ class ObservationScreen(MDScreen):
     @perf.timed("registro.guardar")
     def save(self):
         a = app()
+        primo = getattr(self, "_primo", None)
+        if primo is not None and not primo.save():
+            return
         text = self.ids.bbch.text.strip()
         code = ph.parse_bbch_code(text)
         if text and code is None:

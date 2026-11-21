@@ -384,6 +384,73 @@ export function photoChange(state, obsUid, kind, relPath) {
     data: { observation_id: obsUid, kind, path: relPath, source: "web", captured_at: ts, is_primary: has ? 0 : 1 } };
 }
 
+// ------------------------------------------------------------------ primocaña (opcional)
+// Brotes del año desde BBCH 30, en tablas propias (primo_obs / primo_photos = database.py). No
+// cuenta para el avance de la semana: la floricaña (observations) es la obligatoria.
+export const PRIMO_MIN = 30;
+export function primoFor(state, varietyUid, weekStart) {
+  return rows(state, "primo_obs").find((o) => o.variety_id === varietyUid && o.week_id === weekStart) || null;
+}
+export function primoPhotos(state, primoUid) {
+  return rows(state, "primo_photos").filter((p) => p.primo_id === primoUid)
+    .sort((a, b) => (b.is_primary || 0) - (a.is_primary || 0) || (a.captured_at || "").localeCompare(b.captured_at || ""));
+}
+export function primoLengths(p) {                      // = Database.primo_lengths
+  try { return (JSON.parse(p?.lengths || "[]") || []).filter((x) => x != null).map(Number); } catch { return []; }
+}
+export function parseLengths(text) {                   // = Database.parse_lengths («120, 135 98,5»)
+  const t = String(text || "").replace(/[;\n]/g, " ").replace(/,\s+/g, " ");
+  const out = [];
+  for (let tok of t.split(/\s+/)) {
+    tok = tok.replace(/^,+|,+$/g, "").replace(",", ".");
+    if (!tok) continue;
+    const v = Number(tok);
+    if (!Number.isFinite(v)) throw new Error("Solo números (cm), separados por espacio.");
+    if (!(v > 0 && v < 2000)) throw new Error(`Largo fuera de rango: ${tok} cm`);
+    out.push(v);
+  }
+  return out;
+}
+export function lengthStats(vals) {
+  if (!vals.length) return null;
+  return { n: vals.length, mean: vals.reduce((a, b) => a + b, 0) / vals.length, max: Math.max(...vals), min: Math.min(...vals) };
+}
+// Largo máximo de la temporada de esa variedad/parcela (= Database.primo_max_lengths).
+export function primoSeasonMax(state, varietyUid, season) {
+  let best = null;
+  for (const p of rows(state, "primo_obs")) {
+    if (p.variety_id !== varietyUid || seasonOf(parseDate(p.week_id)) !== season) continue;
+    for (const v of primoLengths(p)) best = best === null ? v : Math.max(best, v);
+  }
+  return best;
+}
+export function primoChanges(state, varietyUid, weekStart, fields) {
+  const ts = nowTs();
+  const changes = [];
+  if (!weekStarts(state).has(weekStart)) {
+    changes.push({ entity: "sampling_weeks", uid: weekStart, ts, deleted: 0,
+      data: { season: seasonOf(parseDate(weekStart)), week_number: 0, start_date: weekStart, label: weekLabel(weekStart), skipped: 0 } });
+  }
+  const cur = primoFor(state, varietyUid, weekStart);
+  const uid = cur ? cur.uid : newUid();
+  const base = cur ? { ...cur } : { variety_id: varietyUid, week_id: weekStart, bbch_code: null, bbch_label: "",
+    ai_code: null, ai_confidence: null, ai_detail: "", notes: "", lengths: "", created_at: ts };
+  delete base.uid;
+  changes.push({ entity: "primo_obs", uid, ts, deleted: 0, data: { ...base, ...fields, updated_at: ts } });
+  return { uid, changes };
+}
+export function primoDeleteChanges(state, primoUid) {
+  const ts = nowTs();
+  return [...primoPhotos(state, primoUid).map((p) => ({ entity: "primo_photos", uid: p.uid, ts, deleted: 1 })),
+    { entity: "primo_obs", uid: primoUid, ts, deleted: 1 }];
+}
+export function primoPhotoChange(state, primoUid, kind, relPath) {
+  const has = primoPhotos(state, primoUid).some((p) => p.kind === kind && p.is_primary);
+  const ts = nowTs();
+  return { entity: "primo_photos", uid: newUid(), ts, deleted: 0,
+    data: { primo_id: primoUid, kind, path: relPath, source: "web", captured_at: ts, is_primary: has ? 0 : 1 } };
+}
+
 // Foto principal de su tipo en el registro (= Database.set_primary).
 export function photoPrimaryChanges(state, photoUid) {
   const all = rows(state, "photos");

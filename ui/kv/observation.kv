@@ -93,6 +93,9 @@
                 spacing: dp(12)
                 Muted:
                     id: week_caption
+                SectionLabel:
+                    id: flori_label
+                    text: "FLORICAÑA · caña lignificada de la temporada pasada"
                 MDGridLayout:
                     cols: 2
                     spacing: dp(10)
@@ -187,6 +190,11 @@
                         max_height: dp(180)
                     Muted:
                         id: stamp
+                MDBoxLayout:
+                    # Primocaña (opcional): «＋ Agregar primocaña» o su tarjeta (ui/primo_ui.py)
+                    id: primo_box
+                    orientation: "vertical"
+                    adaptive_height: True
                 PaperCard:
                     SectionLabel:
                         text: "UBICACIÓN DE LA MUESTRA (OPCIONAL)"

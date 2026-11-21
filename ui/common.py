@@ -478,7 +478,8 @@ class ScaleRow(ButtonBehavior, GlassCard):
     current = BooleanProperty(False)
 
 
-def bbch_dialog(title: str, db, callback, extra: list | None = None, current: int | None = None):
+def bbch_dialog(title: str, db, callback, extra: list | None = None, current: int | None = None,
+                min_code: int | None = None):
     """Escala BBCH casi a todo el ancho, agrupada por macroestadio en desplegables
     (se abre el del estado actual). Cada estado muestra su texto completo
     (cañas anuales y brotes laterales en líneas separadas)."""
@@ -490,6 +491,8 @@ def bbch_dialog(title: str, db, callback, extra: list | None = None, current: in
     from kivy.utils import escape_markup
     dialog = None
     stages = db.list_bbch()
+    if min_code is not None:                   # primocaña: la escala parte en 30
+        stages = [r for r in stages if r["code"] >= min_code]
     groups: dict[int, list] = {}
     for r in stages:
         groups.setdefault(ph.macro_of(r["code"]), []).append(r)

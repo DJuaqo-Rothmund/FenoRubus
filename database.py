@@ -177,6 +177,34 @@ CREATE TABLE IF NOT EXISTS photos (
     is_primary      INTEGER NOT NULL DEFAULT 0   -- foto que aparece en los informes
 );
 
+-- Primocañas (brotes del año, desde BBCH 30): seguimiento OPCIONAL, aparte de la fenología
+-- de siempre (floricañas). Tablas propias: una app que no las conoce simplemente las ignora.
+CREATE TABLE IF NOT EXISTS primo_obs (
+    id             INTEGER PRIMARY KEY AUTOINCREMENT,
+    variety_id     INTEGER NOT NULL REFERENCES varieties(id) ON DELETE CASCADE,
+    week_id        INTEGER NOT NULL REFERENCES sampling_weeks(id) ON DELETE CASCADE,
+    bbch_code      INTEGER,
+    bbch_label     TEXT DEFAULT '',
+    ai_code        INTEGER,
+    ai_confidence  REAL,
+    ai_detail      TEXT DEFAULT '',
+    notes          TEXT DEFAULT '',
+    lengths        TEXT DEFAULT '',     -- largos medidos (cm), JSON [120, 135.5, …]
+    created_at     TEXT NOT NULL,
+    updated_at     TEXT NOT NULL,
+    UNIQUE (variety_id, week_id)
+);
+
+CREATE TABLE IF NOT EXISTS primo_photos (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    primo_id        INTEGER NOT NULL REFERENCES primo_obs(id) ON DELETE CASCADE,
+    kind            TEXT NOT NULL CHECK (kind IN ('canopy', 'detail')),
+    path            TEXT NOT NULL,
+    source          TEXT DEFAULT 'camera',
+    captured_at     TEXT NOT NULL,
+    is_primary      INTEGER NOT NULL DEFAULT 0
+);
+
 CREATE TABLE IF NOT EXISTS drive_queue (
     id           INTEGER PRIMARY KEY AUTOINCREMENT,
     photo_id     INTEGER REFERENCES photos(id) ON DELETE SET NULL,
@@ -395,6 +423,7 @@ class Database:
                          ("gps_accuracy", "REAL"), ("gps_source", "TEXT")],
         "sampling_weeks": [("skipped", "INTEGER NOT NULL DEFAULT 0")],   # semana no muestreada
         "variety_attachments": [("week_id", "INTEGER")],                # foto adjunta semanal
+        "primo_obs": [("lengths", "TEXT DEFAULT ''")],                  # largos de primocañas (cm)
         "ai_references": [("workspace", "TEXT")],                       # ensayo de la foto
         "treatments": [("cultivar", "TEXT")],                           # variedad del tratamiento
         "notebook_entries": [("ink", "TEXT NOT NULL DEFAULT ''"),        # escritura a mano
@@ -2309,6 +2338,137 @@ class Database:
                  json.dumps({k: v for k, v in sets.items() if k != "ai_detail"},
                             ensure_ascii=False))
 
+    # ------------------------------------------------------------ primocañas (opcional)
+    PRIMO_MIN = 30         # la escala de primocaña parte en BBCH 30
+
+    def get_primo(self, variety_id: int, week_id: int) -> dict | None:
+        return self.query_one("SELECT * FROM primo_obs WHERE variety_id=? AND week_id=?", (variety_id, week_id))
+
+    def get_or_create_primo(self, variety_id: int, week_id: int) -> dict:
+        got = self.get_primo(variety_id, week_id)
+        if got:
+            return got
+        now = _now()
+        self.execute("INSERT OR IGNORE INTO primo_obs(variety_id, week_id, created_at, updated_at) VALUES (?,?,?,?)",
+                     (variety_id, week_id, now, now))
+        return self.get_primo(variety_id, week_id)
+
+    def update_primo(self, primo_id: int, **fields: Any) -> None:
+        allowed = {"bbch_code", "bbch_label", "ai_code", "ai_confidence", "ai_detail", "notes", "lengths"}
+        sets = {k: v for k, v in fields.items() if k in allowed}
+        if "lengths" in sets and not isinstance(sets["lengths"], str):
+            sets["lengths"] = json.dumps([float(x) for x in sets["lengths"] or []]) if sets["lengths"] else ""
+        if not sets:
+            return
+        cols = ", ".join(f"{k}=?" for k in sets)
+        self.execute(f"UPDATE primo_obs SET {cols}, updated_at=? WHERE id=?", (*sets.values(), _now(), primo_id))
+
+    def delete_primo(self, primo_id: int) -> None:
+        """Quita la primocaña de esa semana (sus fotos quedan en el teléfono y en Drive)."""
+        self.execute("DELETE FROM primo_photos WHERE primo_id=?", (primo_id,))
+        self.execute("DELETE FROM primo_obs WHERE id=?", (primo_id,))
+
+    def primo_is_empty(self, primo_id: int) -> bool:
+        p = self.query_one("SELECT * FROM primo_obs WHERE id=?", (primo_id,))
+        if not p:
+            return True
+        has_photo = self.query_one("SELECT 1 FROM primo_photos WHERE primo_id=?", (primo_id,))
+        return (p["bbch_code"] is None and not (p["notes"] or "").strip() and not has_photo
+                and not self.primo_lengths(p))
+
+    @staticmethod
+    def primo_lengths(p: dict | None) -> list[float]:
+        """Largos medidos (cm) de una primocaña."""
+        try:
+            got = json.loads((p or {}).get("lengths") or "[]")
+            return [float(x) for x in got if x is not None]
+        except (TypeError, ValueError):
+            return []
+
+    @staticmethod
+    def parse_lengths(text: str) -> list[float]:
+        """«120, 135 98,5» -> [120, 135, 98.5]: separados por espacio, «;» o «, »; la coma
+        pegada a un número es decimal. ValueError si algo no es un número."""
+        import re as _re
+        t = (text or "").replace(";", " ").replace("\n", " ")
+        t = _re.sub(r",\s+", " ", t)
+        out = []
+        for tok in t.split():
+            tok = tok.strip(",").replace(",", ".")
+            if not tok:
+                continue
+            v = float(tok)
+            if not 0 < v < 2000:
+                raise ValueError(f"Largo fuera de rango: {tok} cm")
+            out.append(v)
+        return out
+
+    @staticmethod
+    def length_stats(vals: list[float]) -> dict | None:
+        if not vals:
+            return None
+        return {"n": len(vals), "mean": sum(vals) / len(vals), "max": max(vals), "min": min(vals)}
+
+    def primo_length_series(self, season: int) -> dict[int, list[dict]]:
+        """{variety_id: [{week, start, n, mean, max}…]} de la temporada (gráfico y tabla de largos)."""
+        out: dict[int, list] = {}
+        for r in self.query("SELECT p.variety_id, p.lengths, w.week_number, w.start_date FROM primo_obs p "
+                            "JOIN sampling_weeks w ON w.id = p.week_id WHERE w.season=? AND COALESCE(p.lengths, '') <> '' "
+                            "ORDER BY w.start_date", (season,)):
+            st = self.length_stats(self.primo_lengths(r))
+            if st:
+                out.setdefault(r["variety_id"], []).append({"week": r["week_number"], "start": r["start_date"], **st})
+        return out
+
+    def primo_max_lengths(self, season: int) -> dict[int, float]:
+        """Largo máximo de primocaña por variedad/parcela en la temporada."""
+        return {vid: max(x["max"] for x in rows) for vid, rows in self.primo_length_series(season).items()}
+
+    def list_primo_photos(self, primo_id: int, kind: str | None = None) -> list[dict]:
+        sql, params = "SELECT * FROM primo_photos WHERE primo_id=?", (primo_id,)
+        if kind:
+            sql += " AND kind=?"
+            params += (kind,)
+        return self.query(sql + " ORDER BY is_primary DESC, captured_at, id", params)
+
+    def add_primo_photo(self, primo_id: int, kind: str, path: str, source: str = "camera") -> int:
+        with self._lock:
+            has_primary = self.query_one("SELECT 1 FROM primo_photos WHERE primo_id=? AND kind=? AND is_primary=1",
+                                         (primo_id, kind))
+            cur = self.execute("INSERT INTO primo_photos(primo_id, kind, path, source, captured_at, is_primary) "
+                               "VALUES (?,?,?,?,?,?)", (primo_id, kind, path, source, _now(), 0 if has_primary else 1))
+        return cur.lastrowid
+
+    def set_primo_primary(self, photo_id: int) -> None:
+        p = self.query_one("SELECT primo_id, kind FROM primo_photos WHERE id=?", (photo_id,))
+        if not p:
+            return
+        self.execute("UPDATE primo_photos SET is_primary=0 WHERE primo_id=? AND kind=?", (p["primo_id"], p["kind"]))
+        self.execute("UPDATE primo_photos SET is_primary=1 WHERE id=?", (photo_id,))
+
+    def delete_primo_photo(self, photo_id: int) -> None:
+        p = self.query_one("SELECT * FROM primo_photos WHERE id=?", (photo_id,))
+        self.execute("DELETE FROM primo_photos WHERE id=?", (photo_id,))
+        if p and p["is_primary"]:
+            nxt = self.query_one("SELECT id FROM primo_photos WHERE primo_id=? AND kind=? "
+                                 "ORDER BY captured_at DESC, id DESC LIMIT 1", (p["primo_id"], p["kind"]))
+            if nxt:
+                self.set_primo_primary(nxt["id"])
+
+    def primo_week_codes(self, week_id: int) -> dict[int, int]:
+        """{variety_id: BBCH de primocaña} de esa semana (las insignias «P 35» de la lista)."""
+        return {r["variety_id"]: r["bbch_code"] for r in self.query(
+            "SELECT variety_id, bbch_code FROM primo_obs WHERE week_id=? AND bbch_code IS NOT NULL", (week_id,))}
+
+    def primo_series(self, season: int) -> dict[int, list[tuple[int, int]]]:
+        """{variety_id: [(n.º de semana, BBCH)…]} de la temporada (gráficos de primocaña)."""
+        out: dict[int, list] = {}
+        for r in self.query("SELECT p.variety_id, w.week_number, p.bbch_code FROM primo_obs p "
+                            "JOIN sampling_weeks w ON w.id = p.week_id WHERE w.season=? AND p.bbch_code IS NOT NULL "
+                            "ORDER BY w.start_date", (season,)):
+            out.setdefault(r["variety_id"], []).append((r["week_number"], r["bbch_code"]))
+        return out
+
     def previous_observation(self, variety_id: int, season: int, week_number: int) -> dict | None:
         """Última observación con BBCH de la variedad antes de `week_number`."""
         return self.query_one(
@@ -2373,7 +2533,7 @@ class Database:
         bajarlas de Drive (sincronización). Devuelve cuántas faltan."""
         n = 0
         has = self.query_one("SELECT 1 FROM sqlite_master WHERE type='table' AND name='sync_missing'")
-        for r in self.query("SELECT path FROM photos"):
+        for r in self.query("SELECT path FROM photos UNION ALL SELECT path FROM primo_photos"):
             if r["path"] and not os.path.exists(r["path"]):
                 n += 1
                 if has:

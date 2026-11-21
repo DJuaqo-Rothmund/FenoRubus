@@ -362,13 +362,16 @@ class Report(PDFDoc):
         def X(wk):
             return x0 + (wk - wmin) / (wmax - wmin) * w
 
-        def Y(code):   # código BBCH o promedio de repeticiones (float)
-            return y0 + (1 - ph.scale_pos(code) / 99) * hh
+        from reporter import flori_axis
+        axis = raw.get("axis") or flori_axis()
 
-        from reporter import BANDS
-        for i, (lo, hi, name) in enumerate(BANDS):
-            self.rect(x0, Y(hi + .5), w, Y(lo - .5) - Y(hi + .5), fill="#f4f2ea" if i % 2 else "#faf8f2")
-            self.text(x0 - 4, (Y(lo) + Y(hi)) / 2 + 2.5, name, 6, False, MUTED, "right")
+        def Y(code):   # código BBCH o promedio de repeticiones (float)
+            return y0 + (1 - axis.frac(code)) * hh
+
+        for i, (lo, hi, name) in enumerate(axis.bands()):
+            top, bot = Y(min(hi + .5, axis.hi)), Y(max(lo - .5, axis.lo))
+            self.rect(x0, top, w, bot - top, fill="#f4f2ea" if i % 2 else "#faf8f2")
+            self.text(x0 - 4, (top + bot) / 2 + 2.5, name, 6, False, MUTED, "right")
         self.line(x0, y0 + hh, x0 + w, y0 + hh, MUTED, .6)
         span = wmax - wmin
         step = 1 if span <= 14 else (2 if span <= 28 else 4)
@@ -404,7 +407,9 @@ class Report(PDFDoc):
         if not pts:
             return
         wmax = max(wmax, wmin + 1)
-        coords = [(x + (a - wmin) / (wmax - wmin) * w, y + (1 - ph.scale_pos(b) / 99) * h)
+        from reporter import flori_axis
+        axis = flori_axis()
+        coords = [(x + (a - wmin) / (wmax - wmin) * w, y + (1 - axis.frac(b)) * h)
                   for a, b in sorted(pts)]
         self.polyline(coords, color, 1.1)
         self.circle(*coords[-1], 1.6, fill=color)
@@ -548,6 +553,7 @@ def weekly(ctx: dict, names: dict, num=None) -> Report:
     _progress(r, ctx.get("progress"))
     if ctx.get("evo"):
         _evo(r, ctx["evo"], names, sec)
+    _primo(r, ctx.get("primo"))
     if ctx.get("trial"):
         _trial(r, ctx["trial"], names)
     if ctx.get("parcels"):
@@ -651,6 +657,56 @@ def _map(r: Report, m: dict, caption: str = "", legend=None, max_h: float = 330)
         r.y += 8
 
 
+PRIMO_INK = "#A8184A"
+
+
+def _len(v) -> str:
+    return f"{v:.1f}".rstrip("0").rstrip(".").replace(".", ",")
+
+
+def _primo_line(r: Report, p: dict, x: float, w: float):
+    """En la tarjeta semanal: foto chica + BBCH y largos de la primocaña (opcional)."""
+    st = p.get("stats")
+    lines = ["Primocaña" + (f" · {ph.bbch_label(p['code'], r.names)}" if p.get("code") is not None else "")]
+    if st:
+        lines.append(f"Largo: n = {st['n']} · promedio {_len(st['mean'])} cm · máx. {_len(st['max'])} cm")
+    if p.get("notes"):
+        lines.append(p["notes"][:140])
+    img = 52 if p.get("src") else 0
+    h = max(img * .75, 12 * len(lines)) + 10
+    r.rect(x, r.y, w, h, fill="#FBE6EC", radius=4)
+    r.rect(x, r.y, 2.5, h, fill=PRIMO_INK)
+    if img:
+        r.image(p["src"], x + 8, r.y + 5, img, img * .75, radius=3)
+    tx = x + 10 + (img + 8 if img else 0)
+    for i, t in enumerate(lines):
+        r.text(tx, r.y + 14 + i * 12, r.fit(t, w - (tx - x) - 6, 8.2, i == 0), 8.2, i == 0,
+               PRIMO_INK if i == 0 else INK2)
+    r.y += h + 6
+
+
+def _primo(r: Report, primo: dict | None):
+    """Sección primocaña: gráfico (eje desde BBCH 30) y tabla de largos. Solo si hay datos."""
+    if not primo:
+        return
+    r.h2("Primocaña · brotes del año",
+         "Registro opcional, aparte de la floricaña (caña de la temporada pasada). Escala BBCH desde 30.")
+    if primo.get("compare"):
+        r.chart(primo["compare"]["raw"])
+    if primo.get("rows"):
+        weeks = primo["weeks"]
+        r.y += 4
+        r.para("Largo de primocañas (cm): promedio / máximo de las medidas de cada semana (n = cantidad).",
+               8.4, MUTED)
+        r.table(["Variedad"] + [ph.week_short(w) for w in weeks] + ["Máx. temporada"],
+                [[{"text": rr["variety"]["name"], "bold": True}]
+                 + [f"{_len(c['mean'])} / {_len(c['max'])} (n={c['n']})" if c else {"text": "—", "color": MUTED}
+                    for c in rr["cells"]]
+                 + [{"text": f"{_len(rr['season_max'])} cm" if rr["season_max"] else "—", "bold": True}]
+                 for rr in primo["rows"]],
+                [2.2] + [1.4] * len(weeks) + [1.3], 7.4, ["left"] + ["center"] * (len(weeks) + 1))
+
+
 def _photo_cards(r: Report, ctx: dict, sec):
     cards = ctx["cards"]
     size = ctx.get("photo_size") or "normal"
@@ -694,6 +750,8 @@ def _photo_cards(r: Report, ctx: dict, sec):
             r.y += 52
         r.chip(x, r.y, c["code"], CW - 24)
         r.y += 20
+        if c.get("primo"):
+            _primo_line(r, c["primo"], x, CW - 24)
         r.ai_geo_notes(c, x, CW - 24)
         if att:
             r.y += 6
@@ -796,6 +854,7 @@ def period(ctx: dict, names: dict, num=None) -> Report:
 
     for s in ctx["strips"]:
         r.keep(lambda s=s: draw_strip(s))   # la franja de cada variedad sin cortar
+    _primo(r, ctx.get("primo"))
     _progress(r, ctx.get("progress"))
     return r
 
@@ -849,6 +908,7 @@ def variety(ctx: dict, names: dict, num=None) -> Report:
     else:
         r.para("Aún no hay estados BBCH registrados para esta variedad.", 9, MUTED)
 
+    _primo(r, ctx.get("primo"))
     r.h2("Timeline de brotación a cosecha")
     lw = 92
     pw = (CW - lw - 12 - 8) / 2
@@ -888,6 +948,7 @@ def matrix(ctx: dict, names: dict, num=None) -> Report:
     rows, weeks = ctx["rows"], ctx["weeks"]
     r = _doc(ctx, [f"{len(rows)} variedades", f"{len(weeks)} semanas"], names, num)
     _evo(r, ctx, names, EVO)
+    _primo(r, ctx.get("primo"))
     _progress(r, ctx.get("progress"))
     return r
 

@@ -72,6 +72,21 @@ class VarietyRow(LongPress, GlassButton):
     done = BooleanProperty(False)
     variety_id = NumericProperty()
     thumb_src = StringProperty("")
+    primo_tag = StringProperty("")    # «P 35» si esa semana se registró primocaña (opcional)
+
+    def on_primo_tag(self, *_):
+        """La insignia de primocaña existe solo si hay dato (si no, no ocupa lugar)."""
+        from kivy.factory import Factory
+        tag = getattr(self, "_ptag", None)
+        if self.primo_tag and tag is None:
+            tag = self._ptag = Factory.Tag(text=self.primo_tag, bg=c("#F8DCE4"), fg=c("#A8184A"),
+                                           pos_hint={"right": 1})
+            self.ids.tags.add_widget(tag, index=0)
+        elif self.primo_tag:
+            tag.text = self.primo_tag
+        elif tag is not None:
+            self.ids.tags.remove_widget(tag)
+            self._ptag = None
 
 
 def season_dialog(on_done=None):
@@ -174,6 +189,8 @@ class SamplingTab(MDBoxLayout):
         complete = 0
         names = a.db.bbch_names()
         trt_names = a.db.treatment_names() if a.db.is_trial else {}
+        from ui.common import _crop
+        primo = a.db.primo_week_codes(a.week["id"]) if _crop().id == "frambuesa" else {}
         for r in rows:
             obs, photos, v = r["observation"], r["photos"], r["variety"]
             code = obs["bbch_code"] if obs else None
@@ -189,6 +206,8 @@ class SamplingTab(MDBoxLayout):
             row.photos, row.photo_tag = n, ("SIN FOTOS" if not n else f"{n} FOTO" + ("S" if n > 1 else ""))
             row.code_tag = f"BBCH {ph.code_str(code)}" if code is not None else "BBCH —"
             row.code_bg, row.code_fg, row.done = bg, fg, code is not None
+            pc = primo.get(v["id"])        # primocaña: no cuenta para «completas» (es opcional)
+            row.primo_tag = f"P {ph.code_str(pc)}" if pc is not None else ""
             thumb = photos.get("detail") or photos.get("canopy")
             src = thumb["path"] if thumb else ""
             if src != row.thumb_src or not row.ids.thumb_box.children:

@@ -567,6 +567,11 @@ class DriveBackup:
             row = self.db.query_one(q + "p.id = ?", (photo_id,))
         if row is None:
             row = self.db.query_one(q + "p.path = ?", (path,))
+        if row is None:             # primocaña (opcional): subcarpeta propia en la parcela
+            row = self.db.query_one("SELECT w.start_date, o.variety_id FROM primo_photos p JOIN primo_obs o "
+                                    "ON o.id = p.primo_id JOIN sampling_weeks w ON w.id = o.week_id "
+                                    "WHERE p.path = ?", (path,))
+            sub = "Primocaña" if row else ""
         if row is None:
             row = self.db.query_one("SELECT w.start_date, a.variety_id FROM variety_attachments a "
                                     "JOIN sampling_weeks w ON w.id = a.week_id WHERE a.path = ?", (path,))
@@ -1239,6 +1244,7 @@ class DriveBackup:
             return 0
         targets: dict[str, str] = {}
         rows = [r["path"] for r in self.db.query("SELECT path FROM photos")]
+        rows += [r["path"] for r in self.db.query("SELECT path FROM primo_photos")]
         rows += [r["path"] for r in self.db.query("SELECT path FROM variety_attachments WHERE path IS NOT NULL")]
         rows += [r["path"] for r in self.db.query(
             "SELECT path FROM measure_entries WHERE path IS NOT NULL AND path != ''")]
@@ -1325,6 +1331,7 @@ class DriveBackup:
             return stats
         local: dict[str, str] = {}
         rows = [r["path"] for r in self.db.query("SELECT path FROM photos")]
+        rows += [r["path"] for r in self.db.query("SELECT path FROM primo_photos")]
         rows += [r["path"] for r in self.db.query("SELECT path FROM variety_attachments WHERE path IS NOT NULL")]
         rows += [r["path"] for r in self.db.query(
             "SELECT path FROM measure_entries WHERE path IS NOT NULL AND path != ''")]

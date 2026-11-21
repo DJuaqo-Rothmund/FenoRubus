@@ -23,7 +23,7 @@ import re
 _LEGACY = re.compile(r"^(?P<d>\d{2})(?P<m>\d{2})(?P<y>\d{4})(?P<rest>-.+)$")
 
 # (tabla, columna con la ruta del archivo)
-PATH_COLUMNS = (("photos", "path"), ("variety_attachments", "path"), ("measure_entries", "path"),
+PATH_COLUMNS = (("photos", "path"), ("primo_photos", "path"), ("variety_attachments", "path"), ("measure_entries", "path"),
                 ("notebook_photos", "path"),
                 ("ai_references", "image_path"), ("drive_queue", "path"))
 

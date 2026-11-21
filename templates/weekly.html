@@ -63,6 +63,7 @@
     {% if c.extras %}<div class="extras">{% for src in c.extras %}<img src="{{ src }}" alt="Foto adicional" loading="lazy">{% endfor %}</div>{% endif %}
     <div>{{ bbch_chip(c.code) }}</div>
     {{ ai_line(c) }}
+    {% if c.primo %}<div class="primo-line">{% if c.primo.src %}<img src="{{ c.primo.src }}" alt="Primocaña" loading="lazy">{% endif %}<div><strong>Primocaña</strong>{% if c.primo.code is not none %} · {{ c.primo.code|bbch }}{% endif %}{% if c.primo.stats %}<br>Largo: n = {{ c.primo.stats.n }} · promedio {{ c.primo.stats.mean|num }} cm · máx. {{ c.primo.stats.max|num }} cm{% endif %}{% if c.primo.notes %}<br><span class="muted">{{ c.primo.notes }}</span>{% endif %}</div></div>{% endif %}
     {{ geo_line(c) }}
     {% if c.notes %}<div class="notes">{{ c.notes }}</div>{% endif %}
     {{ attach_gallery(c.attachments) }}
@@ -83,6 +84,7 @@
 {% endwith %}
 {% endif %}
 
+{% include "_primo.html" %}
 {% if trial %}
 {% with weeks=trial.weeks, rows=trial.rows, tests=trial.tests, compare=trial.compare, ranking=trial.ranking, max_abs=trial.max_abs, milestones=trial.milestones, measures=trial.measures, treatments=trial.treatments, unified=trial.unified, unit_note=trial.unit_note, heat=trial.heat %}
 {% include "_trial.html" %}

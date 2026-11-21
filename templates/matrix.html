@@ -4,6 +4,7 @@
 {% block content %}
 {% set evo_sec = ["matrix", "chart", "precocity", "milestones", "gallery"] %}
 {% include "_evo.html" %}
+{% include "_primo.html" %}
 {{ progress_block(progress) }}
 <script type="application/json" id="datos-bbch">{{ data_json|safe }}</script>
 {% endblock %}

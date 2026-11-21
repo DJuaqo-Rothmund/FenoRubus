@@ -63,12 +63,23 @@ ${ctx.plain ? "" : `<footer class="doc"><span>AeonCrop — seguimiento fenológi
     return chartSeries(rowsSel.map((r) => ({ name: C.unitReportName(r.variety), pts: r.pts.map(([i, c]) => [i, C.bbchValue(c)]) })), weeks);
   }
 
-  function chartSeries(series, weeks) {
+  // Eje BBCH (= reporter.BbchAxis): en frambuesa la floricaña salta 30–39 (sin brotes) y la
+  // primocaña parte en 30. Los códigos no cambian, solo su lugar en el eje.
+  const rubus = () => (ctx.crop || "PhenoRubus") === "PhenoRubus";
+  function axisOf(kind) {
+    if (kind === "primo") return { f: (v) => Math.max(0, Math.min(1, (v - 30) / 69)), ticks: [30, 40, 50, 60, 70, 80, 99] };
+    if (!rubus()) return { f: (v) => Math.max(0, Math.min(1, v / 99)), ticks: [0, 20, 40, 60, 80, 99] };
+    const p = (v) => (v >= 40 ? v - 10 : v > 29.5 ? 29.5 : v);
+    return { f: (v) => Math.max(0, Math.min(1, p(v) / 89)), ticks: [0, 20, 50, 60, 70, 80, 99] };
+  }
+
+  function chartSeries(series, weeks, kind = "flori") {
     const W = 900, H = 320, L = 44, R = 130, T = 14, B = 34;
+    const ax = axisOf(kind);
     const x = (i) => L + (weeks.length < 2 ? 0 : (i * (W - L - R)) / (weeks.length - 1));
-    const y = (v) => T + (H - T - B) * (1 - v / 99);
+    const y = (v) => T + (H - T - B) * (1 - ax.f(v));
     let g = "";
-    for (const v of [0, 20, 40, 60, 80, 99]) g += `<line class="grid" x1="${L}" x2="${W - R}" y1="${y(v)}" y2="${y(v)}"/><text class="tick" x="${L - 6}" y="${y(v) + 4}" text-anchor="end">${v}</text>`;
+    for (const v of ax.ticks) g += `<line class="grid" x1="${L}" x2="${W - R}" y1="${y(v)}" y2="${y(v)}"/><text class="tick" x="${L - 6}" y="${y(v) + 4}" text-anchor="end">${v}</text>`;
     const step = Math.max(1, Math.ceil(weeks.length / 12));
     weeks.forEach((w, i) => { if (i % step === 0) g += `<text class="tick" x="${x(i)}" y="${H - 12}" text-anchor="middle">${wkShort(w)}</text>`; });
     const colors = ["#2a78d6", "#eb6834", "#1baf7a", "#eda100", "#9c3350", "#5b6b3a", "#3e4a56", "#7a5ab8"];
@@ -103,6 +114,40 @@ ${ctx.plain ? "" : `<footer class="doc"><span>AeonCrop — seguimiento fenológi
   }
 
   // ------------------------------------------------------------ 1. semanal
+  // ------------------------------------------------------------ primocaña (opcional, frambuesa)
+  const lenStr = (x) => C.numEs(Math.round(x * 10) / 10);
+  function primoBlock(weeks, onlyUid = null) {
+    if (!rubus()) return "";
+    const vs = C.phenoUnits(ctx.state).filter((v) => !onlyUid || v.uid === onlyUid);
+    const set = new Set(weeks);
+    const rowsP = C.rows(ctx.state, "primo_obs").filter((p) => set.has(p.week_id));
+    if (!rowsP.length) return "";
+    const idx = new Map(weeks.map((w, i) => [w, i]));
+    const series = vs.map((v) => ({ name: C.unitReportName(v), pts: rowsP.filter((p) => p.variety_id === v.uid && p.bbch_code != null)
+      .map((p) => [idx.get(p.week_id), C.bbchValue(p.bbch_code)]).sort((a, b) => a[0] - b[0]) })).filter((s) => s.pts.length);
+    let html = `<h2 style="color:#a8184a">Primocaña · brotes del año</h2><p class="lead">Registro opcional, aparte de la floricaña (caña de la temporada pasada). Escala BBCH desde 30.</p>`;
+    if (series.length) html += chartSeries(series, weeks, "primo");
+    const lw = weeks.filter((w) => rowsP.some((p) => p.week_id === w && C.primoLengths(p).length));
+    const trs = vs.map((v) => {
+      const cells = lw.map((w) => C.lengthStats(C.primoLengths(rowsP.find((p) => p.variety_id === v.uid && p.week_id === w))));
+      if (!cells.some(Boolean)) return "";
+      const mx = C.primoSeasonMax(ctx.state, v.uid, C.seasonOf(C.parseDate(weeks[weeks.length - 1])));
+      return `<tr><td><strong>${vname(v)}</strong></td>${cells.map((c) => `<td style="text-align:center">${c ? `<strong>${lenStr(c.mean)}</strong> / ${lenStr(c.max)}<br><span class="muted small">n = ${c.n}</span>` : `<span class="muted">—</span>`}</td>`).join("")}<td style="text-align:center"><strong>${mx != null ? lenStr(mx) + " cm" : "—"}</strong></td></tr>`;
+    }).join("");
+    if (trs) html += `<h3 style="margin-top:14px">Largo de primocañas (cm)</h3><p class="small muted">Cada celda: promedio / máximo de las primocañas medidas (n = cantidad).</p>
+      <div class="scroll-x"><table><thead><tr><th>Variedad / sector</th>${lw.map((w) => `<th>${wkShort(w)}</th>`).join("")}<th>Máximo temporada</th></tr></thead><tbody>${trs}</tbody></table></div>`;
+    return html;
+  }
+  function primoLine(v, week) {
+    if (!rubus()) return "";
+    const p = C.primoFor(ctx.state, v.uid, week);
+    if (!p) return "";
+    const st = C.lengthStats(C.primoLengths(p));
+    return `<div style="margin-top:8px;padding:8px 10px;border-radius:10px;background:rgba(168,24,74,.1);border-left:3px solid #a8184a;font-size:13px">
+      <strong>Primocaña</strong>${p.bbch_code != null ? ` · BBCH ${C.codeStr(p.bbch_code)}${label(p.bbch_code) ? ": " + esc(label(p.bbch_code)) : ""}` : ""}
+      ${st ? `<br>Largo: n = ${st.n} · promedio ${lenStr(st.mean)} cm · máx. ${lenStr(st.max)} cm` : ""}${p.notes ? `<br><span class="muted">${esc(p.notes)}</span>` : ""}</div>`;
+  }
+
   async function weekly(week) {
     const vs = C.phenoUnits(ctx.state);
     const cards = vs.map((v) => {
@@ -121,7 +166,7 @@ ${ctx.plain ? "" : `<footer class="doc"><span>AeonCrop — seguimiento fenológi
       html += `<article class="card vcard"><div class="head"><h3>${vname(c.v)}</h3>${c.v.code ? `<span class="vcode">${esc(c.v.code)}</span>` : ""}</div>
         <div class="photos">${figure(c.canopy && u.get(c.canopy.path), "Canopia")}${figure(c.detail && u.get(c.detail.path), "Detalle")}</div>
         ${c.extras.length ? `<div class="extras">${c.extras.map((p) => u.get(p.path) ? `<img src="${u.get(p.path)}" alt="">` : "").join("")}</div>` : ""}
-        <div>${chip(c.code)}</div>${c.obs?.notes ? `<div class="notes">${esc(c.obs.notes)}</div>` : ""}</article>`;
+        <div>${chip(c.code)}</div>${primoLine(c.v, week)}${c.obs?.notes ? `<div class="notes">${esc(c.obs.notes)}</div>` : ""}</article>`;
     }
     html += "</div>";
     html += await measuresBlock(week);
@@ -302,6 +347,7 @@ ${ctx.plain ? "" : `<footer class="doc"><span>AeonCrop — seguimiento fenológi
       <div class="scroll-x"><table><thead><tr><th>Variedad / sector</th>${C.MILESTONES.map(([c, n]) => `<th>${esc(n)}<br><span class="mono">≥${C.codeStr(c)}</span></th>`).join("")}</tr></thead><tbody>`;
     for (const r of heat) html += `<tr><td><strong>${vname(r.variety)}</strong></td>${r.hits.map((h) => `<td>${h ? wkShort(h) : `<span class="muted">—</span>`}</td>`).join("")}</tr>`;
     html += "</tbody></table></div>";
+    html += primoBlock(weeks);
     // Galería paralela: foto de detalle (o la que haya) por semana.
     const pick = (o) => primary(o, "detail") || primary(o, "canopy");
     const need = heat.flatMap((r) => r.cells.map((c) => pick(c.obs)).filter(Boolean).map((p) => p.path));
@@ -331,6 +377,7 @@ ${ctx.plain ? "" : `<footer class="doc"><span>AeonCrop — seguimiento fenológi
     const u = await urls(need);
     let html = "";
     if (row && row.pts.length) html += `<h2>Evolución BBCH</h2>${chart(heat, weeks, v.uid)}`;
+    html += primoBlock(weeks, v.uid);
     html += `<h2>Hitos</h2><div class="stats">${C.MILESTONES.map(([c, n], i) => `<div class="card stat"><div class="v">${row && row.hits[i] ? wkShort(row.hits[i]) : "—"}</div><div class="l">${esc(n)} (≥${C.codeStr(c)})</div></div>`).join("")}</div>`;
     html += `<h2>Registro semana a semana</h2><div class="timeline">`;
     for (const { w, obs } of items) {

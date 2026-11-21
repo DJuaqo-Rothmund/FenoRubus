@@ -742,7 +742,7 @@ function renderSampling() {
     el.innerHTML = `<div class="thumb">🌱</div>
       <div><div class="place"></div><div class="name"></div><div class="sub"></div></div>
       <div class="badges"><span class="badge">${photos.length ? photos.length + " FOTO" + (photos.length > 1 ? "S" : "") : "SIN FOTOS"}</span>
-      <span class="badge ${obs?.bbch_code != null ? "bbch" : "none"}">BBCH ${obs?.bbch_code != null ? C.codeStr(obs.bbch_code) : "—"}</span></div>`;
+      <span class="badge ${obs?.bbch_code != null ? "bbch" : "none"}">BBCH ${obs?.bbch_code != null ? C.codeStr(obs.bbch_code) : "—"}</span>${primoBadge(v)}</div>`;
     el.querySelector(".place").textContent = C.unitPlace(v);
     el.querySelector(".name").textContent = C.unitMain(v);
     el.querySelector(".sub").textContent = sub + (obs?.notes ? ` · ${obs.notes}` : "");
@@ -765,18 +765,26 @@ function renderSampling() {
   renderMeasures();
 }
 
-function fillBbch(sel, code) {
+function fillBbch(sel, code, min = null) {
   sel.innerHTML = `<option value="">— Sin estado —</option>`;
   for (const [m, title] of Object.entries(S.bbch.macros)) {
+    const stages = S.bbch.stages.filter((x) => String(x.macro) === m && (min === null || x.code >= min));
+    if (!stages.length) continue;
     const g = document.createElement("optgroup");
     g.label = `${m} · ${title}`;
-    for (const s of S.bbch.stages.filter((x) => String(x.macro) === m)) {
+    for (const s of stages) {
       const o = document.createElement("option");
       o.value = s.code; o.textContent = `${s.text} · ${s.label}`;
       if (s.code === code) o.selected = true;
       g.appendChild(o);
     }
     sel.appendChild(g);
+  }
+  // Un código ya registrado que no está en la escala (otro teléfono, escala antigua) no se pierde.
+  if (code !== null && code !== undefined && ![...sel.options].some((o) => Number(o.value) === code && o.value !== "")) {
+    const o = document.createElement("option");
+    o.value = code; o.textContent = `BBCH ${C.codeStr(code)} (registrado)`; o.selected = true;
+    sel.appendChild(o);
   }
 }
 
@@ -926,7 +934,158 @@ function openDetail(v) {
   S.photoSel = new Set();
   renderPhotos(v);
   renderLocation();
+  S.primoOpen = false;
+  renderPrimo(v);
   $("detail").showModal();
+}
+
+// ------------------------------------------------------------ primocaña (opcional, frambuesa)
+const isRubus = () => CROP === "PhenoRubus";
+const lenStr = (x) => C.numEs ? C.numEs(Math.round(x * 10) / 10) : String(Math.round(x * 10) / 10).replace(".", ",");
+
+function primoBadge(v) {
+  if (!isRubus()) return "";
+  const p = C.primoFor(S.state, v.uid, S.week);
+  return p && p.bbch_code != null ? `<span class="badge primo">P ${C.codeStr(p.bbch_code)}</span>` : "";
+}
+
+function renderPrimo(v) {
+  const box = $("dprimo");
+  box.innerHTML = "";
+  if (!isRubus()) return;
+  const p = C.primoFor(S.state, v.uid, S.week);
+  if (!p && !S.primoOpen) {
+    const b = document.createElement("button");
+    b.type = "button"; b.className = "primo-add"; b.textContent = "+ Agregar primocaña (opcional)";
+    b.onclick = () => { S.primoOpen = true; renderPrimo(v); };
+    box.appendChild(b);
+    return;
+  }
+  const card = document.createElement("div");
+  card.className = "primo-card";
+  card.innerHTML = `<div class="phead">PRIMOCAÑA · BROTES DEL AÑO (DESDE BBCH 30) · OPCIONAL<button type="button" class="x" title="Quitar primocaña">✕</button></div>
+    <div class="primo-grid">
+      <div class="pdrop"><b class="t">PRIMOCAÑA · FOTO</b><div class="photos"></div><div class="drophint">+ Arrastre la foto aquí o haga clic</div><input type="file" accept="image/*" multiple hidden></div>
+      <div class="plen"><b class="t">LARGO DE PRIMOCAÑAS</b><textarea rows="2" placeholder="cm, ej.: 120 135 98,5"></textarea><div class="pstats"></div><div class="muted small pmax"></div></div>
+    </div>
+    <label class="field">Estado BBCH de la primocaña (desde 30)<select></select></label>
+    <label class="field">Notas de la primocaña<textarea rows="2" placeholder="Opcional"></textarea></label>`;
+  box.appendChild(card);
+  const [lens, notes] = card.querySelectorAll("textarea");
+  const sel = card.querySelector("select");
+  fillBbch(sel, p?.bbch_code ?? null, C.PRIMO_MIN);
+  lens.value = C.primoLengths(p).map(lenStr).join(" ");
+  notes.value = p?.notes || "";
+  const stats = () => {
+    const out = card.querySelector(".pstats");
+    try {
+      const st = C.lengthStats(C.parseLengths(lens.value));
+      out.innerHTML = st ? `<b>n = ${st.n}</b><br>Promedio <b>${lenStr(st.mean)} cm</b><br>Máximo <b>${lenStr(st.max)} cm</b>`
+        : `<span class="muted">Escriba el largo de cada primocaña medida.</span>`;
+    } catch (e) { out.innerHTML = `<span class="err"></span>`; out.firstChild.textContent = e.message; }
+    const mx = C.primoSeasonMax(S.state, v.uid, C.seasonOf(C.parseDate(S.week)));
+    card.querySelector(".pmax").textContent = mx != null ? `Máximo de la temporada: ${lenStr(mx)} cm` : "";
+  };
+  lens.oninput = stats;
+  stats();
+  S.primoForm = { lens, notes, sel };
+  card.querySelector(".x").onclick = async () => {
+    if (!p) { S.primoOpen = false; S.primoForm = null; renderPrimo(v); return; }
+    if (!confirm("¿Quitar la primocaña de esta semana? (Las fotos quedan en Drive.)")) return;
+    try { await send(C.primoDeleteChanges(S.state, p.uid)); S.primoOpen = false; S.primoForm = null; renderPrimo(v); render(); }
+    catch (e) { $("dmsg").textContent = `No se pudo quitar: ${e.message}`; }
+  };
+  const drop = card.querySelector(".pdrop");
+  dropZone(drop, drop.querySelector("input"), (files) => uploadPrimo(v, files, drop));
+  const photos = p ? C.primoPhotos(S.state, p.uid) : [];
+  const pbox = drop.querySelector(".photos");
+  for (const ph of photos) {
+    const d = document.createElement("div");
+    d.className = "ph pending";
+    d.innerHTML = `${ph.is_primary ? "<span>★ Principal</span>" : ""}<em>Buscando…</em>`;
+    const del = document.createElement("button");
+    del.type = "button"; del.className = "pdel"; del.textContent = "✕"; del.title = "Quitar esta foto";
+    del.onclick = async (e) => {
+      e.stopPropagation();
+      if (!confirm("¿Quitar esta foto de la primocaña? (El archivo queda en Drive.)")) return;
+      try { await send([{ entity: "primo_photos", uid: ph.uid, ts: C.nowTs(), deleted: 1 }]); renderPrimo(v); }
+      catch (er) { $("dmsg").textContent = `No se pudo quitar: ${er.message}`; }
+    };
+    d.append(del);
+    pbox.appendChild(d);
+    photoUrl(ph.path).then((u) => {
+      const em = d.querySelector("em");
+      if (!u) { em.textContent = "No está en Drive"; return; }
+      em.remove(); d.classList.remove("pending");
+      d.style.backgroundImage = `url(${u})`;
+      d.onclick = (e) => { e.stopPropagation(); $("vimg").src = u; $("viewer").showModal(); };
+    }).catch(() => {});
+  }
+}
+
+// Valores del formulario de primocaña (null si no está abierto). Error si algo no sirve.
+function primoFields() {
+  const f = S.primoForm;
+  if (!f || !document.body.contains(f.lens)) return null;
+  const lengths = C.parseLengths(f.lens.value);
+  const raw = f.sel.value;
+  const code = raw === "" ? null : Number(raw);
+  return { bbch_code: code, bbch_label: code === null ? "" : stageLabel(code), notes: f.notes.value.trim(),
+    lengths: lengths.length ? JSON.stringify(lengths) : "" };
+}
+
+async function ensurePrimo(v) {
+  let p = C.primoFor(S.state, v.uid, S.week);
+  if (p) return { p, changes: [] };
+  let fields = {};
+  try { fields = primoFields() || {}; } catch { fields = {}; }
+  const r = C.primoChanges(S.state, v.uid, S.week, fields);
+  C.applyBundle(S.state, `local-${C.newUid()}`, { changes: r.changes });
+  return { p: C.primoFor(S.state, v.uid, S.week), changes: r.changes };
+}
+
+async function uploadPrimo(v, files, zone) {
+  zone.classList.add("busy");
+  try {
+    const { p, changes } = await ensurePrimo(v);
+    const taken = new Set([...C.rows(S.state, "photos"), ...C.rows(S.state, "primo_photos")].map((x) => base(x.path)));
+    const dir = await weekFolderId(S.week, [unitFolder(v), "Primocaña"].filter(Boolean).join("/"));
+    const season = C.seasonOf(C.parseDate(S.week));
+    for (const f of files) {
+      let seq = 1, name;
+      do { name = `${C.photoBasename(v, S.week, "canopy", seq++, S.ws.code)}-PRIMO.jpg`; } while (taken.has(name));
+      taken.add(name);
+      $("dmsg").textContent = `Subiendo ${name}…`;
+      const blob = await resize(f);
+      const id = await upload(dir, name, blob, "image/jpeg");
+      S.photoIds.set(name, id);
+      S.photoUrls.set(name, URL.createObjectURL(blob));
+      cachePut(name, blob, "photos");
+      const ch = C.primoPhotoChange(S.state, p.uid, "canopy", `photos/T${season}/web/${name}`);
+      changes.push(ch);
+      C.applyBundle(S.state, `local-${C.newUid()}`, { changes: [ch] });
+    }
+    await send(changes);
+    $("dmsg").textContent = `${files.length} foto(s) de primocaña subida(s).`;
+    const keep = S.primoForm ? { l: S.primoForm.lens.value, n: S.primoForm.notes.value, s: S.primoForm.sel.value } : null;
+    renderPrimo(v);
+    if (keep) { S.primoForm.lens.value = keep.l; S.primoForm.notes.value = keep.n; S.primoForm.sel.value = keep.s; S.primoForm.lens.oninput(); }
+    render();
+  } catch (er) { $("dmsg").textContent = `No se pudo subir: ${er.message}`; }
+  finally { zone.classList.remove("busy"); }
+}
+
+// Al guardar el registro: crea, actualiza o (si quedó vacía) quita la primocaña.
+function primoSaveChanges(v) {
+  const fields = primoFields();
+  if (!fields) return [];
+  const cur = C.primoFor(S.state, v.uid, S.week);
+  const empty = fields.bbch_code === null && !fields.notes && !fields.lengths
+    && !(cur && C.primoPhotos(S.state, cur.uid).length);
+  if (empty) return cur ? C.primoDeleteChanges(S.state, cur.uid) : [];
+  if (cur && (cur.bbch_code ?? null) === fields.bbch_code && (cur.notes || "") === fields.notes
+    && (cur.lengths || "") === fields.lengths) return [];
+  return C.primoChanges(S.state, v.uid, S.week, fields).changes;
 }
 
 async function saveDetail(ev) {
@@ -936,11 +1095,14 @@ async function saveDetail(ev) {
   const code = raw === "" ? null : Number(raw);
   const obs = C.observationFor(S.state, v.uid, S.week);
   const notes = $("dnotes").value.trim();
-  if ((obs?.bbch_code ?? null) === code && (obs?.notes || "") === notes) { $("detail").close(); return; }
+  let pch;
+  try { pch = primoSaveChanges(v); } catch (e) { $("dmsg").textContent = `Primocaña: ${e.message}`; return; }
+  const same = (obs?.bbch_code ?? null) === code && (obs?.notes || "") === notes;
+  if (same && !pch.length) { $("detail").close(); return; }
   $("dsave").disabled = true;
   try {
-    const { changes } = C.observationChanges(S.state, v.uid, S.week, { bbch_code: code, notes }, code === null ? "" : stageLabel(code));
-    await send(changes);
+    const changes = same ? [] : C.observationChanges(S.state, v.uid, S.week, { bbch_code: code, notes }, code === null ? "" : stageLabel(code)).changes;
+    await send([...changes, ...pch]);
     $("detail").close();
     render();
   } catch (e) {

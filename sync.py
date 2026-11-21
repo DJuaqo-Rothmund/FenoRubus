@@ -38,6 +38,11 @@ TABLES: dict[str, dict] = {
                      "natural": ("variety_id", "week_id")},
     "photos": {"uid": "lower(hex(randomblob(16)))", "fk": {"observation_id": "observations"},
                "natural": ("observation_id", "path")},
+    "primo_obs": {"uid": "lower(hex(randomblob(16)))",
+                  "fk": {"variety_id": "varieties", "week_id": "sampling_weeks"},
+                  "natural": ("variety_id", "week_id")},
+    "primo_photos": {"uid": "lower(hex(randomblob(16)))", "fk": {"primo_id": "primo_obs"},
+                     "natural": ("primo_id", "path")},
     "variety_attachments": {"uid": "lower(hex(randomblob(16)))",
                             "fk": {"variety_id": "varieties", "week_id": "sampling_weeks"},
                             "natural": ("variety_id", "path")},
@@ -70,10 +75,11 @@ TABLES: dict[str, dict] = {
 }
 # Orden de aplicación: primero lo que otros referencian.
 ORDER = ["varieties", "sampling_weeks", "treatments", "measures", "observations", "photos",
+         "primo_obs", "primo_photos",
          "variety_attachments", "measure_entries", "variety_metrics", "custom_fields",
          "notebook_entries", "notebook_photos", "weather_days", "yield_sets", "yield_photos",
          "yield_counts", "scout_species", "scout_records", "scout_photos", "scout_ai"]
-PATH_COLUMNS = {"photos": "path", "variety_attachments": "path", "measure_entries": "path",
+PATH_COLUMNS = {"photos": "path", "primo_photos": "path", "variety_attachments": "path", "measure_entries": "path",
                 "notebook_photos": "path", "yield_photos": "path", "scout_photos": "path"}
 # Ajustes del ensayo que también viajan (semana de referencia, primera semana fijada…).
 SETTING_PREFIXES = ("season_start:", "first_week:", "treatment_", "trial_", "reportcfg", "share_",

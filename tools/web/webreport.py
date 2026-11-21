@@ -140,6 +140,9 @@ def photos(code: str, kind: str, arg: str, season: int, cfg_json: str = "") -> s
     paths = [r["path"] for r in db.query(q, params)]
     if kind == "weekly":
         wid = _week_id(db, arg)
+        paths += [r["path"] for r in db.query(      # primocaña (opcional): su foto en la tarjeta
+            "SELECT f.path FROM primo_photos f JOIN primo_obs p ON p.id = f.primo_id "
+            "WHERE p.week_id=? AND f.is_primary=1", (wid,))]
         paths += [r["path"] for r in db.query(
             "SELECT path FROM measure_entries WHERE week_id=? AND path IS NOT NULL "
             "UNION SELECT path FROM variety_attachments WHERE week_id=? AND path IS NOT NULL", (wid, wid))]

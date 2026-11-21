@@ -24,6 +24,7 @@ _EXT = (".jpg", ".jpeg")
 
 _QUERIES = (
     "SELECT path FROM photos",
+    "SELECT path FROM primo_photos",
     "SELECT path FROM variety_attachments",
     "SELECT path FROM measure_entries WHERE path IS NOT NULL",
     "SELECT path FROM notebook_photos",
