@@ -6,12 +6,13 @@
 import * as C from "./core.js";
 import * as BOX from "./box_ai.js";
 import * as AI from "./scout_ai.js";
+import * as AEON from "./aeon_ai.js";
 
 // Clases de cajas de cada cultivo (= training_labels.py de AeonCrop). La tecla de cada
 // clase es su posición (0–9). IA+ entrena cada cultivo por separado (su carpeta en Drive).
 const CROP_CLASSES = {
   PhenoRubus: [
-    ["yema", "Yema", "#A1887F"], ["brote", "Brote", "#8BC34A"], ["lateral", "Lateral", "#5C6BC0"],
+    ["yema", "Yema", "#A1887F"], ["brote", "Brote", "#8BC34A"],
     ["boton", "Botón", "#00897B"], ["boton_blanco", "Botón blanco", "#78909C"], ["flor", "Flor", "#F9A825"],
     ["flor_pasada", "Flor pasada", "#8D6E63"], ["fruto_verde", "Fruto verde", "#2E7D32"],
     ["fruto_pinton", "Fruto pintón", "#EC407A"], ["fruto_maduro", "Fruto maduro", "#B71C1C"]],
@@ -136,6 +137,7 @@ async function load(fresh) {
       if (cached && cached.photos) data = { ...data, ...cached, classes: data.classes };
     }
     await restorePending();
+    dropRetired();
   }
   if (!photos || fresh) {
     const detail = detailPhotos(await X.allStates(say));
@@ -156,6 +158,29 @@ async function load(fresh) {
   }
   renderWs();
   renderList();
+}
+// Aeon IA: el modelo se carga una vez por página (y por cultivo).
+let aeonP = null, aeonCrop = "";
+async function aeonLoad(say) {
+  if (!aeonP || aeonCrop !== crop) {
+    aeonCrop = crop;
+    aeonP = (async () => {
+      say("buscando el modelo en Drive…");
+      const got = await X.aeonModel?.(say);
+      if (!got) return null;
+      say("preparando el modelo…");
+      return AEON.loadModel(got.meta, got.bytes);
+    })().catch((e) => { aeonP = null; throw e; });
+  }
+  return aeonP;
+}
+
+// Clases retiradas (= training_labels.RETIRED): sus cajas se quitan al leer (se guardan así en Drive).
+const RETIRED = new Set(["lateral"]);
+function dropRetired() {
+  for (const rec of Object.values(data.photos || {})) {
+    if (rec.boxes?.some((b) => RETIRED.has(b.c))) rec.boxes = rec.boxes.filter((b) => !RETIRED.has(b.c));
+  }
 }
 // Marcas sin confirmar en Drive (se guardan también en el navegador): {nombre: marca}.
 let pending = {};
@@ -407,6 +432,7 @@ const Ed = {
       if (cb) cb();
     });
     $("tsuggest").onclick = () => this.suggest();
+    $("taeon").onclick = () => this.aeon();
     $("tsave").onclick = () => this.confirmOrSave();
     // Aviso rojo «NO GUARDADO»: un toque reconecta la cuenta de Google y vuelve a guardar.
     $("tsaved").onclick = async () => {
@@ -496,6 +522,30 @@ const Ed = {
         : "La IA no encontró estructuras nuevas";
     } catch (e) {
       $("tsaved").textContent = `IA: ${e.message}`;
+    } finally { btn.disabled = false; }
+  },
+  // Cajas con Aeon IA (la IA interna, en este navegador): se suman a las que ya hay.
+  async aeon() {
+    const btn = $("taeon");
+    if (!this.img || btn.disabled) return;
+    const p = this.photo;
+    const say = (t) => { $("tsaved").textContent = `Aeon IA: ${t}`; };
+    btn.disabled = true;
+    try {
+      const model = await aeonLoad(say);
+      if (!model) { say("aún no hay un modelo entrenado en Drive (Entrenamiento IA › modelos)"); return; }
+      say("buscando estructuras…");
+      const got = await AEON.detect(model, this.img, CLASSES.map(([k]) => k));
+      if (this.photo !== p) return;
+      const before = this.rec.boxes.length;
+      this.rec.boxes = BOX.merge(this.rec.boxes, got);
+      const n = this.rec.boxes.length - before;
+      this.sel = null;
+      this.changed();
+      $("tsaved").textContent = n ? `Aeon IA ${model.meta.version}: ${n} caja(s) sugerida(s). Revise el tipo de cada una y borre las que sobren`
+        : "Aeon IA no encontró estructuras nuevas";
+    } catch (e) {
+      say(e.message);
     } finally { btn.disabled = false; }
   },
   go(d) {

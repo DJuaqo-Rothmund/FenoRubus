@@ -217,6 +217,32 @@ async function saveLabels(data) {
   else await upload(dir, TRAIN_FILE, blob, "application/json");
 }
 
+// Aeon IA (la IA interna, web/aeon_ai.js): el modelo más reciente de «Entrenamiento IA/modelos/
+// <versión>/» (model.json + detector_<versión>.onnx, los deja el cuaderno de Colab). El .onnx se
+// baja una sola vez por versión y queda en el navegador. Devuelve {meta, bytes} o null.
+async function aeonModel(progress = () => {}) {
+  const dir = await trainDir(false);
+  const mdir = dir && await folder("modelos", dir, false);
+  if (!mdir) return null;
+  let best = null;
+  for (const f of await list(`'${mdir}' in parents and mimeType='${FOLDER}' and trashed=false`, "files(id,name)")) {
+    const files = await list(`'${f.id}' in parents and trashed=false`, "files(id,name,modifiedTime)");
+    const mj = files.find((x) => x.name === "model.json"), ox = files.find((x) => x.name.endsWith(".onnx"));
+    if (!mj || !ox) continue;
+    const meta = await (await download(mj.id)).json().catch(() => null);
+    if (meta && (!best || (meta.trained_at || "") > (best.meta.trained_at || ""))) best = { meta, onnx: ox };
+  }
+  if (!best) return null;
+  const key = `aeon/${best.onnx.id}/${best.onnx.modifiedTime}`;
+  let bytes = await cacheGet(key);
+  if (!bytes) {
+    progress(`Bajando Aeon IA ${best.meta.version} (una sola vez)…`);
+    bytes = await (await download(best.onnx.id)).arrayBuffer();
+    cachePut(key, bytes);
+  }
+  return { meta: best.meta, bytes };
+}
+
 // Fotos extra para IA+ (= extra_photos.py): fotos que no son de un ensayo ni de un predio,
 // solo para entrenar, en «PhenoRubus · …/IA+ Conocimiento ampliado» (con subcarpetas). La
 // clave de cada foto en marcas.json es «ext/<subcarpetas>/<nombre>».
@@ -3019,7 +3045,7 @@ async function boot() {
     // quedan en el navegador y se vuelven a subir al abrir (no se pierden al recargar).
     pendingGet: () => cacheGet(`${trainKey()}:pendientes`), pendingPut: (v) => cachePut(`${trainKey()}:pendientes`, v),
     reconnect: () => signIn(""),
-    allStates, extraList, extraUrl, extraUpload, yieldList,
+    allStates, extraList, extraUrl, extraUpload, yieldList, aeonModel,
     setCrop: (mod) => { trainMod = mod; },
     crop: () => (S.workspaces.length && !$("app").hidden ? CROP : null),
     email: () => store.get("ac_email") });

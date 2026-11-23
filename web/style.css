@@ -703,3 +703,7 @@ dialog.rcfg { width: min(720px, 96vw); background: #FBF8F1; }
 .primo-card .pstats { font-size: 13.5px; line-height: 1.45; }
 .primo-card .pstats .err { color: #a8184a; }
 .badge.primo { background: #f8dce4; color: #a8184a; border: 0; }
+/* Aeon IA (IA interna, en el navegador): botón con texto, verde-azul como el logo */
+.tbtn.taeon { width: auto; padding: 0 12px; font: 700 12.5px/1 system-ui, sans-serif; color: #fff; letter-spacing: .02em;
+  background: linear-gradient(135deg, #1b9e5a, #1565c0); white-space: nowrap; border-radius: 999px; }
+.tbtn.taeon:disabled { opacity: .55; }

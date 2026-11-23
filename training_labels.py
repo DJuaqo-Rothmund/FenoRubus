@@ -25,7 +25,6 @@ import os
 CLASSES = [            # (clave, nombre, color): la posición es la tecla en la web (0–9)
     ("yema", "Yema", "#A1887F"),
     ("brote", "Brote", "#8BC34A"),
-    ("lateral", "Lateral", "#5C6BC0"),
     ("boton", "Botón", "#00897B"),
     ("boton_blanco", "Botón blanco", "#78909C"),
     ("flor", "Flor", "#F9A825"),
@@ -61,6 +60,9 @@ CROP_CLASSES = {
         ("fruto_maduro", "Fruto rojo (maduro)", "#B71C1C"),
     ],
 }
+# Clases que ya no se usan (nov. 2026: «lateral» se quitó; solo yema, brote y floración):
+# sus cajas se borran al leer las marcas y no se cuentan ni se entrenan.
+RETIRED = {"lateral"}
 NAMES = {k: n for k, n, _ in CLASSES}
 COLORS = {k: c for k, _, c in CLASSES}
 
@@ -92,6 +94,18 @@ def merge(into: dict, other: dict | None) -> int:
         if cur is None or (rec.get("ts") or "") > (cur.get("ts") or ""):
             photos[name] = rec
             n += 1
+    return n
+
+
+def drop_retired(photos: dict) -> int:
+    """Quita las cajas de clases retiradas (RETIRED). Devuelve cuántas quitó."""
+    n = 0
+    for rec in photos.values():
+        boxes = rec.get("boxes") or []
+        keep = [b for b in boxes if b.get("c") not in RETIRED]
+        if len(keep) != len(boxes):
+            n += len(boxes) - len(keep)
+            rec["boxes"] = keep
     return n
 
 
@@ -164,7 +178,7 @@ class LabelStore:
             with open(self.path, encoding="utf-8") as f:
                 got = json.load(f)
             self.data["photos"] = got.get("photos") or {}
-            self.dirty = bool(got.get("_dirty"))
+            self.dirty = bool(got.get("_dirty")) or drop_retired(self.data["photos"]) > 0
         except (OSError, ValueError):
             pass
 
@@ -224,6 +238,8 @@ class LabelStore:
                 got += merge(self.data, json.loads(drive_sync._get(f["id"]).decode("utf-8")))
             except ValueError:
                 continue
+        if drop_retired(self.data["photos"]):     # cajas de clases retiradas: fuera, y se sube
+            self.dirty = True
         if self.dirty or main is None:       # aquí hay marcas nuevas: se sube el total
             body = json.dumps({"version": 1, "classes": self.data["classes"], "photos": self.data["photos"]},
                               ensure_ascii=False).encode("utf-8")
