@@ -1088,7 +1088,7 @@ class BoxEditor(ModalView):
         # Botones centrados; el conteo a la izquierda, en el espacio que queda libre.
         from kivy.uix.floatlayout import FloatLayout
         tools = FloatLayout(size_hint_y=None, height=dp(66))
-        btns = BoxLayout(size_hint=(None, None), size=(dp(46) * 4 + dp(12) * 3, dp(46)), spacing=dp(12),
+        btns = BoxLayout(size_hint=(None, None), size=(dp(46) * 5 + dp(12) * 4, dp(46)), spacing=dp(12),
                          pos_hint={"center_x": .5, "center_y": .5})
         self.count = Label(text="", font_size=sp(11), color=(1, 1, 1, .9), halign="left", valign="middle",
                            markup=True, size_hint=(None, 1), pos_hint={"x": 0, "y": 0})
@@ -1099,8 +1099,11 @@ class BoxEditor(ModalView):
         tools.add_widget(btns)
         self.ai_b = _IconBtn("creation", "#8E44FF", glow=True)
         self.ai_b.bind(on_release=lambda *_: self.suggest())
+        # Aeon IA: la IA interna (detector propio, en el teléfono, sin internet ni clave).
+        self.aeon_b = _IconBtn("brain", "#1B7F6A")
+        self.aeon_b.bind(on_release=lambda *_: self.aeon())
         self.save_b = _IconBtn("content-save-outline", "#2E7D32")
-        for w, fn in ((self.ai_b, None), (_IconBtn("fit-to-screen-outline", "#3A3631"), lambda: self.canvas_w.fit()),
+        for w, fn in ((self.aeon_b, None), (self.ai_b, None), (_IconBtn("fit-to-screen-outline", "#3A3631"), lambda: self.canvas_w.fit()),
                       (_IconBtn("delete-outline", "#C62828"), self.delete_sel),
                       (self.save_b, self.save_now)):
             if fn:
@@ -1322,6 +1325,63 @@ class BoxEditor(ModalView):
             self.changed()
             a.toast(f"{n} caja(s) sugerida(s): revise el tipo de cada una y borre las que sobren"
                     if n else "La IA no encontró estructuras nuevas en esta foto")
+        threading.Thread(target=work, daemon=True).start()
+
+    def aeon(self):
+        """Cajas con Aeon IA (la IA interna, en el teléfono): se agregan a las que ya hay. La
+        primera vez de cada sesión revisa en Drive si hay una versión nueva del modelo."""
+        a = app()
+        p = self.photo
+        if not p.get("path") or not os.path.exists(p["path"]):
+            a.toast("La foto aún no está en el teléfono.")
+            return
+        if getattr(self, "_aeon_busy", False):
+            return
+        self._aeon_busy = True
+        self.aeon_b.opacity = .55
+        a.toast("Aeon IA: buscando estructuras…")
+        keys = [k for k, _, _ in CLASSES]
+
+        def say(t):
+            Clock.schedule_once(lambda *_: a.toast(f"Aeon IA: {t}"))
+
+        def work():
+            import aeon_ai
+            got, err, model = [], None, None
+            try:
+                model = aeon_ai.current()
+                if drive_ready() and not getattr(a, "_aeon_checked", False):
+                    try:
+                        model = aeon_ai.update_from_drive(a.sync, say) or model
+                        a._aeon_checked = True
+                    except Exception as exc:  # noqa: BLE001 - sin red: el modelo que ya hay
+                        if model is None:
+                            raise exc
+                if model is None:
+                    raise RuntimeError("aún no hay un modelo entrenado (Drive › Entrenamiento IA › modelos)"
+                                       if drive_ready() else "conecte Google Drive para bajar el modelo")
+                got = aeon_ai.detect(p["path"], keys, model)
+            except Exception as exc:  # noqa: BLE001
+                err = exc
+            Clock.schedule_once(lambda *_: done(got, err, model))
+
+        def done(got, err, model):
+            self._aeon_busy = False
+            self.aeon_b.opacity = 1
+            if err is not None:
+                a.toast(f"Aeon IA: {err}")
+                return
+            if self.photo is not p:
+                return
+            import box_ai
+            before = len(self.rec["boxes"])
+            self.rec["boxes"] = box_ai.merge(self.rec["boxes"], got)
+            n = len(self.rec["boxes"]) - before
+            self.sel = None
+            self.changed()
+            ver = (model or {}).get("meta", {}).get("version", "")
+            a.toast(f"Aeon IA {ver}: {n} caja(s) sugerida(s). Revise el tipo de cada una y borre las que sobren"
+                    if n else "Aeon IA no encontró estructuras nuevas en esta foto")
         threading.Thread(target=work, daemon=True).start()
 
     def copy_prev(self):
