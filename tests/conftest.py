@@ -1,4 +1,10 @@
+import os
+import sys
+
 import pytest
+
+# Los módulos de la app están en la raíz del repositorio (con «pytest» a secas no está en la ruta).
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 
 @pytest.fixture(autouse=True)
