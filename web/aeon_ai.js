@@ -68,23 +68,38 @@ export async function detect(model, img, keys, { conf = CONF } = {}) {
   const t = prepare(img, S);
   const feeds = { [session.inputNames[0]]: new o.Tensor("float32", t.data, [1, 3, S, S]) };
   const res = await session.run(feeds);
-  const out = res[session.outputNames[0]];
-  const [, rows, N] = out.dims;                 // [1, 4 + nc, N]
-  const d = out.data, nc = rows - 4;
+  // La salida de cajas (si el modelo trae más de una, la de 3 dimensiones más grande).
+  const outs = session.outputNames.map((n) => res[n]).filter((x) => x && x.dims.length === 3);
+  const out = outs.sort((a, b) => b.data.length - a.data.length)[0] || res[session.outputNames[0]];
+  const d = out.data, dims = out.dims;
   const cand = [];
-  for (let j = 0; j < N; j++) {
-    let best = -1, ci = -1;
-    for (let c = 0; c < nc; c++) {
-      const v = d[(4 + c) * N + j];
-      if (v > best) { best = v; ci = c; }
+  const box = (ci, p, x0, y0, x1, y1) => {
+    if (p < conf || !keys.includes(classes[ci])) return;
+    x0 = (x0 - t.px) / t.k; y0 = (y0 - t.py) / t.k; x1 = (x1 - t.px) / t.k; y1 = (y1 - t.py) / t.k;
+    cand.push({ c: classes[ci], p, x0: Math.max(0, x0), y0: Math.max(0, y0), x1: Math.min(t.W, x1), y1: Math.min(t.H, y1) });
+  };
+  let best = 0;
+  if (dims.length === 3 && dims[2] === 6 && dims[1] <= 1000) {
+    // Exportado con NMS incluido: [1, K, 6] = x0, y0, x1, y1, puntaje, clase.
+    for (let j = 0; j < dims[1]; j++) {
+      const q = j * 6;
+      best = Math.max(best, d[q + 4]);
+      box(Math.round(d[q + 5]), d[q + 4], d[q], d[q + 1], d[q + 2], d[q + 3]);
     }
-    if (best < conf || !keys.includes(classes[ci])) continue;
-    const cx = d[j], cy = d[N + j], w = d[2 * N + j], h = d[3 * N + j];
-    const x0 = (cx - w / 2 - t.px) / t.k, y0 = (cy - h / 2 - t.py) / t.k;
-    const x1 = (cx + w / 2 - t.px) / t.k, y1 = (cy + h / 2 - t.py) / t.k;
-    cand.push({ c: classes[ci], p: best, x0: Math.max(0, x0), y0: Math.max(0, y0),
-      x1: Math.min(t.W, x1), y1: Math.min(t.H, y1) });
+  } else {
+    // YOLOv8: [1, 4 + nc, N] (lo normal) o [1, N, 4 + nc] (algunas exportaciones lo dan traspuesto).
+    const T = dims[1] > dims[2];
+    const C = T ? dims[2] : dims[1], N = T ? dims[1] : dims[2], nc = C - 4;
+    const at = T ? (r, j) => d[j * C + r] : (r, j) => d[r * N + j];
+    for (let j = 0; j < N; j++) {
+      let bp = -1, ci = -1;
+      for (let c = 0; c < nc; c++) { const v = at(4 + c, j); if (v > bp) { bp = v; ci = c; } }
+      best = Math.max(best, bp);
+      const cx = at(0, j), cy = at(1, j), w = at(2, j), h = at(3, j);
+      box(ci, bp, cx - w / 2, cy - h / 2, cx + w / 2, cy + h / 2);
+    }
   }
+  model.lastInfo = `salida [${dims.join("×")}], puntaje máx. ${Math.round(best * 100) / 100}`;
   cand.sort((a, b) => b.p - a.p);
   const keep = [];
   for (const b of cand) {

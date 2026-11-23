@@ -543,7 +543,8 @@ const Ed = {
       this.sel = null;
       this.changed();
       $("tsaved").textContent = n ? `Aeon IA ${model.meta.version}: ${n} caja(s) sugerida(s). Revise el tipo de cada una y borre las que sobren`
-        : "Aeon IA no encontró estructuras nuevas";
+        : got.length ? `Aeon IA encontró ${got.length}, pero ya estaban marcadas`
+          : `Aeon IA no encontró estructuras (${model.lastInfo || ""})`;
     } catch (e) {
       say(e.message);
     } finally { btn.disabled = false; }

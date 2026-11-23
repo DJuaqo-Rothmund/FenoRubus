@@ -129,6 +129,8 @@ def _detect_numpy(model_path: str, image_path: str, imgsz: int) -> str:
     x = np.asarray(canvas, dtype=np.float32).transpose(2, 0, 1)[None] / 255.0
     sess = ort.InferenceSession(model_path, providers=["CPUExecutionProvider"])
     d = sess.run(None, {sess.get_inputs()[0].name: x})[0][0]          # [4 + nc, N]
+    if d.shape[0] > d.shape[1]:                                         # traspuesto: [N, 4 + nc]
+        d = d.T
     scores = d[4:]
     ci = scores.argmax(0)
     best = scores.max(0)

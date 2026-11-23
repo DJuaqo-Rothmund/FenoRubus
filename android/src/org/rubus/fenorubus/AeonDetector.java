@@ -167,7 +167,13 @@ public class AeonDetector {
             long t2 = System.currentTimeMillis();
             try (OrtSession.Result res = s.run(feeds)) {
                 float[][][] out = (float[][][]) res.get(0).getValue();
-                float[][] d = out[0];             // [4 + nc][N]
+                float[][] d = out[0];             // [4 + nc][N] (o traspuesto: [N][4 + nc])
+                if (d.length > d[0].length) {    // algunas exportaciones lo dan traspuesto
+                    float[][] tr = new float[d[0].length][d.length];
+                    for (int a = 0; a < d.length; a++)
+                        for (int b = 0; b < d[0].length; b++) tr[b][a] = d[a][b];
+                    d = tr;
+                }
                 int rows = d.length, N = d[0].length, nc = rows - 4;
                 for (int j = 0; j < N; j++) {
                     int ci = -1;
