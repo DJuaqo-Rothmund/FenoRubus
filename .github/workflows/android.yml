@@ -72,6 +72,12 @@ jobs:
       # Versión creciente en cada compilación (<serie>.<n.º de ejecución>): Android la
       # instala como ACTUALIZACIÓN encima de la anterior, conservando los datos. La serie,
       # el paquete y el nombre salen de release.env (1.1 estable; 1.2 «PhenoRubus Lab»).
+      # Empaquetar el APK con ONNX Runtime (Aeon IA) necesita más memoria que la que Gradle
+      # usa por defecto (falla «PackageAndroidArtifact$IncrementalSplitterRunnable»).
+      - name: Memoria para Gradle
+        run: |
+          mkdir -p ~/.gradle
+          echo "org.gradle.jvmargs=-Xmx4g -XX:MaxMetaspaceSize=1g -Dfile.encoding=UTF-8" >> ~/.gradle/gradle.properties
       - name: Número de versión y canal
         run: |
           source ${{ matrix.variant }}

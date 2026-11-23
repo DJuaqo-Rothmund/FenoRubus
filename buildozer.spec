@@ -115,7 +115,8 @@ android.gradle_dependencies = com.microsoft.onnxruntime:onnxruntime-android:1.20
 
 # ONNX Runtime (Aeon IA, la IA interna: android/src/…/AeonDetector.java) trae sus librerías
 # para todas las arquitecturas: solo se deja la de 64 bits (la de la app), así el APK no crece de más.
-android.add_packaging_options = "exclude 'lib/x86/libonnxruntime*.so'", "exclude 'lib/x86_64/libonnxruntime*.so'", "exclude 'lib/armeabi-v7a/libonnxruntime*.so'"
+# (Sin comillas: buildozer las copia tal cual al build.gradle y ahí no harían nada.)
+android.add_packaging_options = exclude 'lib/x86/libonnxruntime*.so', exclude 'lib/x86_64/libonnxruntime*.so', exclude 'lib/armeabi-v7a/libonnxruntime*.so'
 
 # (list) Actividades propias: la cámara de la app (CameraX: zoom, enfoque, varias fotos
 # seguidas y botones de un estabilizador Bluetooth). Ver android/src/…/AeonCamera.java.
