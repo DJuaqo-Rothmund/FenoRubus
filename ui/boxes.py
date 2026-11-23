@@ -1329,46 +1329,36 @@ class BoxEditor(ModalView):
 
     def aeon(self):
         """Cajas con Aeon IA (la IA interna, en el teléfono): se agregan a las que ya hay. La
-        primera vez de cada sesión revisa en Drive si hay una versión nueva del modelo."""
+        primera vez de cada sesión revisa en Drive si hay una versión nueva del modelo.
+        1) Drive (hilo aparte) · 2) análisis en Java (su propio hilo; aquí solo se pregunta cada
+        0,3 s si terminó, así la app no se congela) · cada etapa queda en el registro de tiempos."""
         a = app()
         p = self.photo
         if not p.get("path") or not os.path.exists(p["path"]):
             a.toast("La foto aún no está en el teléfono.")
             return
         if getattr(self, "_aeon_busy", False):
+            a.toast("Aeon IA ya está trabajando en esta foto…")
             return
+        import time
+
+        import aeon_ai
+        import crashguard
+        import perf
+        from platform_utils import is_android
         self._aeon_busy = True
         self.aeon_b.opacity = .55
-        a.toast("Aeon IA: buscando estructuras…")
         keys = [k for k, _, _ in CLASSES]
+        t0 = time.perf_counter()
+        a.toast("Aeon IA: preparando el modelo…")
 
-        def say(t):
-            Clock.schedule_once(lambda *_: a.toast(f"Aeon IA: {t}"))
-
-        def work():
-            import aeon_ai
-            got, err, model = [], None, None
-            try:
-                model = aeon_ai.current()
-                if drive_ready() and not getattr(a, "_aeon_checked", False):
-                    try:
-                        model = aeon_ai.update_from_drive(a.sync, say) or model
-                        a._aeon_checked = True
-                    except Exception as exc:  # noqa: BLE001 - sin red: el modelo que ya hay
-                        if model is None:
-                            raise exc
-                if model is None:
-                    raise RuntimeError("aún no hay un modelo entrenado (Drive › Entrenamiento IA › modelos)"
-                                       if drive_ready() else "conecte Google Drive para bajar el modelo")
-                got = aeon_ai.detect(p["path"], keys, model)
-            except Exception as exc:  # noqa: BLE001
-                err = exc
-            Clock.schedule_once(lambda *_: done(got, err, model))
-
-        def done(got, err, model):
+        def finish(got, err, model):
             self._aeon_busy = False
             self.aeon_b.opacity = 1
+            perf.record("aeon.total", (time.perf_counter() - t0) * 1000,
+                        f"{len(got or [])} cajas" if err is None else f"error: {err}")
             if err is not None:
+                crashguard.quiet(err if isinstance(err, BaseException) else RuntimeError(str(err)), "Aeon IA")
                 a.toast(f"Aeon IA: {err}")
                 return
             if self.photo is not p:
@@ -1380,9 +1370,80 @@ class BoxEditor(ModalView):
             self.sel = None
             self.changed()
             ver = (model or {}).get("meta", {}).get("version", "")
-            a.toast(f"Aeon IA {ver}: {n} caja(s) sugerida(s). Revise el tipo de cada una y borre las que sobren"
-                    if n else "Aeon IA no encontró estructuras nuevas en esta foto")
-        threading.Thread(target=work, daemon=True).start()
+            secs = time.perf_counter() - t0
+            a.toast(f"Aeon IA {ver}: {n} caja(s) sugerida(s) en {secs:.1f} s. Revise el tipo de cada una"
+                    if n else f"Aeon IA no encontró estructuras nuevas ({secs:.1f} s)")
+
+        def analyze(model):                          # en la interfaz: arranca y espera a Java
+            if not is_android():
+                def work_pc():
+                    try:
+                        with perf.timed("aeon.analizar"):
+                            got = aeon_ai.detect(p["path"], keys, model)
+                        Clock.schedule_once(lambda *_: finish(got, None, model))
+                    except Exception as exc:  # noqa: BLE001
+                        Clock.schedule_once(lambda *_, e=exc: finish([], e, model))
+                threading.Thread(target=work_pc, daemon=True).start()
+                return
+            try:
+                if not aeon_ai.start_android(p["path"], model):
+                    finish([], RuntimeError("el detector sigue ocupado con la foto anterior"), model)
+                    return
+            except Exception as exc:  # noqa: BLE001 - p. ej. la clase Java no está
+                finish([], exc, model)
+                return
+            a.toast("Aeon IA: analizando la foto…")
+            t1 = time.perf_counter()
+            warned = {"n": 0}
+
+            def tick(dt):
+                try:
+                    got = aeon_ai.poll_android(model, keys)
+                except Exception as exc:  # noqa: BLE001
+                    finish([], exc, model)
+                    return False
+                if got is not None:
+                    finish(got, None, model)
+                    return False
+                waited = time.perf_counter() - t1
+                if waited > 20 * (warned["n"] + 1):          # avisa cada 20 s en qué etapa va
+                    warned["n"] += 1
+                    a.toast(f"Aeon IA: sigue trabajando ({aeon_ai.stage_android()}, {int(waited)} s)…")
+                if waited > 120:
+                    finish([], RuntimeError(f"demoró demasiado (etapa: {aeon_ai.stage_android()})"), model)
+                    return False
+                return True
+            Clock.schedule_interval(tick, .3)
+
+        def say(t):
+            Clock.schedule_once(lambda *_: a.toast(f"Aeon IA: {t}"))
+
+        def prepare():                               # hilo aparte: Drive
+            model, err = None, None
+            try:
+                model = aeon_ai.current()
+                if drive_ready() and not getattr(a, "_aeon_checked", False):
+                    say("revisando la versión del modelo en Drive…")
+                    try:
+                        with perf.timed("aeon.revisar Drive"):
+                            model = aeon_ai.update_from_drive(a.sync, say) or model
+                        a._aeon_checked = True
+                    except Exception as exc:  # noqa: BLE001 - sin red: el modelo que ya hay
+                        crashguard.quiet(exc, "Aeon IA: revisar Drive")
+                        if model is None:
+                            raise
+                if model is None:
+                    raise RuntimeError("aún no hay un modelo entrenado (Drive › Entrenamiento IA › modelos)"
+                                       if drive_ready() else "conecte Google Drive para bajar el modelo")
+                perf.note("aeon.modelo", f"{model['meta'].get('version', '')} · {model['meta'].get('imgsz', '')} px")
+            except Exception as exc:  # noqa: BLE001
+                err = exc
+            if err is not None:
+                Clock.schedule_once(lambda *_: finish([], err, model))
+            else:
+                Clock.schedule_once(lambda *_: analyze(model))
+
+        threading.Thread(target=prepare, daemon=True).start()
 
     def copy_prev(self):
         if self.i <= 0:

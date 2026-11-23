@@ -93,6 +93,14 @@ def update_from_drive(drive_sync, progress=None) -> dict | None:
 def _parse(text: str, classes: list[str], keys: list[str]) -> list[dict]:
     if text.startswith("ERROR:"):
         raise RuntimeError(text[6:].strip() or "error de Aeon IA")
+    if text.startswith("T:"):              # tiempos del teléfono: modelo, foto, análisis (ms)
+        head, _, text = text.partition("|")
+        try:
+            import perf
+            for name, ms in zip(("aeon.cargar modelo", "aeon.preparar foto", "aeon.analizar"), head[2:].split(",")):
+                perf.record(name, float(ms))
+        except Exception:  # noqa: BLE001
+            pass
     out = []
     for item in filter(None, text.split(";")):
         ci, p, x0, y0, x1, y1 = item.split(",")
@@ -148,6 +156,39 @@ def _detect_numpy(model_path: str, image_path: str, imgsz: int) -> str:
         if len(keep) >= MAX_BOXES:
             break
     return ";".join(f"{c},{p},{x0 / W},{y0 / H},{x1 / W},{y1 / H}" for c, p, x0, y0, x1, y1 in keep)
+
+
+# ---- En Android, sin bloquear la interfaz (ver AeonDetector.start/poll) ----
+_det = None
+
+
+def _java():
+    """La clase Java, cargada desde la interfaz (en otros hilos la app no siempre la encuentra)."""
+    global _det
+    if _det is None:
+        from jnius import autoclass
+        _det = autoclass("org.rubus.fenorubus.AeonDetector")
+    return _det
+
+
+def start_android(image_path: str, model: dict) -> bool:
+    imgsz = int(model["meta"].get("imgsz") or 640)
+    return bool(_java().start(model["path"], image_path, imgsz, float(CONF), float(IOU), MAX_BOXES))
+
+
+def poll_android(model: dict, keys: list[str]):
+    """None mientras analiza; después, las cajas (o error con RuntimeError)."""
+    text = _java().poll()
+    if text is None:
+        return None
+    return _parse(str(text), list(model["meta"].get("classes") or []), list(keys))
+
+
+def stage_android() -> str:
+    try:
+        return str(_java().stage() or "")
+    except Exception:  # noqa: BLE001
+        return ""
 
 
 def detect(image_path: str, keys: list[str], model: dict | None = None) -> list[dict]:

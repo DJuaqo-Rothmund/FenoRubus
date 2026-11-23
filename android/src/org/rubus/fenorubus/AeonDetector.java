@@ -88,10 +88,53 @@ public class AeonDetector {
         return u > 0 ? inter / u : 0f;
     }
 
+    // ---- Llamada sin bloquear: Python llama start() desde la interfaz y luego poll() cada
+    // fracción de segundo (pyjnius no suelta Python mientras Java trabaja: si detect() se
+    // llamara directo, la app quedaría congelada mientras analiza la foto).
+    private static volatile boolean busy = false;
+    private static volatile String result = null;
+    private static volatile String stage = "";
+
+    public static synchronized boolean start(final String modelPath, final String imagePath, final int imgsz,
+                                             final float conf, final float iouThr, final int maxBoxes) {
+        if (busy) return false;
+        busy = true;
+        result = null;
+        stage = "inicio";
+        new Thread(new Runnable() {
+            @Override
+            public void run() {
+                String r;
+                try {
+                    r = detect(modelPath, imagePath, imgsz, conf, iouThr, maxBoxes);
+                } catch (Throwable e) {
+                    r = "ERROR:" + e;
+                }
+                result = r;
+                busy = false;
+            }
+        }, "AeonDetector").start();
+        return true;
+    }
+
+    /** null mientras analiza; después, el resultado de detect(). */
+    public static String poll() {
+        return busy ? null : result;
+    }
+
+    /** Etapa en curso (para avisar si demora): «modelo», «foto», «analizando», «cajas». */
+    public static String stage() {
+        return stage;
+    }
+
     public static String detect(String modelPath, String imagePath, int imgsz, float conf, float iouThr,
                                 int maxBoxes) {
         try {
+            long t0 = System.currentTimeMillis();
+            stage = "modelo";
             OrtSession s = load(modelPath);
+            long t1 = System.currentTimeMillis();
+            stage = "foto";
             Bitmap src = readUpright(imagePath, imgsz);
             int W = src.getWidth(), H = src.getHeight();
             float k = Math.min((float) imgsz / W, (float) imgsz / H);
@@ -120,6 +163,8 @@ public class AeonDetector {
             OnnxTensor t = OnnxTensor.createTensor(env, fb, new long[]{1, 3, imgsz, imgsz});
             feeds.put(input, t);
             List<float[]> cand = new ArrayList<>();
+            stage = "analizando";
+            long t2 = System.currentTimeMillis();
             try (OrtSession.Result res = s.run(feeds)) {
                 float[][][] out = (float[][][]) res.get(0).getValue();
                 float[][] d = out[0];             // [4 + nc][N]
@@ -140,6 +185,8 @@ public class AeonDetector {
             } finally {
                 t.close();
             }
+            long t3 = System.currentTimeMillis();
+            stage = "cajas";
             Collections.sort(cand, new Comparator<float[]>() {
                 @Override
                 public int compare(float[] a, float[] b) { return Float.compare(b[1], a[1]); }
@@ -155,8 +202,11 @@ public class AeonDetector {
                 if (keep.size() >= maxBoxes) break;
             }
             StringBuilder sb = new StringBuilder();
+            // Tiempos (ms) al comienzo: «T:modelo,foto,análisis|cajas…» (van al registro de tiempos).
+            sb.append("T:").append(t1 - t0).append(',').append(t2 - t1).append(',').append(t3 - t2).append('|');
+            int start = sb.length();
             for (float[] b : keep) {
-                if (sb.length() > 0) sb.append(';');
+                if (sb.length() > start) sb.append(';');
                 sb.append((int) b[0]).append(',').append(b[1]).append(',')
                   .append(b[2] / W).append(',').append(b[3] / H).append(',')
                   .append(b[4] / W).append(',').append(b[5] / H);
