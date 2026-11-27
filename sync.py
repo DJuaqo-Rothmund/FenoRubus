@@ -72,15 +72,30 @@ TABLES: dict[str, dict] = {
                      "natural": ("record_id", "path"), "local": ("queue_id",)},
     "scout_ai": {"uid": "lower(hex(randomblob(16)))", "fk": {"record_id": "scout_records"},
                  "natural": ("record_id",)},
+    # Plantas (base propia por cultivo, ver plantas.py).
+    "field_row_edits": {"uid": "lower(hex(randomblob(16)))", "fk": {}, "natural": ("predio", "row_key")},
+    "plant_trials": {"uid": "lower(hex(randomblob(16)))", "fk": {}, "natural": ("code",)},
+    "plant_rows": {"uid": "lower(hex(randomblob(16)))", "fk": {"trial_id": "plant_trials"},
+                   "natural": ("trial_id", "label")},
+    "plants": {"uid": "lower(hex(randomblob(16)))", "fk": {"row_id": "plant_rows"},
+               "natural": ("row_id", "hoyo")},
+    "plant_events": {"uid": "lower(hex(randomblob(16)))", "fk": {"plant_id": "plants"}, "natural": ()},
+    "plant_photos": {"uid": "lower(hex(randomblob(16)))", "fk": {"event_id": "plant_events"},
+                     "natural": ("event_id", "path"), "local": ("queue_id",)},
+    "plant_measures": {"uid": "lower(hex(randomblob(16)))", "fk": {"plant_id": "plants"},
+                       "natural": ("plant_id", "day")},
 }
 # Orden de aplicación: primero lo que otros referencian.
 ORDER = ["varieties", "sampling_weeks", "treatments", "measures", "observations", "photos",
          "primo_obs", "primo_photos",
          "variety_attachments", "measure_entries", "variety_metrics", "custom_fields",
          "notebook_entries", "notebook_photos", "weather_days", "yield_sets", "yield_photos",
-         "yield_counts", "scout_species", "scout_records", "scout_photos", "scout_ai"]
+         "yield_counts", "scout_species", "scout_records", "scout_photos", "scout_ai",
+         "field_row_edits", "plant_trials", "plant_rows", "plants", "plant_events", "plant_photos",
+         "plant_measures"]
 PATH_COLUMNS = {"photos": "path", "primo_photos": "path", "variety_attachments": "path", "measure_entries": "path",
-                "notebook_photos": "path", "yield_photos": "path", "scout_photos": "path"}
+                "notebook_photos": "path", "yield_photos": "path", "scout_photos": "path",
+                "plant_photos": "path"}
 # Ajustes del ensayo que también viajan (semana de referencia, primera semana fijada…).
 SETTING_PREFIXES = ("season_start:", "first_week:", "treatment_", "trial_", "reportcfg", "share_",
                     "measure_schedule:", "sheet_legend", "sheet_marks:")

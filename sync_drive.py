@@ -399,6 +399,13 @@ class DriveSync:
                 if isinstance(exc, Offline):
                     raise
                 print("sincronización de rendimiento:", exc)
+            try:
+                with perf.timed("sync.plantas"):
+                    self._sync_plants(manual, total)
+            except Exception as exc:  # noqa: BLE001
+                if isinstance(exc, Offline):
+                    raise
+                print("sincronización de plantas:", exc)
         d = perf.since(before)
         perf.note("sync.resumen", f"{len(wss)} ensayos · " + " · ".join(
             f"{k}: {round(v)}" for k, v in sorted(d.items()) if k.startswith(("drive.", "sql."))))
@@ -417,6 +424,32 @@ class DriveSync:
         res = self.sync_db(db, folder)
         for k in ("received", "sent", "applied"):
             total[k] += res[k]
+        if self.photos_allowed():
+            got, left = self.fetch_missing(db, None if manual else MAX_DOWNLOADS)
+            total["downloaded"] += got
+            total["pending_photos"] += left
+
+    def _sync_plants(self, manual: bool, total: dict) -> None:
+        """Módulo Plantas del cultivo: paquetes en «<módulo>/Plantas/Sincronización»; sube las
+        fotos de los eventos pendientes y baja las que lleguen del otro equipo."""
+        import plantas
+        crop = getattr(self.drive, "crop", None)
+        db = plantas.open_db(self.data_dir, getattr(crop, "id", "frambuesa"))
+        if not db.query_one("SELECT 1 FROM plant_trials LIMIT 1") and not db.query_one(
+                "SELECT 1 FROM field_row_edits LIMIT 1") and not manual:
+            return                     # módulo sin usar: no crea carpetas en Drive
+        base = self.drive._folder(plantas.DRIVE_DIR, self.drive.root_id())
+        folder = self.drive._folder(plantas.SYNC_DIR, base)
+        res = self.sync_db(db, folder)
+        for k in ("received", "sent", "applied"):
+            total[k] += res[k]
+        try:
+            from drive_backup import DriveBackup
+            backup = DriveBackup(db, authorizer=self.drive.authorizer, transport=self.drive.transport,
+                                 metered=self.drive.metered, crop=self.drive.crop)
+            total["uploaded"] += plantas.PlantDrive(db, backup=backup).run()
+        except Exception as exc:  # noqa: BLE001 (las fotos se suben la próxima vez)
+            print("fotos de plantas:", exc)
         if self.photos_allowed():
             got, left = self.fetch_missing(db, None if manual else MAX_DOWNLOADS)
             total["downloaded"] += got

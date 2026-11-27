@@ -462,6 +462,15 @@
         Widget:
             size_hint_y: None
             height: dp(4)
+        GhostButton:
+            id: plants_btn
+            icon: "sprout-outline"
+            text: "Plantas · ficha de cada planta"
+            height: dp(46)
+            on_release: app.open_plantas()
+        Widget:
+            size_hint_y: None
+            height: dp(6)
         # La cuenta de Google se conecta en la pantalla de cultivos (una para todos).
         GhostButton:
             id: crops_btn

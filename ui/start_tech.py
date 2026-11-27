@@ -402,6 +402,12 @@ KV = """
                 accent: "#3C78FF"
                 on_release: app.open_yield()
         GhostButton:
+            id: plants_btn
+            icon: "sprout-outline"
+            text: "Plantas · ficha de cada planta"
+            height: dp(46)
+            on_release: app.open_plantas()
+        GhostButton:
             id: crops_btn
             icon: "home-variant-outline"
             text: "AeonCrop · todos los cultivos"

@@ -474,6 +474,11 @@ class FenoRubusApp(MDApp):
         from ui import yield_ui
         yield_ui.open_home()
 
+    def open_plantas(self):
+        """Módulo Plantas: hileras del campo y la ficha de cada planta de los ensayos."""
+        from ui import plantas_ui
+        plantas_ui.open_home()
+
     def open_scout(self):
         """AeonScout desde la pantalla principal."""
         from ui import scout_ui

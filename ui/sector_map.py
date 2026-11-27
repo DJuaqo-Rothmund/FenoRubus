@@ -159,6 +159,7 @@ class SectorMap(StencilView):
     fill = DictProperty()
     marks = ListProperty()
     fill_text = DictProperty()          # {id: "1,9 t/ha"}: se agrega al rótulo al acercar
+    fill_k = NumericProperty(1.0)       # opacidad del relleno de los sectores (hileras encima: menos)
 
     MAX_ZOOM = 14.0
 
@@ -201,7 +202,7 @@ class SectorMap(StencilView):
         self.bind(size=self._redraw, selected=self._redraw,
                   status=self._redraw, zoom=self._redraw, rotate=self._redraw,
                   satellite=self._redraw, fill=self._redraw, marks=self._redraw,
-                  fill_text=self._redraw, focused=self._redraw)
+                  fill_text=self._redraw, focused=self._redraw, fill_k=self._redraw)
 
     # ----------------------------------------------------------- coordenadas
     def _dims(self):
@@ -392,7 +393,8 @@ class SectorMap(StencilView):
                 if self.fill and (sat or other):
                     Color(*rgba[:3], (.15 if faded else .7) * (.35 if other else 1))
                 else:
-                    Color(*rgba[:3], (.38 if faded else .62) if sat else (rgba[3] if len(rgba) > 3 else 1))
+                    Color(*rgba[:3], ((.38 if faded else .62) if sat else (rgba[3] if len(rgba) > 3 else 1))
+                          * self.fill_k)
                 for verts, idx in meshes:
                     v = list(verts)
                     for k in range(0, len(v), 4):
@@ -415,6 +417,7 @@ class SectorMap(StencilView):
                     Line(points=pts, close=True, width=dp(.5))
                 else:
                     Line(points=pts, close=True, width=dp(.9))
+            self._overlay(ts)           # hileras del módulo Plantas (ui/plant_maps.py), bajo los rótulos
             # Rótulos «equipo-sector» donde caben; un punto si tiene mediciones.
             s = self._base() * self.zoom
             for sid, (lx, ly) in self._labels.items():
@@ -508,6 +511,9 @@ class SectorMap(StencilView):
             ev.cancel()
             self._neon_ev = None
         self._neon_tick(0)
+
+    def _overlay(self, ts):
+        """Dibujo extra entre los sectores y sus rótulos (lo usan las subclases)."""
 
     BREATH_S = 2.2      # una respiración completa (sube y baja el brillo)
 
