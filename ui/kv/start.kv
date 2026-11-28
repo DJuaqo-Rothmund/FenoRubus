@@ -5,6 +5,42 @@
 #:import dp kivy.metrics.dp
 #:import NoTransition kivy.uix.screenmanager.NoTransition
 
+<ModulePill@ButtonBehavior+BoxLayout>:
+    # Módulo secundario del inicio (Plantas): su ícono ilustrado y el nombre, en una píldora.
+    source: ""
+    text: ""
+    size_hint_y: None
+    height: dp(58)
+    padding: dp(8), dp(3), dp(16), dp(3)
+    spacing: dp(10)
+    canvas.before:
+        Color:
+            rgba: c(theme.SURFACE, .55 if self.state == "normal" else .8)
+        RoundedRectangle:
+            pos: self.pos
+            size: self.size
+            radius: [self.height / 2]
+        Color:
+            rgba: c(theme.LINE)
+        Line:
+            rounded_rectangle: (self.x, self.y, self.width, self.height, self.height / 2)
+            width: dp(1)
+    Image:
+        source: root.source
+        size_hint: None, None
+        size: dp(52), dp(52)
+        pos_hint: {"center_y": .5}
+        fit_mode: "contain"
+    Label:
+        text: root.text
+        markup: True
+        color: c(theme.LEAF_DARK)
+        bold: True
+        font_size: "15sp"
+        halign: "left"
+        valign: "middle"
+        text_size: self.size
+
 # ---------------------------------------------------------------------------
 # Pantalla de inicio
 # ---------------------------------------------------------------------------
@@ -462,11 +498,10 @@
         Widget:
             size_hint_y: None
             height: dp(4)
-        GhostButton:
+        ModulePill:
             id: plants_btn
-            icon: "sprout-outline"
-            text: "Plantas · ficha de cada planta"
-            height: dp(46)
+            source: theme.START_PLANTAS
+            text: "Plantas  [size=12sp][color=#6E7E75]· ficha de cada planta[/color][/size]"
             on_release: app.open_plantas()
         Widget:
             size_hint_y: None

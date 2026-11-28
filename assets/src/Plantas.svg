@@ -1,0 +1,41 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 360 360" width="360" height="360">
+  <g fill="none" stroke="#111" stroke-width="7" stroke-linecap="round" stroke-linejoin="round">
+    <!-- suelo -->
+    <path d="M70 318 Q180 290 290 318" />
+    <path d="M110 330 L130 330 M160 334 L200 334 M228 330 L250 330" stroke-width="5"/>
+    <!-- caña principal -->
+    <path d="M178 312 C176 250 182 200 178 120 C177 100 182 82 190 70" />
+    <!-- caña secundaria (primocaña) -->
+    <path d="M182 300 C200 270 222 240 240 214" />
+    <path d="M176 296 C160 270 140 252 118 240" />
+  </g>
+  <!-- hojas -->
+  <g stroke="#111" stroke-width="6" stroke-linejoin="round">
+    <path d="M178 178 C140 150 108 156 92 170 C112 196 150 200 178 178 Z" fill="#8FCB6B"/>
+    <path d="M178 178 C150 172 122 170 100 172" fill="none" stroke-width="4"/>
+    <path d="M180 140 C214 108 250 112 266 128 C246 156 208 160 180 140 Z" fill="#8FCB6B"/>
+    <path d="M180 140 C210 134 236 130 258 130" fill="none" stroke-width="4"/>
+    <path d="M190 72 C206 46 232 40 246 46 C238 72 214 84 190 72 Z" fill="#B5DD8F"/>
+    <path d="M240 214 C262 196 286 200 296 212 C280 232 258 234 240 214 Z" fill="#B5DD8F"/>
+    <path d="M118 240 C96 226 72 232 64 244 C80 262 104 260 118 240 Z" fill="#B5DD8F"/>
+  </g>
+  <!-- frambuesas -->
+  <g stroke="#111" stroke-width="5">
+    <path d="M150 210 C150 232 168 246 176 246 C184 246 200 232 200 210" fill="none" stroke-width="0"/>
+    <g fill="#C2185B">
+      <circle cx="146" cy="214" r="10"/><circle cx="164" cy="214" r="10"/>
+      <circle cx="137" cy="230" r="10"/><circle cx="155" cy="230" r="10"/><circle cx="173" cy="230" r="10"/>
+      <circle cx="146" cy="246" r="10"/><circle cx="164" cy="246" r="10"/>
+      <circle cx="155" cy="261" r="10"/>
+    </g>
+    <path d="M155 204 L148 194 M155 204 L162 194 M155 204 L155 192" stroke-width="5" fill="none"/>
+    <path d="M178 200 C170 200 160 204 155 204" fill="none"/>
+  </g>
+  <!-- diana (mira) sobre la planta -->
+  <g fill="none" stroke="#A8184A" stroke-linecap="round">
+    <circle cx="190" cy="168" r="96" stroke-width="9"/>
+    <circle cx="190" cy="168" r="60" stroke-width="6" stroke-dasharray="14 12"/>
+    <path d="M190 52 L190 92 M190 244 L190 284 M74 168 L114 168 M266 168 L306 168" stroke-width="9"/>
+  </g>
+  <circle cx="190" cy="168" r="11" fill="#A8184A" stroke="#fff" stroke-width="4"/>
+</svg>

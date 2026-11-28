@@ -19,7 +19,7 @@ from pathlib import Path
 from kivy.clock import Clock
 from kivy.core.text import Label as CoreLabel
 from kivy.graphics import (Color, Ellipse, InstructionGroup, Line, Mesh, PopMatrix, PushMatrix,
-                           Rectangle, Translate)
+                           Rectangle, Scale, Translate)
 from kivy.graphics.tesselator import TYPE_POLYGONS, WINDING_ODD, Tesselator
 from kivy.metrics import dp, sp
 from kivy.properties import BooleanProperty, DictProperty, ListProperty, NumericProperty, StringProperty
@@ -192,6 +192,11 @@ class SectorMap(StencilView):
             self._bbox[s["id"]] = (max(r[0::2]) - min(r[0::2]), max(r[1::2]) - min(r[1::2]))
         self._shift = None
         self._redraw = Clock.create_trigger(self._draw, -1)
+        # Al mover o pellizcar no se redibuja: se desplaza y escala lo ya dibujado (una sola
+        # matriz, ver _fast) y el dibujo fino se rehace al soltar (_settle).
+        self._settle = Clock.create_trigger(self._draw, .14)
+        self._drawn = None
+        self._view = None
         self._tiles = None
         if plan.get("geo"):
             from kivymd.app import MDApp
@@ -200,7 +205,7 @@ class SectorMap(StencilView):
         self.bind(pos=self._move)
         self.bind(size=lambda *_: self.focused and self.focus(self.focused, animate=False))
         self.bind(size=self._redraw, selected=self._redraw,
-                  status=self._redraw, zoom=self._redraw, rotate=self._redraw,
+                  status=self._redraw, rotate=self._redraw,
                   satellite=self._redraw, fill=self._redraw, marks=self._redraw,
                   fill_text=self._redraw, focused=self._redraw, fill_k=self._redraw)
 
@@ -223,6 +228,29 @@ class SectorMap(StencilView):
         s = self._base() * self.zoom
         return (self.width / 2 + (x - mw / 2) * s + self._pan[0],
                 self.height / 2 + (y - mh / 2) * s + self._pan[1])
+
+    def _affine(self):
+        """(ax, ay, s, rotate, w_plano): _local precalculado para dibujar miles de puntos."""
+        mw, mh = self._dims()
+        s = self._base() * self.zoom
+        return (self.width / 2 - mw / 2 * s + self._pan[0], self.height / 2 - mh / 2 * s + self._pan[1],
+                s, self.rotate, self.plan["w"])
+
+    def _fast_local(self):
+        ax, ay, s, rot, pw = self._affine()
+        if rot:
+            return lambda x, y: (ax + y * s, ay + (pw - x) * s)
+        return lambda x, y: (ax + x * s, ay + y * s)
+
+    def _xform(self, v, step=4):
+        """Vértices [x, y, …] (cada `step` valores) del plano a la pantalla, de una vez."""
+        ax, ay, s, rot, pw = self._affine()
+        xs, ys = v[0::step], v[1::step]
+        if rot:
+            xs, ys = ys, [pw - x for x in xs]
+        v[0::step] = [ax + x * s for x in xs]
+        v[1::step] = [ay + y * s for y in ys]
+        return v
 
     def to_screen(self, x, y):
         lx, ly = self._local(x, y)
@@ -293,7 +321,7 @@ class SectorMap(StencilView):
             k = 1 - (1 - state["t"]) ** 3          # sale rápido y frena suave
             self._pan = [start[1][i] + (target_pan[i] - start[1][i]) * k for i in (0, 1)]
             self.zoom = start[0] + (target_zoom - start[0]) * k
-            self._redraw()
+            self._fast()
             return state["t"] < 1.0
 
         self._focus_ev = Clock.schedule_interval(step, 1 / 60)
@@ -309,12 +337,14 @@ class SectorMap(StencilView):
         lat_c = (self.plan["h"] / 2 + g["y0"]) / g["ky"]
         z = int(math.ceil(math.log2(max(1.0, 156543.03 * math.cos(math.radians(lat_c)) * s))))
         z = max(10, min(20, z))
-        corners = [self.to_map(self.x + a * self.width, self.y + b * self.height) for a in (0, 1) for b in (0, 1)]
+        # Con margen: al arrastrar, lo de alrededor ya está dibujado hasta soltar.
+        corners = [self.to_map(self.x + a * self.width, self.y + b * self.height)
+                   for a in (-.35, 1.35) for b in (-.35, 1.35)]
         lons = [(x + g["x0"]) / g["kx"] for x, _y in corners]
         lats = [(y + g["y0"]) / g["ky"] for _x, y in corners]
         tx0, ty0 = geo.latlon_to_tile(max(lats), min(lons), z)
         tx1, ty1 = geo.latlon_to_tile(min(lats), max(lons), z)
-        if (tx1 - tx0) * (ty1 - ty0) > 400:            # demasiadas: no dibujar
+        if (tx1 - tx0) * (ty1 - ty0) > 700:            # demasiadas: no dibujar
             return
         Color(1, 1, 1, 1)
         for ty in range(int(ty0), int(ty1) + 1):
@@ -376,11 +406,13 @@ class SectorMap(StencilView):
             for sid in info:
                 rgb = self.fill.get(sid)
                 colors[sid] = ([*rgb, 1.0], True) if rgb else (c("#E6E8E3"), False)
-        ts = self._local
+        ts = self._fast_local()
         w, h = self.size
         with self.canvas:
             PushMatrix()
             self._shift = Translate(*self.pos)
+            self._view = (Translate(0, 0), Scale(1, 1, 1), Translate(0, 0))
+            self._drawn = (self._base() * self.zoom, list(self._pan), tuple(self.size))
             if sat:
                 Color(0.16, 0.2, 0.16, 1)                     # mientras bajan las teselas
                 Rectangle(pos=(0, 0), size=self.size)
@@ -396,18 +428,13 @@ class SectorMap(StencilView):
                     Color(*rgba[:3], ((.38 if faded else .62) if sat else (rgba[3] if len(rgba) > 3 else 1))
                           * self.fill_k)
                 for verts, idx in meshes:
-                    v = list(verts)
-                    for k in range(0, len(v), 4):
-                        v[k], v[k + 1] = ts(v[k], v[k + 1])
-                    Mesh(vertices=v, indices=idx, mode="triangle_fan")
+                    Mesh(vertices=self._xform(list(verts)), indices=idx, mode="triangle_fan")
             # Las líneas van SIEMPRE opacas: una Line con transparencia usa el stencil por
             # dentro y se saldría del recorte del plano.
             Color(1, 1, 1, 1)
             outlines = {}
             for sid, ring, _m, _a in self._parts:
-                pts = []
-                for k in range(0, len(ring), 2):
-                    pts += ts(ring[k], ring[k + 1])
+                pts = self._xform(list(ring), 2)
                 outlines.setdefault(sid, []).append(pts)
                 if self.fill:        # rendimiento en el relleno; el equipo, en el borde
                     eq = info[sid]["equipo"]
@@ -512,6 +539,25 @@ class SectorMap(StencilView):
             self._neon_ev = None
         self._neon_tick(0)
 
+    def _fast(self):
+        """Mover o acercar sin redibujar: ajusta la matriz de vista sobre lo ya dibujado y
+        deja el dibujo fino (rótulos, hileras, teselas nuevas) para cuando se suelta."""
+        if self._view is None or self._drawn is None or self._drawn[2] != tuple(self.size):
+            self._redraw()
+            return
+        s0, p0, _size = self._drawn
+        k = (self._base() * self.zoom) / s0
+        if not .55 < k < 1.8:          # pellizco largo: detalle nuevo sin esperar a soltar
+            self._redraw()
+            return
+        cx, cy = self.width / 2, self.height / 2
+        t1, sc, t2 = self._view
+        t1.xy = (cx + self._pan[0], cy + self._pan[1])
+        sc.xyz = (k, k, 1)
+        t2.xy = (-(cx + p0[0]), -(cy + p0[1]))
+        self._settle.cancel()
+        self._settle()
+
     def _overlay(self, ts):
         """Dibujo extra entre los sectores y sus rótulos (lo usan las subclases)."""
 
@@ -591,7 +637,7 @@ class SectorMap(StencilView):
         self._pan[1] = (pos[1] - self.center_y) - (pos[1] - self.center_y - self._pan[1]) * k
         self.zoom = new
         self._clamp_pan()
-        self._redraw()
+        self._fast()
 
     def on_touch_move(self, touch):
         if touch.grab_current is not self:
@@ -609,7 +655,7 @@ class SectorMap(StencilView):
             self._pan[0] += touch.x - prev[0]
             self._pan[1] += touch.y - prev[1]
             self._clamp_pan()
-            self._redraw()
+            self._fast()
         return True
 
     def on_touch_up(self, touch):

@@ -20,7 +20,8 @@ import zlib
 
 from kivy.clock import Clock
 from kivy.core.text import Label as CoreLabel
-from kivy.graphics import Color, Ellipse, Line, Mesh, Rectangle, RoundedRectangle
+from kivy.graphics import (Color, Ellipse, Line, Mesh, PopMatrix, PushMatrix, Rectangle, RoundedRectangle,
+                           Scale, Translate)
 from kivy.metrics import dp, sp
 from kivy.properties import BooleanProperty, DictProperty, ListProperty, NumericProperty, StringProperty
 from kivy.uix.stencilview import StencilView
@@ -104,7 +105,7 @@ class RowMap(SectorMap):
         width = max(dp(.7), min(dp(4), spacing * .42))
         groups: dict = {}
         lit, rev, hidden = [], [], []
-        pad = dp(20)
+        pad = max(w, h) * .6            # margen: al arrastrar ya está dibujado hasta soltar
         for r in self.rows:
             x0, y0 = ts(r["x0"], r["y0"])
             x1, y1 = ts(r["x1"], r["y1"])
@@ -310,8 +311,12 @@ class PlantMap(StencilView):
         self._multi: set = set()
         self._fit = True
         self._redraw = Clock.create_trigger(self._draw, -1)
+        self._settle = Clock.create_trigger(self._draw, .14)   # dibujo fino al soltar (ver _fast)
+        self._view = None
+        self._drawn = None
+        self._rgb: dict = {}
         self.bind(size=self._on_size, pos=self._redraw, mode=self._redraw, values=self._redraw,
-                  events=self._redraw, selected=self._redraw, k=self._redraw)
+                  events=self._redraw, selected=self._redraw)
 
     # ------------------------------------------------------------ geometría
     TOP, BOTTOM = dp(34), dp(26)
@@ -365,17 +370,46 @@ class PlantMap(StencilView):
         return value_color(self.values.get(p["id"]), lo, hi)
 
     # ------------------------------------------------------------ dibujo
+    def _c(self, hex_color):
+        rgb = self._rgb.get(hex_color)
+        if rgb is None:
+            rgb = self._rgb[hex_color] = _hex(hex_color)
+        return rgb
+
+    def _fast(self):
+        """Arrastrar o pellizcar sin redibujar: solo la matriz de vista (vertical) sobre lo ya
+        dibujado; el dibujo fino (círculos redondos, números) al soltar."""
+        if self._view is None or self._drawn is None or self._drawn[2] != (tuple(self.pos), tuple(self.size)):
+            self._redraw()
+            return
+        k0, off0, _geo = self._drawn
+        if not .6 < self.k / k0 < 1.7:   # pellizco largo: redibuja sin esperar a soltar
+            self._redraw()
+            return
+        base = self.y + self.BOTTOM
+        t1, sc, t2 = self._view
+        t1.xy = (0, base + (off0 - self.off) * self.k)
+        sc.xyz = (1, self.k / k0, 1)
+        t2.xy = (0, -base)
+        self._settle.cancel()
+        self._settle()
+
     def _draw(self, *_):
+        # (canvas.before/after son del recorte de StencilView: no se tocan)
         self.canvas.clear()
         if not self.width or not self.height:
             return
         k, r = self.k, self._radius()
         vals = [v for v in self.values.values() if v is not None]
         self._range = (min(vals), max(vals)) if vals else (0, 1)
-        lo_m, hi_m = self.m_of(self.y) - 2, self.m_of(self.top) + 2
+        span = (self.top - self.y) / k
+        lo_m, hi_m = self.m_of(self.y) - 2 - span, self.m_of(self.top) + 2 + span   # con margen
         with self.canvas:
             Color(*_hex("#EEEBE2"), 1)
             Rectangle(pos=self.pos, size=self.size)
+            PushMatrix()
+            self._view = (Translate(0, 0), Scale(1, 1, 1), Translate(0, 0))
+            self._drawn = (k, self.off, (tuple(self.pos), tuple(self.size)))
             # Regla de metros a la izquierda.
             step = next(s for s in (1, 2, 5, 10, 20, 50, 100) if s * k >= dp(38))
             m = math.ceil(max(0.0, lo_m) / step) * step
@@ -411,8 +445,8 @@ class PlantMap(StencilView):
                         Color(*_hex("#8F978F"), .9 if p["kind"] == "falla" else .45)
                         Line(circle=(x, y, max(dp(1.2), r * .85)), width=dp(1) if r > dp(4) else dp(.7))
                         continue
-                    Color(*_hex(col), 1)
-                    Ellipse(pos=(x - r, y - r), size=(2 * r, 2 * r))
+                    Color(*self._c(col), 1)
+                    Ellipse(pos=(x - r, y - r), size=(2 * r, 2 * r), segments=24 if r > dp(4) else 10)
                     if p["status"] == "muerta" and r >= dp(5):
                         Color(1, 1, 1, .9)
                         Line(points=[x - r * .5, y - r * .5, x + r * .5, y + r * .5], width=dp(1))
@@ -426,7 +460,8 @@ class PlantMap(StencilView):
                         Line(circle=(x, y, r + dp(4)), width=dp(2))
                 # Rótulos de tramo (variedad · bloque y su rango de plantas) donde caben.
                 self._tramo_labels(row, x, r, lo_m, hi_m, left=i % 2 == 0)
-            # Cabecera: hilera del campo y etiqueta del ensayo.
+            PopMatrix()
+            # Cabecera: hilera del campo y etiqueta del ensayo (fijas: no se mueven con el mapa).
             Color(*_hex("#EEEBE2"), .92)
             Rectangle(pos=(self.x, self.top - self.TOP), size=(self.width, self.TOP))
             for i, row in enumerate(self.rows):
@@ -499,7 +534,7 @@ class PlantMap(StencilView):
         self.k = max(self._min_k(), min(self._max_k(), self.k * f))
         self.off = m - (y - self.y - self.BOTTOM) / self.k
         self._clamp()
-        self._redraw()
+        self._fast()
 
     def on_touch_down(self, touch):
         if not self.collide_point(*touch.pos):
@@ -530,7 +565,7 @@ class PlantMap(StencilView):
             self._fit = False
             self.off -= (touch.y - prev[1]) / self.k
             self._clamp()
-            self._redraw()
+            self._fast()
         return True
 
     def on_touch_up(self, touch):

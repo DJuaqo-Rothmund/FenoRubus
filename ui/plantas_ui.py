@@ -337,6 +337,14 @@ class PlantsHome(PlScreen):
     def refresh(self):
         d = db()
         body = self.clear()
+        head = MDBoxLayout(size_hint_y=None, height=dp(84), spacing=dp(12))
+        head.add_widget(Image(source=theme.START_PLANTAS, size_hint=(None, None), size=(dp(80), dp(80)),
+                              pos_hint={"center_y": .5}))
+        txt = MDBoxLayout(orientation="vertical", adaptive_height=True, pos_hint={"center_y": .5})
+        txt.add_widget(lbl("Plantas", 22, True, GREEN))
+        txt.add_widget(lbl("La ficha de cada planta, en el mapa del campo", 12.5, False, theme.MUTED))
+        head.add_widget(txt)
+        body.add_widget(head)
         rows = d.field_rows(PREDIO)
         if rows:
             k = card()
@@ -398,7 +406,8 @@ class FieldScreen(PlMapScreen):
     def on_pre_enter(self, *_):
         self.title = "Hileras del campo"
         self.actions = [["magnify", lambda x: self.search()],
-                        ["satellite-variant", lambda x: self.toggle_sat()]]
+                        ["satellite-variant", lambda x: self.toggle_sat()],
+                        ["cloud-upload-outline", lambda x: self.send_edits()]]
         if self.map is None:
             self._build_map()
         self.reload()
@@ -492,6 +501,45 @@ class FieldScreen(PlMapScreen):
                 self.set_highlight(True)
                 self.top_controls()
         form_dialog("¿Qué ensayos destacar?", box, ok, ok_text="LISTO")
+
+    def send_edits(self):
+        """Correcciones de las hileras → Drive («Plantas/Hileras corregidas AM.json»): con ese
+        archivo se dejan incorporadas en el plano de la app (instalaciones nuevas, corregidas)."""
+        d = db()
+        n = len(d.export_row_edits(PREDIO)["edits"])
+        if not n:
+            app().toast("Todavía no hay correcciones de hileras")
+            return
+        a = app()
+
+        def work():
+            try:
+                import crops
+                drv = P.PlantDrive(d, crop=crops.current())
+                if not drv.enabled:
+                    msg = "Conecte su cuenta de Google para enviar las correcciones."
+                else:
+                    drv.put_edits(force=True)
+                    msg = None
+            except Exception as exc:  # noqa: BLE001
+                msg = f"No se pudo enviar: {exc}"
+            Clock.schedule_once(lambda *_: done(msg))
+
+        def done(msg):
+            if msg:
+                a.toast(msg)
+                return
+            from ui.common import confirm
+            confirm("Correcciones enviadas",
+                    f"{n} hileras corregidas quedaron en Drive: «AeonCrop/…/Plantas/{P.edits_name(PREDIO)}».\n\n"
+                    "Para que vengan incluidas en la app (por ejemplo, al instalarla en otro teléfono), "
+                    "pide que se incorporen al plano: es un solo archivo. Además se actualiza solo en cada "
+                    "sincronización.", [])
+        try:
+            a.workers.submit(work)
+        except Exception:  # noqa: BLE001
+            threading.Thread(target=work, daemon=True).start()
+        a.toast("Enviando correcciones…")
 
     def toggle_sat(self):
         from ui.mapview import remember_layer

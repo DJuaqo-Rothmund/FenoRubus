@@ -305,6 +305,26 @@ class PlantDB(Database):
                     n += 1
         return n
 
+    def export_row_edits(self, predio: str) -> dict:
+        """Correcciones de las hileras, para incorporarlas al plano de la app
+        (tools/bake_row_edits.py): así una instalación nueva ya viene corregida."""
+        cols = ("n", "ns", "sector", "equipo", "largo", "plantas", "variedad", "anio", "estado", "unida_a", "nota")
+        edits = []
+        for e in self.query("SELECT * FROM field_row_edits WHERE predio=? ORDER BY row_key", (predio.upper(),)):
+            edits.append({"key": e["row_key"], **{k: e[k] for k in cols if e[k] not in (None, "")},
+                          "updated_at": e["updated_at"]})
+        return {"format": 1, "predio": predio.upper(), "exported_at": _now(), "edits": edits}
+
+    def write_row_edits(self, predio: str) -> str | None:
+        """Deja el archivo de correcciones en la carpeta del módulo; None si no hay ninguna."""
+        data = self.export_row_edits(predio)
+        if not data["edits"]:
+            return None
+        path = os.path.join(self.base_dir, edits_name(predio))
+        with open(path, "w", encoding="utf-8") as fh:
+            json.dump(data, fh, ensure_ascii=False, indent=1)
+        return path
+
     def merge_rows(self, predio: str, key: str, other: str) -> dict:
         """Une dos tramos de la misma hilera (cortada por un obstáculo): la primera suma el
         largo de la otra (con plantas) y la otra queda «unida». Devuelve la hilera unida."""
@@ -637,6 +657,10 @@ def fmt(v, d: int = 1) -> str:
     return f"{v:,.{d}f}".replace(",", "X").replace(".", ",").replace("X", ".")
 
 
+def edits_name(predio: str) -> str:
+    return f"Hileras corregidas {predio.upper()}.json"
+
+
 _OPEN: dict = {}
 
 
@@ -664,4 +688,22 @@ class PlantDrive:
     def run(self) -> int:
         if not self.enabled:
             return 0
-        return self.backup.flush()
+        n = self.backup.flush()
+        self.put_edits()
+        return n
+
+    def put_edits(self, force: bool = False) -> bool:
+        """Sube «Plantas/Hileras corregidas <predio>.json» si cambió desde la última vez."""
+        import hashlib
+        done = False
+        for predio in {r["predio"] for r in self.db.query("SELECT DISTINCT predio FROM field_row_edits")}:
+            data = self.db.export_row_edits(predio)
+            sig = hashlib.sha1(json.dumps(data["edits"], sort_keys=True).encode()).hexdigest()
+            if not force and self.db.get_setting(f"edits_sent:{predio}") == sig:
+                continue
+            path = self.db.write_row_edits(predio)
+            if path:
+                self.backup.put_file(path, f"{DRIVE_DIR}/{edits_name(predio)}")
+                self.db.set_setting(f"edits_sent:{predio}", sig)
+                done = True
+        return done

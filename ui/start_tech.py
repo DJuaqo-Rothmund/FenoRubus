@@ -401,11 +401,10 @@ KV = """
                 label: "Rendimiento"
                 accent: "#3C78FF"
                 on_release: app.open_yield()
-        GhostButton:
+        ModulePill:
             id: plants_btn
-            icon: "sprout-outline"
-            text: "Plantas · ficha de cada planta"
-            height: dp(46)
+            source: theme.START_PLANTAS
+            text: "Plantas  [size=12sp][color=#6E7E75]· ficha de cada planta[/color][/size]"
             on_release: app.open_plantas()
         GhostButton:
             id: crops_btn

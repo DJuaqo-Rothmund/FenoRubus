@@ -104,3 +104,30 @@ def test_sync_between_two_phones(tmp_path):
     assert b.measure(pb["id"], "2026-11-20")["canas"] == 6
     assert b.field_rows("AM")[10]["ns"] == "N"
     assert eid
+
+
+def test_row_edits_bake_into_asset(tmp_path):
+    """Lo corregido en el teléfono se incorpora al plano: una instalación nueva viene corregida."""
+    import sys
+    sys.path.insert(0, str(plantas.ASSETS.parent / "tools"))
+    import bake_row_edits
+    db = _db(tmp_path)
+    rows = db.field_rows("AM")
+    rev = [r for r in rows if r["rev"] and r["flag"] == 1]
+    a, b = rev[0], rev[1]
+    dup = next(r for r in rows if r["flag"] == 2)
+    db.edit_row("AM", a["key"], ns="S", largo=120.5, plantas=172, estado="ok")
+    db.edit_row("AM", b["key"], estado="no")
+    db.remove_duplicates("AM")
+    data = json.loads(json.dumps(db.export_row_edits("AM")))
+    asset = json.loads((plantas.ASSETS / "maps" / "AM_hileras.json").read_text(encoding="utf-8"))
+    total = len(asset["rows"])
+    baked, stats = bake_row_edits.bake(asset, data["edits"])
+    assert stats["quitadas"] == 1 + sum(1 for r in rows if r["flag"] == 2)
+    names = baked["fields"]
+    got = {r[0]: dict(zip(names, r)) for r in baked["rows"]}
+    assert got[a["key"]]["ns"] == "S" and got[a["key"]]["L"] == 120.5 and got[a["key"]]["flag"] == 0
+    assert b["key"] not in got and dup["key"] not in got
+    assert len(baked["rows"]) == total - stats["quitadas"]
+    path = db.write_row_edits("AM")
+    assert path and json.load(open(path, encoding="utf-8"))["edits"]
